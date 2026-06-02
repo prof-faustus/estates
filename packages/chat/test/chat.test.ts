@@ -58,6 +58,21 @@ test('multiparty chat: three peers join and all receive each broadcast-encrypted
   }
 });
 
+test('2-party ECDH (postTo): only the chosen member (+ sender) can read; others cannot', () => {
+  const relay = new InMemoryRelay();
+  const A = new ChatRoom(relay, genPeer(), 'A');
+  const B = new ChatRoom(relay, genPeer(), 'B');
+  const C = new ChatRoom(relay, genPeer(), 'C');
+  const gotA: string[] = [], gotB: string[] = [], gotC: string[] = [];
+  A.onMessage((m) => gotA.push(m.text)); B.onMessage((m) => gotB.push(m.text)); C.onMessage((m) => gotC.push(m.text));
+  for (const r of [A, B, C]) r.connect();
+  for (const r of [A, B, C]) r.join();
+  A.postTo(B.me.address, 'just for B');
+  assert.ok(gotB.includes('just for B'), 'recipient reads it');
+  assert.ok(gotA.includes('just for B'), 'sender sees own copy');
+  assert.equal(gotC.includes('just for B'), false, 'a third party cannot read a 2-party message');
+});
+
 test('the relay only sees ciphertext (never plaintext)', () => {
   const relay = new InMemoryRelay();
   const A = new ChatRoom(relay, genPeer()); const B = new ChatRoom(relay, genPeer());

@@ -53,7 +53,10 @@ export function App() {
     tableRef.current = t;
     setStage('table');
   }
-  function returnToLobby() { tableRef.current = null; setBeBanker(false); setStage('lobby'); force(); }
+  function returnToLobby() {
+    tableRef.current?.leaveGame();   // leaving mid-game gives your money + assets to the leading player
+    tableRef.current = null; setBeBanker(false); setStage('lobby'); force();
+  }
 
   const t = tableRef.current;
   const v: TableView | null = t ? t.view() : null;

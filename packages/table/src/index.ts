@@ -154,6 +154,14 @@ export class NetTable {
   }
   submit(action: Action): void { if (this.myTurn()) this.send({ kind: 'action', action }); }
 
+  /** Leave the table mid-game (any time, on or off turn): your money + assets go
+   *  to the leading player. Broadcast so every peer applies it. */
+  leaveGame(): void {
+    if (this.started && this.state && this.mySeat !== null && !this.state.seats[this.mySeat]!.bankrupt) {
+      this.send({ kind: 'action', action: { type: 'LEAVE', seat: this.mySeat } });
+    }
+  }
+
   iAmHost(): boolean { return this.host === this.me; }
   myTurn(): boolean {
     return !!this.state && this.mySeat !== null && this.state.phase !== 'GAME_OVER' && this.state.current === this.mySeat;

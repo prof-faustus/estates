@@ -163,6 +163,33 @@ test('bankruptcy: insufficient even after liquidation removes the seat and ends 
   assert.ok(end.ok && end.state.phase === 'GAME_OVER' && end.state.winner === 1);
 });
 
+test('a player who leaves gives their money + titles to the leading player (who then wins)', () => {
+  let s = fresh();
+  s = setOwner(s, [1, 3], 1);            // seat 1 owns two titles
+  s = setBalance(s, 1, 800);
+  s = setBalance(s, 0, 1500);
+  const r = apply(s, { type: 'LEAVE', seat: 1 });
+  assert.ok(r.ok); const st = r.state;
+  assert.equal(st.seats[1]!.bankrupt, true);
+  assert.equal(st.seats[1]!.balance, 0);
+  assert.equal(st.seats[0]!.balance, 2300, 'leader inherits the leaver’s cash');
+  assert.equal(st.titles[1]!.owner, 0, 'leader inherits the leaver’s titles');
+  assert.equal(st.titles[3]!.owner, 0);
+  assert.equal(st.phase, 'GAME_OVER');
+  assert.equal(st.winner, 0, 'last solvent player wins');
+});
+
+test('leave in a 3-player game routes assets to the highest-worth remaining player; game continues', () => {
+  let s = initialState({ network: 'regtest', seatCount: 3, bankReserve: 1_000_000 });
+  s = setBalance(s, 0, 1000);
+  s = setBalance(s, 2, 5000);            // seat 2 is the leader
+  s = setBalance(s, 1, 700);
+  const r = apply(s, { type: 'LEAVE', seat: 1 });
+  assert.ok(r.ok); const st = r.state;
+  assert.equal(st.seats[2]!.balance, 5700, 'highest-worth player gets the leaver’s money');
+  assert.notEqual(st.phase, 'GAME_OVER', 'two players remain — game continues');
+});
+
 test('wrong-phase actions are rejected, not applied', () => {
   const s = fresh(); // AWAIT_ROLL
   assert.deepEqual(apply(s, { type: 'BUY' }), { ok: false, code: 'WRONG_PHASE', context: 'cannot BUY in AWAIT_ROLL' });

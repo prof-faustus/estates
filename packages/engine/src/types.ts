@@ -63,6 +63,7 @@ export type Action =
   | { type: 'MORTGAGE'; propertyId: number }
   | { type: 'UNMORTGAGE'; propertyId: number }
   | { type: 'FORFEIT' }   // AWAIT_ROLL timeout default: forfeit the turn, no move
+  | { type: 'LEAVE'; seat: number }  // a player leaves: their money + assets go to the leading player
   | { type: 'END_TURN' };
 
 export type RejectCode =

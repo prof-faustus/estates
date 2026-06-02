@@ -72,11 +72,19 @@ export class ChatRoom {
   /** Locally exclude a member from this peer's future broadcasts (revocation). */
   revoke(address: string): void { this.members.delete(address); }
 
-  /** Post a broadcast-encrypted message to the current member set. */
+  /** Broadcast-encrypt a message to the whole current member set (Bitmessage-style). */
   post(text: string): void {
     const recipients = [...this.members.values()].map((m) => m.pub);
     if (recipients.length === 0) return;
     const env = encryptBroadcast(recipients, new TextEncoder().encode(text));
+    this.relay.publish(enc({ kind: 'chat', from: this.me.address, env }));
+  }
+
+  /** 2-party ECDH: encrypt only to one member (+ me, so I see my own copy). */
+  postTo(address: string, text: string): void {
+    const m = this.members.get(address);
+    if (!m) return;
+    const env = encryptBroadcast([m.pub, this.me.pub], new TextEncoder().encode(text));
     this.relay.publish(enc({ kind: 'chat', from: this.me.address, env }));
   }
 

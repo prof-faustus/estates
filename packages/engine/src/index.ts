@@ -352,6 +352,7 @@ function applyCardEffect(s: GameState, e: CardEffect, diceTotal: number): GameSt
 
 export function apply(s: GameState, a: Action): ApplyResult {
   if (s.phase === 'GAME_OVER') return reject('GAME_OVER', 'game is over');
+  if (a.type === 'LEAVE') return doLeave(s, a.seat); // allowed in any phase, on or off turn
 
   switch (a.type) {
     case 'ROLL': return doRoll(s, a.dice);
@@ -365,6 +366,44 @@ export function apply(s: GameState, a: Action): ApplyResult {
     case 'FORFEIT': return doForfeit(s);
     case 'END_TURN': return doEndTurn(s);
   }
+}
+
+/**
+ * A player leaves the table at any time (their choice). Their money + titles
+ * default to the LEADING player (highest net worth among the remaining solvent
+ * seats) — so if leaving makes one seat the last standing, that player wins with
+ * everything. With no one else solvent, the assets simply return to the bank.
+ */
+function doLeave(s: GameState, seatId: number): ApplyResult {
+  const leaver = s.seats[seatId];
+  if (!leaver || leaver.bankrupt) return ok(s);
+  let st = s;
+  const others = solventSeats(st).filter((id) => id !== seatId);
+  if (others.length > 0) {
+    let winner = others[0]!;
+    for (const id of others) if (netWorth(st, id) > netWorth(st, winner)) winner = id;
+    st = withSeat(st, winner, {
+      balance: seat(st, winner).balance + leaver.balance,
+      reprieveCards: seat(st, winner).reprieveCards + leaver.reprieveCards,
+    });
+    for (const sp of BOARD) {
+      if (isTitled(sp) && st.titles[sp.id]!.owner === seatId) st = withTitle(st, sp.id, { owner: winner });
+    }
+    st = withSeat(st, seatId, { balance: 0, bankrupt: true, reprieveCards: 0 });
+    st = note(st, `seat ${seatId} leaves; money + assets default to the leading player (seat ${winner})`);
+  } else {
+    st = withSeat(st, seatId, { balance: 0, bankrupt: true, reprieveCards: 0 });
+    st = note(st, `seat ${seatId} leaves the table`);
+  }
+  if (st.current === seatId) {
+    let next = st.current;
+    for (let i = 1; i <= st.seats.length; i++) {
+      const cand = (st.current + i) % st.seats.length;
+      if (!seat(st, cand).bankrupt) { next = cand; break; }
+    }
+    st = { ...st, current: next, phase: 'AWAIT_ROLL', doublesPending: false, doublesCount: 0, turnIndex: st.turnIndex + 1 };
+  }
+  return ok(maybeGameOver(st));
 }
 
 function doForfeit(s: GameState): ApplyResult {
