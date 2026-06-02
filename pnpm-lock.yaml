@@ -95,6 +95,18 @@ importers:
         specifier: workspace:*
         version: link:../turn
 
+  packages/chainmap:
+    dependencies:
+      '@estates/engine':
+        specifier: workspace:*
+        version: link:../engine
+      '@estates/onchain':
+        specifier: workspace:*
+        version: link:../onchain
+      '@estates/params':
+        specifier: workspace:*
+        version: link:../params
+
   packages/conformance:
     dependencies:
       '@estates/engine':

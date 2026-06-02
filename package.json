@@ -13,7 +13,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test --experimental-strip-types \"packages/**/test/**/*.test.ts\"",
     "lint:bans": "node --experimental-strip-types tools/lint-bans.ts",
-    "ci": "node --experimental-strip-types tools/ci.ts"
+    "ci": "node --experimental-strip-types tools/ci.ts",
+    "reproduce": "node --experimental-strip-types tools/ci.ts && pnpm --filter @estates/conformance generate"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
