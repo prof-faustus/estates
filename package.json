@@ -1,0 +1,22 @@
+{
+  "name": "@estates/root",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ESTATES — a dealerless, fully-on-chain, fully-auditable property game on BSV. Original non-copyright content; money in native satoshis; title/Reprieve cards as 1-sat NFTs.",
+  "license": "MIT",
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --experimental-strip-types \"packages/**/test/**/*.test.ts\"",
+    "lint:bans": "node --experimental-strip-types tools/lint-bans.ts",
+    "ci": "node --experimental-strip-types tools/ci.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.3"
+  }
+}

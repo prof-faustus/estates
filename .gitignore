@@ -1,0 +1,29 @@
+# Node / TypeScript
+node_modules/
+dist/
+dist-app/
+build/
+*.tsbuildinfo
+.pnpm-store/
+coverage/
+
+# Vite
+.vite/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+Thumbs.db
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Local scratch
+*.log
+*.tmp
+scratch/
