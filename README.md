@@ -71,8 +71,11 @@ for the C1–C8 capability bindings. Design decisions: [`DECISIONS.md`](DECISION
 
 - **Phase 6 integration shipped**: `@estates/net` (C7 untrusted relay transport +
   peer convergence + reconnection), `@estates/chainmap` (engine↔1-sat-NFT bridge),
-  and **Tauri v2 desktop packaging** (`apps/client-web/src-tauri`) — `tauri build`
-  produces `estates-desktop.exe` plus MSI and NSIS installers (Rust 1.96 / WebView2).
+  **Tauri v2 desktop packaging** (`apps/client-web/src-tauri`) — `tauri build`
+  produces `estates-desktop.exe` plus MSI and NSIS installers (Rust 1.96 / WebView2),
+  and `@estates/chat` — **multiparty join + broadcast-encrypted chat**: Bitmessage-style
+  addresses, multi-recipient ECIES (secp256k1 → HKDF → AES-256-GCM) over the untrusted
+  relay; only current members decrypt, revocation + forward-access-control enforced.
 
 Remaining (ops / post-v1): reproducible-from-clean-VM build (the `pnpm reproduce`
 script is the deterministic core), and the bank covenant upgrade (D-BANK-ENFORCE,

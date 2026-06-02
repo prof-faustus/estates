@@ -110,6 +110,12 @@ importers:
         specifier: workspace:*
         version: link:../params
 
+  packages/chat:
+    dependencies:
+      '@estates/net':
+        specifier: workspace:*
+        version: link:../net
+
   packages/conformance:
     dependencies:
       '@estates/engine':
