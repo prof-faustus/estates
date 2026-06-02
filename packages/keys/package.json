@@ -1,0 +1,18 @@
+{
+  "name": "@estates/keys",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ESTATES deterministic one-use ECDH key derivation (BRC-42 hash chain): no address ever reused; Alice-only and Alice+Bob shared one-time keys, indexed and deterministic. Isomorphic (@noble).",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@noble/hashes": "1.5.0",
+    "@noble/secp256k1": "2.1.0"
+  },
+  "scripts": {
+    "test": "node --test --experimental-strip-types \"test/**/*.test.ts\""
+  }
+}
