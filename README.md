@@ -23,10 +23,21 @@ for the C1–C8 capability bindings. Design decisions: [`DECISIONS.md`](DECISION
 
 ## Status
 
-**Phase 0 complete** (repository reconciliation): protocol binding, decisions, the
-single-source-of-truth params, and the CI static bans are in place and green.
-Phases 1–6 (deterministic core + lobby + beacon → board engine → on-chain objects
-& trade → bot → graphical client → full game/audit/packaging) follow.
+- **Phase 0 complete** (`v0.0.0-phase0`): protocol binding, decisions, params SoT, CI bans.
+- **Phase 1 complete** (`v0.1.0-phase1`): the deterministic core + lobby + dice beacon,
+  with conformance vectors generated from the core.
+  - `@estates/engine` — pure turn-FSM core (movement, doubles, holding, salary,
+    buy/rent/tax/cards, even-build + supply, mortgage, raise-funds/bankruptcy, win).
+  - `@estates/conformance` — 16 `(state, action) → (hash | rejection)` vectors, the
+    legality source of truth, re-checked against the live engine.
+  - `@estates/beacon` — commit→reveal debiased 2d6 (rejection sampling), `prev_beacon`
+    chaining, reveal-drop timeout default (binds C4).
+  - `@estates/lobby` — join/ready/start-authority/override-start; network fixed at
+    genesis; regtest auto-funding; emits the `EngineConfig` that seeds the core.
+
+Remaining: Phase 2 (board/turn wiring to live play) → Phase 3 (on-chain 1-sat NFTs,
+native-sat payments, bank reserve, atomic trade, mortgage/build/auction) → Phase 4
+(bots) → Phase 5 (React/SVG client) → Phase 6 (full game, audit/replay, packaging).
 
 ## Toolchain
 

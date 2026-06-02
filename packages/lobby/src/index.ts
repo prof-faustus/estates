@@ -1,0 +1,153 @@
+/**
+ * @estates/lobby — the waiting room (design spec §5).
+ *
+ * Pure state machine: join / leave / ready / fill-bot / start. The network mode
+ * is fixed at lobby genesis and is immutable. The start-authority (host) may
+ * START once there are ≥2 occupied seats including ≥1 human, optionally
+ * overriding the all-ready gate ("override start", 1 human + bot … 6). On
+ * regtest, START auto-funds seat balances and the bank reserve (explicit +
+ * logged). START emits the EngineConfig that seeds @estates/engine.
+ */
+import { loadParams, type NetworkMode, type EstatesParams } from '@estates/params';
+import type { EngineConfig } from '@estates/engine';
+
+const P: EstatesParams = loadParams();
+
+export type SeatKind = 'human' | 'bot';
+export interface LobbySeat {
+  readonly seat: number;
+  readonly kind: SeatKind;
+  readonly playerId: string;        // human player id, or a bot id
+  readonly policy?: string;         // bot policy (cautious|balanced|aggressive)
+  readonly ready: boolean;
+}
+
+export interface SeatMeta {
+  readonly kind: SeatKind;
+  readonly playerId: string;
+  readonly policy?: string;
+}
+
+export interface Genesis {
+  readonly engineConfig: EngineConfig;
+  readonly seats: readonly SeatMeta[];
+  readonly autoFunded: boolean;
+  readonly fundLog: readonly string[];
+}
+
+export interface LobbyState {
+  readonly network: NetworkMode;
+  readonly maxSeats: number;
+  readonly authority: string;       // start-authority (host) player id
+  readonly seats: readonly LobbySeat[];
+  readonly started: boolean;
+  readonly genesis: Genesis | null;
+}
+
+export interface LobbyConfig {
+  readonly network: NetworkMode;
+  readonly authority: string;
+  readonly maxSeats?: number;       // ≤ params.max_seats
+  /** bank reserve sized as this many salary payments (regtest auto-fund). */
+  readonly reserveSalaryCap?: number;
+}
+
+export type LobbyAction =
+  | { type: 'JOIN'; playerId: string }
+  | { type: 'LEAVE'; playerId: string }
+  | { type: 'READY'; playerId: string; ready: boolean }
+  | { type: 'FILL_BOT'; by: string; policy: string }
+  | { type: 'START'; by: string; override?: boolean };
+
+export type LobbyReject =
+  | 'LOBBY_FULL' | 'ALREADY_JOINED' | 'NOT_PRESENT' | 'NOT_AUTHORITY'
+  | 'ALREADY_STARTED' | 'TOO_FEW_SEATS' | 'NEED_A_HUMAN' | 'NOT_ALL_READY'
+  | 'BAD_POLICY';
+
+export type LobbyResult =
+  | { ok: true; state: LobbyState }
+  | { ok: false; code: LobbyReject; context: string };
+
+const ok = (state: LobbyState): LobbyResult => ({ ok: true, state });
+const no = (code: LobbyReject, context: string): LobbyResult => ({ ok: false, code, context });
+
+export function createLobby(cfg: LobbyConfig): LobbyState {
+  const maxSeats = Math.min(cfg.maxSeats ?? P.scalars.max_seats, P.scalars.max_seats);
+  return { network: cfg.network, maxSeats, authority: cfg.authority, seats: [], started: false, genesis: null };
+}
+
+function lowestFreeSeat(s: LobbyState): number {
+  const taken = new Set(s.seats.map((x) => x.seat));
+  for (let i = 0; i < s.maxSeats; i++) if (!taken.has(i)) return i;
+  return -1;
+}
+const humans = (s: LobbyState): number => s.seats.filter((x) => x.kind === 'human').length;
+const allReady = (s: LobbyState): boolean => s.seats.every((x) => x.ready);
+
+export function applyLobby(s: LobbyState, a: LobbyAction, cfg?: { reserveSalaryCap?: number }): LobbyResult {
+  if (s.started) return no('ALREADY_STARTED', 'lobby already started');
+
+  switch (a.type) {
+    case 'JOIN': {
+      if (s.seats.some((x) => x.playerId === a.playerId)) return no('ALREADY_JOINED', a.playerId);
+      const seat = lowestFreeSeat(s);
+      if (seat < 0) return no('LOBBY_FULL', `max ${s.maxSeats}`);
+      return ok({ ...s, seats: [...s.seats, { seat, kind: 'human', playerId: a.playerId, ready: false }] });
+    }
+    case 'LEAVE': {
+      if (!s.seats.some((x) => x.playerId === a.playerId)) return no('NOT_PRESENT', a.playerId);
+      return ok({ ...s, seats: s.seats.filter((x) => x.playerId !== a.playerId) });
+    }
+    case 'READY': {
+      if (!s.seats.some((x) => x.playerId === a.playerId)) return no('NOT_PRESENT', a.playerId);
+      return ok({ ...s, seats: s.seats.map((x) => (x.playerId === a.playerId ? { ...x, ready: a.ready } : x)) });
+    }
+    case 'FILL_BOT': {
+      if (a.by !== s.authority) return no('NOT_AUTHORITY', a.by);
+      if (!P.bot_policies.includes(a.policy)) return no('BAD_POLICY', a.policy);
+      const seat = lowestFreeSeat(s);
+      if (seat < 0) return no('LOBBY_FULL', `max ${s.maxSeats}`);
+      const playerId = `bot:${a.policy}:${seat}`;
+      return ok({ ...s, seats: [...s.seats, { seat, kind: 'bot', playerId, policy: a.policy, ready: true }] });
+    }
+    case 'START': {
+      if (a.by !== s.authority) return no('NOT_AUTHORITY', a.by);
+      const occupied = s.seats.length;
+      if (occupied < P.scalars.min_seats) return no('TOO_FEW_SEATS', `need ≥${P.scalars.min_seats}, have ${occupied}`);
+      if (humans(s) < 1) return no('NEED_A_HUMAN', 'at least one human seat required');
+      if (!a.override && !allReady(s)) return no('NOT_ALL_READY', 'use override to start before all seats are ready');
+      return ok({ ...s, started: true, genesis: buildGenesis(s, cfg?.reserveSalaryCap) });
+    }
+  }
+}
+
+function buildGenesis(s: LobbyState, reserveSalaryCap = 200): Genesis {
+  // compact seats to 0..n-1 in ascending lobby-seat order (canonical)
+  const ordered = [...s.seats].sort((a, b) => a.seat - b.seat);
+  const seats: SeatMeta[] = ordered.map((x) =>
+    x.policy === undefined
+      ? { kind: x.kind, playerId: x.playerId }
+      : { kind: x.kind, playerId: x.playerId, policy: x.policy },
+  );
+  const seatCount = seats.length;
+  const fundLog: string[] = [];
+  let bankReserve = 0;
+  let autoFunded = false;
+
+  if (s.network === 'regtest') {
+    autoFunded = true;
+    bankReserve = P.scalars.salary * reserveSalaryCap;
+    for (let i = 0; i < seatCount; i++) {
+      fundLog.push(`[regtest auto-fund] seat ${i} balance = ${P.scalars.starting_balance_per_seat} sats`);
+    }
+    fundLog.push(`[regtest auto-fund] bank reserve = ${bankReserve} sats (${reserveSalaryCap} × salary ${P.scalars.salary})`);
+  } else {
+    // testnet/mainnet: funded by buy-in at the genesis tx (Phase 3). The
+    // engine still seeds with the agreed reserve once that tx confirms.
+    bankReserve = P.scalars.salary * reserveSalaryCap;
+    fundLog.push(`[${s.network}] seat balances + bank reserve funded by buy-in at the genesis tx`);
+  }
+
+  const engineConfig: EngineConfig = { network: s.network, seatCount, bankReserve };
+  return { engineConfig, seats, autoFunded, fundLog };
+}
