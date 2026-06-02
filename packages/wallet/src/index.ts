@@ -57,6 +57,43 @@ export class Wallet {
     return { hex: tx.toHex(), txid: tx.id('hex') as string };
   }
 
+  private woc(): 'main' | 'test' {
+    if (this.network === 'regtest') throw new Error('balance/UTXOs/send over WhatsOnChain need testnet or mainnet');
+    return this.network === 'mainnet' ? 'main' : 'test';
+  }
+
+  /** Confirmed + unconfirmed balance (sats) of this wallet, from WhatsOnChain. */
+  async getBalance(): Promise<number> {
+    const r = await fetch(`https://api.whatsonchain.com/v1/bsv/${this.woc()}/address/${this.address}/balance`);
+    const j = (await r.json()) as { confirmed: number; unconfirmed: number };
+    return (j.confirmed || 0) + (j.unconfirmed || 0);
+  }
+
+  /** Spendable UTXOs of this wallet (with each source tx's raw hex), from WhatsOnChain. */
+  async fetchUtxos(): Promise<Utxo[]> {
+    const net = this.woc();
+    const r = await fetch(`https://api.whatsonchain.com/v1/bsv/${net}/address/${this.address}/unspent`);
+    const us = (await r.json()) as { tx_hash: string; tx_pos: number; value: number }[];
+    const out: Utxo[] = [];
+    for (const u of us) {
+      const raw = (await (await fetch(`https://api.whatsonchain.com/v1/bsv/${net}/tx/${u.tx_hash}/hex`)).text()).trim();
+      out.push({ sourceTxHex: raw, vout: u.tx_pos, satoshis: u.value });
+    }
+    return out;
+  }
+
+  /**
+   * SEND/spend: gather this wallet's UTXOs, pay `satoshis` to `toAddress` (change
+   * back to you), sign, and broadcast. The CALLER (a human clicking Send) passes
+   * `confirm: true`; mainnet additionally requires it as the money guard.
+   */
+  async send(toAddress: string, satoshis: number, confirm = false): Promise<{ txid: string }> {
+    const utxos = await this.fetchUtxos();
+    if (utxos.length === 0) throw new Error('no spendable funds — receive some first');
+    const { hex } = await this.buildAndSign(utxos, [{ address: toAddress, satoshis }]);
+    return this.broadcast(hex, { confirmRealValue: confirm });
+  }
+
   /**
    * Broadcast a signed tx. regtest → the node's JSON-RPC `sendrawtransaction`;
    * testnet → WhatsOnChain; mainnet → WhatsOnChain ONLY if `confirmRealValue`.

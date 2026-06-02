@@ -24,6 +24,11 @@ h1 .sub { font-size: 12px; color: #f5a623; font-weight: normal; }
 .wallet .wrow { font-size: 12px; margin: 4px 0; }
 .wallet code { word-break: break-all; color: #aee1f9; }
 .wallet code.wif { color: #f5a623; }
+.tabs { display: flex; gap: 4px; margin: 6px 0; }
+.tab { font-size: 12px; padding: 4px 10px; background: #333; border: 1px solid #555; border-radius: 4px 4px 0 0; text-transform: capitalize; }
+.tab.on { background: #2e7d32; border-color: #2e7d32; }
+.wtab { display: flex; flex-direction: column; gap: 6px; padding: 6px 0; }
+.wtab input { width: 100%; }
 .card { background: #3a2f1a; border: 1px solid #f5a623; border-radius: 6px; padding: 8px 10px; }
 .card h3 { margin: 0 0 2px; font-size: 12px; color: #f5a623; }
 .card p { margin: 0; font-size: 13px; }
