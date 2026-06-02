@@ -2532,7 +2532,7 @@
       },
       "expected": {
         "ok": true,
-        "stateHash": "f43f30f2396fec413f6c0973e018c049a24d5b4fa9b92118ffe40cb33ce3b32f"
+        "stateHash": "bb3db19dc14f18852eb6db8c88f302d35e7449f1381aaedf704caff690455dc5"
       }
     },
     {
@@ -2725,7 +2725,7 @@
       },
       "expected": {
         "ok": true,
-        "stateHash": "0dc8c493708f5e9cb85d00a0e7def7273ba22d00aa35eb37dca6900f73687a80"
+        "stateHash": "9386136db2b9f0df04a2a208996b68dac53356261f3812700d82f257cea24120"
       }
     },
     {

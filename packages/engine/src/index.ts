@@ -148,7 +148,8 @@ function raiseFunds(s: GameState, seatId: number, target: number): GameState {
     const t = st.titles[sp.id]!;
     if (t.owner === seatId && !t.mortgaged && t.buildLevel === 0) {
       const v = mortgageValue(sp.base_price ?? 0);
-      st = withTitle(withSeat(st, seatId, { balance: seat(st, seatId).balance + v }), sp.id, { mortgaged: true });
+      // mortgage value is paid by the bank reserve (bank→seat), same as doMortgage
+      st = bankToSeat(withTitle(st, sp.id, { mortgaged: true }), seatId, v);
     }
   }
   return st;

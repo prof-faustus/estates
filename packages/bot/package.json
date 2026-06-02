@@ -1,0 +1,20 @@
+{
+  "name": "@estates/bot",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ESTATES bot policies (cautious/balanced/aggressive) as turn-driver Deciders with an independent secp256k1 signing identity. In-process use is offline-practice only (non-trustless).",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@estates/params": "workspace:*",
+    "@estates/engine": "workspace:*",
+    "@estates/turn": "workspace:*",
+    "@estates/trade": "workspace:*"
+  },
+  "scripts": {
+    "test": "node --test --experimental-strip-types \"test/**/*.test.ts\""
+  }
+}

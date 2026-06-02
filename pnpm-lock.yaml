@@ -31,6 +31,21 @@ importers:
 
   packages/beacon: {}
 
+  packages/bot:
+    dependencies:
+      '@estates/engine':
+        specifier: workspace:*
+        version: link:../engine
+      '@estates/params':
+        specifier: workspace:*
+        version: link:../params
+      '@estates/trade':
+        specifier: workspace:*
+        version: link:../trade
+      '@estates/turn':
+        specifier: workspace:*
+        version: link:../turn
+
   packages/conformance:
     dependencies:
       '@estates/engine':

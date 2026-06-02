@@ -48,9 +48,15 @@ for the C1–C8 capability bindings. Design decisions: [`DECISIONS.md`](DECISION
   - `@estates/bank` — M-of-N threshold-guarded reserve spends (D-BANK-ENFORCE v1)
     + the genesis/setup tx minting the NFTs and funding seats + reserve.
 
-Remaining: Phase 4 (bots) → Phase 5 (React/SVG client) → Phase 6 (full game,
-audit/replay, packaging). Also pending: wire on-chain build/mortgage re-mint to
-the engine, and the bank covenant upgrade (D-BANK-ENFORCE).
+- **Phase 4 complete** (`v0.4.0-phase4`): `@estates/bot` — `cautious`/`balanced`/
+  `aggressive` policies as turn-driver `Decider`s, each with an independent
+  secp256k1 signing identity. Self-play over hundreds of turns proves money is
+  conserved (seats + bank reserve) and no balance goes negative — which caught and
+  fixed a reserve-debit bug in the engine's auto-liquidation path.
+
+Remaining: Phase 5 (React/SVG client) → Phase 6 (full game, audit/replay,
+packaging). Also pending: wire on-chain build/mortgage re-mint to the engine, and
+the bank covenant upgrade (D-BANK-ENFORCE).
 
 ## Toolchain
 
