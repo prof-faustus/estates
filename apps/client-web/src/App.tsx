@@ -22,13 +22,19 @@ export function App() {
   const [seatCount, setSeatCount] = useState(2);
   const [network, setNetwork] = useState<NetworkMode>('regtest');
   const [ownWif, setOwnWif] = useState('');
-  const [funding, setFunding] = useState<{ address: string; network: NetworkMode; own: boolean } | null>(null);
+  const [funding, setFunding] = useState<{ address: string; wif: string; network: NetworkMode; own: boolean } | null>(null);
 
   function connect() {
     const t = new NetTable(makeRelay(relayUrl, channel), name, force);
     t.connect();
     tableRef.current = t;
     setConnected(true);
+  }
+  function leaveTable() {        // your choice — leave at any time
+    tableRef.current = null;
+    setFunding(null);
+    setConnected(false);
+    force();
   }
   const t = tableRef.current;
   const v: TableView | null = t ? t.view() : null;
@@ -40,7 +46,7 @@ export function App() {
     // per-table address. Either way YOU fund it, on the network YOU chose.
     const own = ownWif.trim().length > 0;
     const w = own ? Wallet.fromWif(ownWif.trim(), network) : Wallet.random(network);
-    setFunding({ address: w.address, network, own });
+    setFunding({ address: w.address, wif: w.key.toWif(), network, own });
   }
   const act = (a: Action) => t?.submit(a);
 
@@ -93,15 +99,17 @@ export function App() {
           </ol>
           <div className="lobby-actions">
             {v.mySeat === null && v.freeSeats.length > 0 && <button className="primary" onClick={() => t!.joinSeat()}>Take a seat</button>}
-            {v.iAmHost && v.freeSeats.length > 0 && <button onClick={() => t!.addBot()}>Add bot (optional)</button>}
+            {v.iAmHost && v.freeSeats.length > 0 && <button onClick={() => t!.addBot()}>Add simulated player (test only)</button>}
             {v.iAmHost && <button className="primary" disabled={!v.canStart} onClick={() => t!.start()}>{v.canStart ? 'Start game' : 'Start (fill all seats)'}</button>}
             {!v.iAmHost && <span className="hint">waiting for the host to start…</span>}
+            <button onClick={leaveTable}>Leave</button>
           </div>
           {funding && (
             <div className="funding">
-              <h3>Fund this table ({funding.network})</h3>
-              <p>{funding.own ? 'Your wallet — fund/control it as you like:' : 'Fresh per-table address — send sats here while it runs:'}</p>
-              <code>{funding.address}</code>
+              <h3>Your wallet ({funding.network})</h3>
+              <p>You hold the key — fund or <b>defund this wallet yourself, any time</b>. Nobody asks you for money.</p>
+              <div>address: <code>{funding.address}</code></div>
+              <div>WIF (your key): <code>{funding.wif}</code></div>
             </div>
           )}
         </section>
@@ -118,7 +126,7 @@ export function App() {
                     {v.myTurn ? 'Your turn' : `${v.seats.find((x) => x.seat === v.state!.current)?.name ?? `Seat ${v.state.current}`}’s turn`} · {v.state.phase}
                   </h2>}
               {v.state.lastRoll && <p className="dice">🎲 {v.state.lastRoll[0]} + {v.state.lastRoll[1]} = {v.state.lastRoll[0] + v.state.lastRoll[1]}</p>}
-              <p className="me">you are seat {v.mySeat}</p>
+              <p className="me">you are seat {v.mySeat} · <button className="link" onClick={leaveTable}>leave table</button></p>
             </section>
 
             {v.myTurn && (
