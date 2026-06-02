@@ -27,3 +27,8 @@ Thumbs.db
 *.log
 *.tmp
 scratch/
+
+# Tauri / Rust build output
+**/src-tauri/target/
+**/src-tauri/gen/
+**/target/

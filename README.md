@@ -69,9 +69,14 @@ for the C1–C8 capability bindings. Design decisions: [`DECISIONS.md`](DECISION
   Forged dice, swapped reveals, illegal actions, and wrong final hashes are all
   rejected — the proof that a complete game verifies from chain data alone.
 
-Remaining (integration/ops): full multiplayer transport (C7 relay/SSE), reproducible
-VM build, Tauri desktop packaging; plus wiring on-chain build/mortgage re-mint into
-the engine and the bank covenant upgrade (D-BANK-ENFORCE).
+- **Phase 6 integration shipped**: `@estates/net` (C7 untrusted relay transport +
+  peer convergence + reconnection), `@estates/chainmap` (engine↔1-sat-NFT bridge),
+  and **Tauri v2 desktop packaging** (`apps/client-web/src-tauri`) — `tauri build`
+  produces `estates-desktop.exe` plus MSI and NSIS installers (Rust 1.96 / WebView2).
+
+Remaining (ops / post-v1): reproducible-from-clean-VM build (the `pnpm reproduce`
+script is the deterministic core), and the bank covenant upgrade (D-BANK-ENFORCE,
+explicitly post-v1).
 
 ## Toolchain
 
