@@ -1,0 +1,17 @@
+{
+  "name": "@estates/wallet",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ESTATES real BSV wallet: key→address, build/sign (BIP-143) real txs, and broadcast — regtest (node RPC), testnet/mainnet (WhatsOnChain/ARC). Bridges the engine/onchain model to live chain.",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@bsv/sdk": "^1.4.0"
+  },
+  "scripts": {
+    "test": "node --test --experimental-strip-types \"test/**/*.test.ts\""
+  }
+}

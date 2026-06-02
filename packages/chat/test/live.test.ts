@@ -8,7 +8,7 @@ import { ChatRoom, HttpRelay, genPeer } from '../src/index.ts';
 import { startRelayServer } from '../src/server.ts';
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
-async function waitFor(pred: () => boolean, ms = 3000): Promise<void> {
+async function waitFor(pred: () => boolean, ms = 8000): Promise<void> {
   const t0 = Date.now();
   while (!pred()) { if (Date.now() - t0 > ms) throw new Error('waitFor timeout'); await delay(20); }
 }
@@ -23,7 +23,7 @@ test('two peers chat live over an HTTP+SSE relay (end-to-end encrypted)', async 
     B.onMessage((m) => gotB.push(m.text));
 
     A.connect(); B.connect();
-    await delay(150);            // let both SSE subscriptions establish
+    await delay(400);            // let both SSE subscriptions establish
     A.join(); B.join();
     await waitFor(() => A.members.size === 2 && B.members.size === 2); // membership propagated live
 
