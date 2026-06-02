@@ -4,15 +4,10 @@
  * Every game value derives from here; no number is hard-coded twice. Rents are
  * DERIVED from base_price + rent_factors (rules doc §4) and never stored.
  */
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-// packages/params/src -> packages/params -> packages -> <root>/params/estates.v1.json
-const PARAMS_PATH = join(
-  fileURLToPath(new URL('.', import.meta.url)),
-  '..', '..', '..', 'params', 'estates.v1.json',
-);
+// Static JSON import (isomorphic: works under Node --experimental-strip-types
+// AND in the browser via the bundler — no node:fs, so the engine/turn stack is
+// importable by the web client).
+import paramsJson from '../../../params/estates.v1.json' with { type: 'json' };
 
 export type NetworkMode = 'mainnet' | 'testnet' | 'regtest';
 export type SpaceType = 'corner' | 'property' | 'station' | 'utility' | 'card' | 'tax';
@@ -83,13 +78,11 @@ export interface EstatesParams {
   readonly auction: { format: string };
 }
 
-let cached: EstatesParams | null = null;
+const PARAMS = paramsJson as unknown as EstatesParams;
 
-/** Load (and cache) the single source of truth. */
+/** The single source of truth. */
 export function loadParams(): EstatesParams {
-  if (cached) return cached;
-  cached = JSON.parse(readFileSync(PARAMS_PATH, 'utf8')) as EstatesParams;
-  return cached;
+  return PARAMS;
 }
 
 const round = (n: number): number => Math.round(n);

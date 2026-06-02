@@ -54,9 +54,17 @@ for the C1–C8 capability bindings. Design decisions: [`DECISIONS.md`](DECISION
   conserved (seats + bank reserve) and no balance goes negative — which caught and
   fixed a reserve-debit bug in the engine's auto-liquidation path.
 
-Remaining: Phase 5 (React/SVG client) → Phase 6 (full game, audit/replay,
-packaging). Also pending: wire on-chain build/mortgage re-mint to the engine, and
-the bank covenant upgrade (D-BANK-ENFORCE).
+- **Phase 5 complete** (`v0.5.0-phase5`): `@estates/client-web` — React + Vite + **SVG**
+  board. Offline-practice mode runs the pure engine **in-browser** (keys never leave
+  the client; dice via Web Crypto here, beacon for trustless play). Lobby seat count,
+  SVG board with group bands / owner dots / buildings, per-seat NFT+cash panel, dice
+  readout, build/buy/tax/end-turn controls, transcript log. This required making
+  `@estates/params` **isomorphic** (static JSON import, no `node:fs`) so the engine
+  stack bundles for the browser. `vite build` green.
+
+Remaining: Phase 6 (full multiplayer wiring, chain audit/replay, reproducible VM
+build, Tauri packaging). Also pending: wire on-chain build/mortgage re-mint to the
+engine, and the bank covenant upgrade (D-BANK-ENFORCE).
 
 ## Toolchain
 
