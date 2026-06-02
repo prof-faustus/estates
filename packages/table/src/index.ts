@@ -21,8 +21,66 @@ export function rollDice(): [number, number] {
   crypto.getRandomValues(b);
   return [1 + (b[0]! % 6), 1 + (b[1]! % 6)];
 }
-export function makeRelay(url: string, channel: string): Relay {
-  return url.trim() ? new HttpRelay(url.trim(), channel) : new InMemoryRelay();
+/** Built-in transport — NO url is ever typed by a user (Bitmessage-style). */
+export const DEFAULT_RELAY = 'http://127.0.0.1:8788';
+export const LOBBY_CHANNEL = 'estates-lobby-v1';
+export function makeRelay(channel: string, url: string = DEFAULT_RELAY): Relay {
+  return new HttpRelay(url, channel);
+}
+
+/** A Bitmessage-style address (hex) for an identity or a table. */
+export function newAddress(): string {
+  const b = new Uint8Array(20);
+  crypto.getRandomValues(b);
+  return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+}
+
+// --- properties the active seat may build on / mortgage right now ------------
+export function buildable(s: GameState, seat: number): number[] {
+  const out: number[] = [];
+  for (const [name, g] of Object.entries(P.groups)) {
+    if (g.build_cost <= 0) continue;
+    const ids = g.member_property_ids;
+    if (!ids.every((id) => s.titles[id]?.owner === seat)) continue;
+    if (ids.some((id) => s.titles[id]!.mortgaged)) continue;
+    const min = Math.min(...ids.map((id) => s.titles[id]!.buildLevel));
+    for (const id of ids) if (s.titles[id]!.buildLevel === min && min < 5) out.push(id);
+  }
+  return out;
+}
+export function mortgageable(s: GameState, seat: number): number[] {
+  return P.board.filter((sp) => s.titles[sp.id]?.owner === seat && !s.titles[sp.id]!.mortgaged && s.titles[sp.id]!.buildLevel === 0).map((sp) => sp.id);
+}
+export function unmortgageable(s: GameState, seat: number): number[] {
+  return P.board.filter((sp) => s.titles[sp.id]?.owner === seat && s.titles[sp.id]!.mortgaged).map((sp) => sp.id);
+}
+
+/** The most recently drawn Fate/Treasury card text (to show on the table). */
+export function lastCard(s: GameState): string | null {
+  for (let i = s.log.length - 1; i >= 0; i--) {
+    const m = s.log[i]!.match(/draws (Fate|Treasury): (.+)$/);
+    if (m) return `${m[1]} — ${m[2]}`;
+  }
+  return null;
+}
+
+// --- Bitmessage-style lobby discovery: hosts announce, clients list ----------
+export interface OpenTable { addr: string; name: string; maxSeats: number; network: NetworkMode; host: string; ts: number }
+export class LobbyClient {
+  readonly tables = new Map<string, OpenTable>();
+  private relay: Relay;
+  private onUpdate: () => void;
+  constructor(relay: Relay, onUpdate: () => void) { this.relay = relay; this.onUpdate = onUpdate; }
+  connect(): void {
+    this.relay.subscribe((p) => {
+      try {
+        const m = JSON.parse(new TextDecoder().decode(p)) as { kind: string } & OpenTable;
+        if (m.kind === 'announce') { this.tables.set(m.addr, { addr: m.addr, name: m.name, maxSeats: m.maxSeats, network: m.network, host: m.host, ts: m.ts }); this.onUpdate(); }
+      } catch { /* opaque */ }
+    });
+  }
+  announce(t: OpenTable): void { this.relay.publish(new TextEncoder().encode(JSON.stringify({ kind: 'announce', ...t }))); }
+  list(): OpenTable[] { return [...this.tables.values()].sort((a, b) => b.ts - a.ts); }
 }
 
 type Msg =

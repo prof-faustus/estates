@@ -1,8 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { InMemoryRelay } from '@estates/chat';
-import type { GameState } from '@estates/engine';
-import { NetTable, P, type NetworkMode } from '../src/index.ts';
+import { initialState, type GameState } from '@estates/engine';
+import {
+  NetTable, P, LobbyClient, buildable, mortgageable, unmortgageable, lastCard, newAddress,
+  type NetworkMode,
+} from '../src/index.ts';
+
+function own(ids: number[], owner: number): GameState {
+  const s = initialState({ network: 'regtest', seatCount: 2, bankReserve: 1_000_000 });
+  const titles = { ...s.titles };
+  for (const id of ids) titles[id] = { ...titles[id]!, owner };
+  return { ...s, titles, phase: 'AWAIT_POST' };
+}
 
 const priceOf = (id: number): number => P.board[id]?.base_price ?? 0;
 
@@ -188,4 +198,49 @@ test('view() reflects each phase; a fresh peer is disconnected until a table exi
   const p = peer(relay, 'solo'); p.connect();
   assert.equal(p.view().phase, 'disconnected');
   assert.equal(p.view().canStart, false);
+});
+
+// ---- houses & hotels (build), mortgage, cards, Bitmessage-style discovery ----
+test('buildable: full group only, even-build; building advances the level', () => {
+  let s = own([6, 8, 9], 0);                 // full Sky group
+  assert.deepEqual(buildable(s, 0).sort((a, b) => a - b), [6, 8, 9]);
+  assert.deepEqual(buildable(s, 1), []);     // seat 1 owns nothing
+  s = { ...s, titles: { ...s.titles, 6: { ...s.titles[6]!, buildLevel: 1 } } };
+  assert.deepEqual(buildable(s, 0).sort((a, b) => a - b), [8, 9], 'even-build: only the lagging members');
+  // a partial group is never buildable
+  assert.deepEqual(buildable(own([6, 8], 0), 0), []);
+});
+
+test('mortgageable / unmortgageable reflect ownership + state', () => {
+  const s = own([1, 3], 0);
+  assert.deepEqual(mortgageable(s, 0).sort((a, b) => a - b), [1, 3]);
+  assert.deepEqual(unmortgageable(s, 0), []);
+  const m = { ...s, titles: { ...s.titles, 1: { ...s.titles[1]!, mortgaged: true } } };
+  assert.deepEqual(unmortgageable(m, 0), [1]);
+  assert.deepEqual(mortgageable(m, 0), [3]);
+});
+
+test('lastCard surfaces the most recent Fate/Treasury draw for the table', () => {
+  const s = initialState({ network: 'regtest', seatCount: 2, bankReserve: 1000 });
+  assert.equal(lastCard(s), null);
+  const withCard = { ...s, log: [...s.log, 'seat 1 draws Treasury: A bequest arrives. Collect 125.'] };
+  assert.equal(lastCard(withCard), 'Treasury — A bequest arrives. Collect 125.');
+});
+
+test('newAddress: distinct 40-hex Bitmessage-style addresses', () => {
+  const a = newAddress(); const b = newAddress();
+  assert.match(a, /^[0-9a-f]{40}$/);
+  assert.notEqual(a, b);
+});
+
+test('Bitmessage-style lobby discovery: a host announce is listed by other clients (no URL)', () => {
+  const relay = new InMemoryRelay();          // the built-in transport — no URL typed
+  const host = new LobbyClient(relay, () => {});
+  const guest = new LobbyClient(relay, () => {});
+  host.connect(); guest.connect();
+  const addr = newAddress();
+  host.announce({ addr, name: 'Tav', maxSeats: 4, network: 'regtest', host: 'h', ts: 1 });
+  assert.equal(guest.list().length, 1);
+  assert.equal(guest.list()[0]!.addr, addr);
+  assert.equal(guest.list()[0]!.maxSeats, 4);
 });

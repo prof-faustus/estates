@@ -17,6 +17,17 @@ h1 { font-size: 22px; margin: 8px 0; }
 h1 .sub { font-size: 12px; color: #f5a623; font-weight: normal; }
 .newgame { display: flex; gap: 8px; align-items: center; }
 .main { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.lobbywrap { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.lobbywrap .connect-card { margin: 0; flex: 1; min-width: 360px; }
+.wallet { background: #2a2a2a; border: 1px solid #3cb44b; border-radius: 8px; padding: 12px; min-width: 300px; }
+.wallet h3 { margin: 0 0 6px; font-size: 14px; color: #3cb44b; }
+.wallet .wrow { font-size: 12px; margin: 4px 0; }
+.wallet code { word-break: break-all; color: #aee1f9; }
+.wallet code.wif { color: #f5a623; }
+.card { background: #3a2f1a; border: 1px solid #f5a623; border-radius: 6px; padding: 8px 10px; }
+.card h3 { margin: 0 0 2px; font-size: 12px; color: #f5a623; }
+.card p { margin: 0; font-size: 13px; }
+label input[type=checkbox] { flex: none; }
 .board { background: #f4f1e8; border-radius: 6px; box-shadow: 0 2px 10px #0006; }
 .panel { flex: 1; min-width: 300px; display: flex; flex-direction: column; gap: 12px; }
 .status h2 { margin: 4px 0; font-size: 18px; }

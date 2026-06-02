@@ -1,10 +1,14 @@
 /**
- * Client glue — the multiplayer controller lives in @estates/table (exhaustively
- * tested in CI). Here we only add UI-only helpers (colours, owned-titles view).
+ * Client glue — the multiplayer controller + lobby discovery live in
+ * @estates/table (exhaustively tested). Here we only add UI-only helpers.
  */
 import type { GameState } from '@estates/engine';
-export { P, NetTable, makeRelay, rollDice, botAction } from '@estates/table';
-export type { NetworkMode, TableView, SeatInfo } from '@estates/table';
+export {
+  P, NetTable, makeRelay, rollDice, botAction,
+  LobbyClient, newAddress, buildable, mortgageable, unmortgageable, lastCard,
+  DEFAULT_RELAY, LOBBY_CHANNEL,
+} from '@estates/table';
+export type { NetworkMode, TableView, SeatInfo, OpenTable } from '@estates/table';
 import { P } from '@estates/table';
 
 export const SEAT_COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4'];
