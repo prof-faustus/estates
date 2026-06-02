@@ -15,6 +15,20 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  packages/auction: {}
+
+  packages/bank:
+    dependencies:
+      '@estates/onchain':
+        specifier: workspace:*
+        version: link:../onchain
+      '@estates/params':
+        specifier: workspace:*
+        version: link:../params
+      '@estates/trade':
+        specifier: workspace:*
+        version: link:../trade
+
   packages/beacon: {}
 
   packages/conformance:

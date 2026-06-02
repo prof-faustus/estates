@@ -40,9 +40,17 @@ for the C1–C8 capability bindings. Design decisions: [`DECISIONS.md`](DECISION
   relative window; no CLTV/CSV) plus a full-turn/whole-game driver. The engine gained
   a `FORFEIT` action (the AWAIT_ROLL timeout default).
 
-Remaining: Phase 3 (on-chain 1-sat NFTs, native-sat payments, bank reserve, atomic
-trade, mortgage/build/auction) → Phase 4 (bots) → Phase 5 (React/SVG client) →
-Phase 6 (full game, audit/replay, packaging).
+- **Phase 3 complete** (`v0.3.0-phase3`): on-chain objects + trade + auction + bank.
+  - `@estates/onchain` — BSV script model (OP_RETURN-banned at serialize), 1-sat
+    title/Reprieve NFTs (state as `<push> OP_DROP` + P2PKH), native-sat payments.
+  - `@estates/trade` — atomic player↔player trade; secp256k1 `SIGHASH_ALL` co-signing.
+  - `@estates/auction` — sealed-bid commit→reveal, highest valid bid wins.
+  - `@estates/bank` — M-of-N threshold-guarded reserve spends (D-BANK-ENFORCE v1)
+    + the genesis/setup tx minting the NFTs and funding seats + reserve.
+
+Remaining: Phase 4 (bots) → Phase 5 (React/SVG client) → Phase 6 (full game,
+audit/replay, packaging). Also pending: wire on-chain build/mortgage re-mint to
+the engine, and the bank covenant upgrade (D-BANK-ENFORCE).
 
 ## Toolchain
 
