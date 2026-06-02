@@ -49,6 +49,12 @@ importers:
 
   packages/params: {}
 
+  packages/trade:
+    dependencies:
+      '@estates/onchain':
+        specifier: workspace:*
+        version: link:../onchain
+
   packages/turn:
     dependencies:
       '@estates/engine':

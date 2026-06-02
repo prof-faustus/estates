@@ -1,0 +1,17 @@
+{
+  "name": "@estates/trade",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ESTATES atomic player↔player trade (tx-nft doc §7): one tx, all-or-nothing, secp256k1 SIGHASH_ALL co-signing. Tampering or a missing signature invalidates the trade.",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@estates/onchain": "workspace:*"
+  },
+  "scripts": {
+    "test": "node --test --experimental-strip-types \"test/**/*.test.ts\""
+  }
+}
