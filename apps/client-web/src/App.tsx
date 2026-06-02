@@ -30,10 +30,12 @@ export function App() {
     tableRef.current = t;
     setConnected(true);
   }
-  function leaveTable() {        // your choice — leave at any time
+  // Your choice, any time: end the game, WALK FROM whatever sats are on the
+  // table, and return to the lobby/menu (NOT quit the app) to start or join again.
+  function returnToLobby() {
     tableRef.current = null;
     setFunding(null);
-    setConnected(false);
+    setConnected(false);   // back to the lobby (connect/create menu); state kept so you just re-enter
     force();
   }
   const t = tableRef.current;
@@ -102,7 +104,7 @@ export function App() {
             {v.iAmHost && v.freeSeats.length > 0 && <button onClick={() => t!.addBot()}>Add simulated player (test only)</button>}
             {v.iAmHost && <button className="primary" disabled={!v.canStart} onClick={() => t!.start()}>{v.canStart ? 'Start game' : 'Start (fill all seats)'}</button>}
             {!v.iAmHost && <span className="hint">waiting for the host to start…</span>}
-            <button onClick={leaveTable}>Leave</button>
+            <button onClick={returnToLobby}>Return to lobby</button>
           </div>
           {funding && (
             <div className="funding">
@@ -126,7 +128,7 @@ export function App() {
                     {v.myTurn ? 'Your turn' : `${v.seats.find((x) => x.seat === v.state!.current)?.name ?? `Seat ${v.state.current}`}’s turn`} · {v.state.phase}
                   </h2>}
               {v.state.lastRoll && <p className="dice">🎲 {v.state.lastRoll[0]} + {v.state.lastRoll[1]} = {v.state.lastRoll[0] + v.state.lastRoll[1]}</p>}
-              <p className="me">you are seat {v.mySeat} · <button className="link" onClick={leaveTable}>leave table</button></p>
+              <p className="me">you are seat {v.mySeat} · <button className="link" onClick={returnToLobby}>end game · return to lobby</button></p>
             </section>
 
             {v.myTurn && (
