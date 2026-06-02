@@ -117,6 +117,7 @@ export class NetTable {
   private seats = new Map<number, { who: string; name: string; bot: boolean }>();
   mySeat: number | null = null;
   private myBots = new Set<number>();
+  private seen = new Set<string>();   // de-dup so our own optimistic apply + the relay echo apply once
   private botTimer: ((cb: () => void) => void) | null;
 
   /** `scheduleBot` lets tests run the optional bot synchronously; default = setTimeout. */
@@ -184,11 +185,27 @@ export class NetTable {
     };
   }
 
-  private send(m: Msg): void { this.relay.publish(new TextEncoder().encode(JSON.stringify(m))); }
+  // Publish to the relay AND apply our own message locally + immediately, so the
+  // UI responds without waiting on (or depending on) the relay round-trip. The
+  // relay echo and other peers are de-duped by id. Turn-based play means only one
+  // seat acts at a time, so local-first apply stays consistent across peers.
+  private send(m: Msg): void {
+    const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    this.relay.publish(new TextEncoder().encode(JSON.stringify({ ...m, id })));
+    this.handle(m, id);
+  }
 
   private ingest(p: Uint8Array): void {
-    let m: Msg;
-    try { m = JSON.parse(new TextDecoder().decode(p)) as Msg; } catch { return; }
+    try {
+      const o = JSON.parse(new TextDecoder().decode(p)) as Msg & { id?: string };
+      const { id, ...rest } = o;
+      this.handle(rest as Msg, id ?? new TextDecoder().decode(p));
+    } catch { /* opaque payloads (e.g. lobby/chat) are ignored here */ }
+  }
+
+  private handle(m: Msg, id: string): void {
+    if (this.seen.has(id)) return;
+    this.seen.add(id);
     switch (m.kind) {
       case 'table':
         if (this.maxSeats === null) { this.maxSeats = m.maxSeats; this.network = m.network; this.host = m.host; }

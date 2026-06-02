@@ -21,10 +21,19 @@ export function startRelayServer(port = 0): Promise<RelayServer> {
     return c;
   };
 
+  const CORS = {
+    'access-control-allow-origin': '*',
+    'access-control-allow-methods': 'GET, POST, OPTIONS',
+    'access-control-allow-headers': '*',
+  } as const;
+
   const server: Server = createServer((req, res) => {
     const url = req.url ?? '';
     const pub = url.match(/^\/publish\/([\w.-]+)/);
     const sub = url.match(/^\/subscribe\/([\w.-]+)/);
+
+    // CORS preflight (so the desktop/browser webview can POST + stream)
+    if (req.method === 'OPTIONS') { res.writeHead(204, CORS).end(); return; }
 
     if (req.method === 'POST' && pub) {
       const c = chan(pub[1]!);
@@ -36,26 +45,21 @@ export function startRelayServer(port = 0): Promise<RelayServer> {
           c.log.push(hex);
           for (const client of c.clients) client.write(`data: ${hex}\n\n`);
         }
-        res.writeHead(204).end();
+        res.writeHead(204, CORS).end();
       });
       return;
     }
 
     if (req.method === 'GET' && sub) {
       const c = chan(sub[1]!);
-      res.writeHead(200, {
-        'content-type': 'text/event-stream',
-        'cache-control': 'no-cache',
-        connection: 'keep-alive',
-        'access-control-allow-origin': '*',
-      });
+      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', ...CORS });
       for (const hex of c.log) res.write(`data: ${hex}\n\n`); // history catch-up
       c.clients.add(res);
       req.on('close', () => c.clients.delete(res));
       return;
     }
 
-    res.writeHead(404).end();
+    res.writeHead(404, CORS).end();
   });
 
   return new Promise((resolve) => {
