@@ -21,7 +21,8 @@ export function App() {
 
   const [seatCount, setSeatCount] = useState(2);
   const [network, setNetwork] = useState<NetworkMode>('regtest');
-  const [funding, setFunding] = useState<{ address: string; network: NetworkMode } | null>(null);
+  const [ownWif, setOwnWif] = useState('');
+  const [funding, setFunding] = useState<{ address: string; network: NetworkMode; own: boolean } | null>(null);
 
   function connect() {
     const t = new NetTable(makeRelay(relayUrl, channel), name, force);
@@ -35,8 +36,11 @@ export function App() {
   function createTable() {
     if (!t) return;
     t.createTable(seatCount, network);
-    const w = Wallet.random(network); // FRESH funding address for THIS table
-    setFunding({ address: w.address, network });
+    // YOUR choice: control a wallet you have (paste a WIF) or generate a fresh
+    // per-table address. Either way YOU fund it, on the network YOU chose.
+    const own = ownWif.trim().length > 0;
+    const w = own ? Wallet.fromWif(ownWif.trim(), network) : Wallet.random(network);
+    setFunding({ address: w.address, network, own });
   }
   const act = (a: Action) => t?.submit(a);
 
@@ -67,6 +71,7 @@ export function App() {
               {NETWORKS.map((n) => <option key={n} value={n}>{n}</option>)}
             </select>
           </label>
+          <label>your wallet WIF <input placeholder="blank = generate a fresh address" value={ownWif} onChange={(e) => setOwnWif(e.target.value)} /></label>
           <button className="primary" onClick={createTable}>Open waiting room</button>
           <p className="hint">…or wait for a host to open one on table id “{channel}”.</p>
         </section>
@@ -95,7 +100,7 @@ export function App() {
           {funding && (
             <div className="funding">
               <h3>Fund this table ({funding.network})</h3>
-              <p>Send sats to this fresh address while the table runs:</p>
+              <p>{funding.own ? 'Your wallet — fund/control it as you like:' : 'Fresh per-table address — send sats here while it runs:'}</p>
               <code>{funding.address}</code>
             </div>
           )}
