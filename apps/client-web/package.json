@@ -17,6 +17,7 @@
     "@estates/turn": "workspace:*",
     "@estates/chat": "workspace:*",
     "@estates/wallet": "workspace:*",
+    "@estates/table": "workspace:*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

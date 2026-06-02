@@ -1,0 +1,17 @@
+{
+  "name": "@estates/table",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ESTATES multiplayer table controller (lobby + human-controlled start + relay-synced play). Isomorphic; the web client uses it. Exhaustively tested.",
+  "license": "MIT",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@estates/params": "workspace:*",
+    "@estates/engine": "workspace:*",
+    "@estates/chat": "workspace:*"
+  },
+  "scripts": {
+    "test": "node --test --experimental-strip-types \"test/**/*.test.ts\""
+  }
+}

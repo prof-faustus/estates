@@ -26,6 +26,9 @@ importers:
       '@estates/params':
         specifier: workspace:*
         version: link:../../packages/params
+      '@estates/table':
+        specifier: workspace:*
+        version: link:../../packages/table
       '@estates/turn':
         specifier: workspace:*
         version: link:../../packages/turn
@@ -192,6 +195,18 @@ importers:
         version: link:../params
 
   packages/params: {}
+
+  packages/table:
+    dependencies:
+      '@estates/chat':
+        specifier: workspace:*
+        version: link:../chat
+      '@estates/engine':
+        specifier: workspace:*
+        version: link:../engine
+      '@estates/params':
+        specifier: workspace:*
+        version: link:../params
 
   packages/trade:
     dependencies:
