@@ -25,6 +25,11 @@ export function App() {
   const [seatCount, setSeatCount] = useState(2);
   const [network, setNetwork] = useState<NetworkMode>('regtest');
   const [beBanker, setBeBanker] = useState(false);
+  // When ON, THIS window is a SEPARATE simulated player: it claims its own seat
+  // and auto-plays ONLY that seat (a bot is never controlled from inside another
+  // player's app — that is a cheat). Run a second window/instance with this ON to
+  // watch a bot play as a real, remote participant. Never auto-set; you choose it.
+  const [autoPlay, setAutoPlay] = useState(false);
 
   const identity = () => { try { return Wallet.fromWif(wif, 'testnet').address; } catch { return name; } };
 
@@ -39,7 +44,7 @@ export function App() {
 
   function createTable() {
     const addr = newAddress();
-    const t = new NetTable(makeRelay(addr), identity(), force);
+    const t = new NetTable(makeRelay(addr), identity(), force, { autoPlay });
     t.connect();
     t.createTable(seatCount, network);
     tableRef.current = t;
@@ -47,7 +52,7 @@ export function App() {
     setStage('table');
   }
   function joinTable(ot: OpenTable) {
-    const t = new NetTable(makeRelay(ot.addr), identity(), force);
+    const t = new NetTable(makeRelay(ot.addr), identity(), force, { autoPlay });
     t.connect();
     setNetwork(ot.network);
     tableRef.current = t;
@@ -72,6 +77,11 @@ export function App() {
           <p className="hint">No URLs. You get a Bitmessage-style address that is also your wallet.</p>
           <label>name <input value={name} onChange={(e) => setName(e.target.value)} /></label>
           <label>your wallet WIF <input placeholder="blank = generate one (you keep the key)" value={ownWif} onChange={(e) => setOwnWif(e.target.value)} /></label>
+          <label className="simtoggle">
+            <input type="checkbox" checked={autoPlay} onChange={(e) => setAutoPlay(e.target.checked)} />
+            this window is a simulated player (test) — auto-plays only its own seat
+          </label>
+          <p className="hint">A bot is a SEPARATE remote player: open another window with this ticked, join the same table, and watch it play over the network. It is never run inside another player’s app.</p>
           <button className="primary" onClick={enter}>Enter the lobby</button>
         </section>
       </Shell>
@@ -133,8 +143,7 @@ export function App() {
               })}
             </ol>
             <div className="lobby-actions">
-              {v.mySeat === null && v.freeSeats.length > 0 && <button className="primary" onClick={() => t!.joinSeat()}>Take a seat</button>}
-              {v.iAmHost && v.freeSeats.length > 0 && <button onClick={() => t!.addBot()}>Add simulated player (test only)</button>}
+              {v.mySeat === null && v.freeSeats.length > 0 && <button className="primary" onClick={() => t!.joinSeat(autoPlay)}>{autoPlay ? 'Take a seat (simulated player)' : 'Take a seat'}</button>}
               {v.iAmHost && <button className="primary" disabled={!v.canStart} onClick={() => t!.start()}>{v.canStart ? 'Start game' : 'Start (fill all seats)'}</button>}
               {!v.iAmHost && <span className="hint">waiting for the host to start…</span>}
               <button onClick={returnToLobby}>Return to lobby</button>

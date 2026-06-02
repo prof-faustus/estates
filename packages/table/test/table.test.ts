@@ -18,8 +18,8 @@ const priceOf = (id: number): number => P.board[id]?.base_price ?? 0;
 
 // shared relay = one in-memory bus; publish fans out synchronously to all peers,
 // so after each action every peer is in lockstep immediately (deterministic).
-function peer(relay: InMemoryRelay, name: string, sched?: (cb: () => void) => void): NetTable {
-  return new NetTable(relay, name, () => {}, sched);
+function peer(relay: InMemoryRelay, name: string, opts?: { autoPlay?: boolean; scheduleBot?: (cb: () => void) => void }): NetTable {
+  return new NetTable(relay, name, () => {}, opts);
 }
 function proj(s: GameState): string {
   return JSON.stringify({
@@ -116,21 +116,31 @@ for (const n of [2, 3, 4, 5, 6]) {
   });
 }
 
-// ---- bots are an OPTION the host adds; they only play their own seat --------
-test('host fills seats with simulated players (bots); the game still converges; a bot never starts', () => {
+// ---- a bot is a SEPARATE remote player (own peer) connected over the relay ---
+// It is NOT controlled from anyone's app (that would be a cheat): it is its own
+// NetTable running in auto-play, it claims its own seat, and it plays ONLY that
+// seat. Here the human host shares ONE relay (bus) with the simulated player,
+// exactly as a second window/daemon would over a real socket.
+test('a separate simulated player (its own auto-play peer) joins over the relay and plays only its own seat; the human still starts', () => {
   const relay = new InMemoryRelay();
   const queue: (() => void)[] = [];
-  const sched = (cb: () => void) => queue.push(cb);   // pump bot actions deterministically
-  const host = peer(relay, 'host', sched); host.connect();
-  host.createTable(3, 'regtest');
+  const sched = (cb: () => void) => queue.push(cb);   // pump the bot peer deterministically
+  const host = peer(relay, 'host'); host.connect();                          // the human
+  const bot = peer(relay, 'sim', { autoPlay: true, scheduleBot: sched });    // a separate remote peer
+  bot.connect();
+  host.createTable(2, 'regtest');
   host.joinSeat();          // seat 0 = human host
-  host.addBot();            // seat 1 = bot (host-added)
-  host.addBot();            // seat 2 = bot
-  assert.equal(host.view().phase, 'lobby', 'still lobby — bots never auto-start');
+  bot.joinSeat(true);       // seat 1 = the simulated player claims its OWN seat over the relay
+
+  assert.equal(host.view().seats.length, 2, 'both peers claimed seats');
+  assert.equal(host.view().seats[1]!.bot, true, 'seat 1 is flagged as a simulated player');
+  assert.equal(bot.view().phase, 'lobby', 'still lobby — a bot NEVER starts the game');
   host.start();             // ONLY the human host starts
   assert.equal(host.view().phase, 'playing');
-  // drive: the human plays seat 0; bots are pumped for their seats
-  for (let i = 0; i < 4000; i++) {
+  assert.equal(bot.view().phase, 'playing', 'the simulated peer follows the start over the relay');
+
+  // drive: the human plays seat 0; the bot peer auto-plays seat 1 via its own queue
+  for (let i = 0; i < 6000; i++) {
     const s = host.state!;
     if (s.phase === 'GAME_OVER') break;
     if (s.current === 0) {
@@ -138,11 +148,13 @@ test('host fills seats with simulated players (bots); the game still converges; 
       else if (s.phase === 'AWAIT_BUY') host.submit({ type: 'DECLINE' });
       else if (s.phase === 'AWAIT_TAX') host.submit({ type: 'PAY_TAX', choice: 'flat' });
       else if (s.phase === 'AWAIT_POST') host.submit({ type: 'END_TURN' });
-    } else if (queue.length) { queue.shift()!(); }
+    } else if (queue.length) { queue.shift()!(); }  // the bot's own scheduled move fires
     else break; // no progress
     if (s.turnIndex > 25) break;
   }
-  assert.ok(host.state!.turnIndex >= 3, 'the table progressed with bot-filled seats');
+  assert.ok(host.state!.turnIndex >= 3, 'the table progressed with a separate simulated player');
+  // both peers stay in lockstep — the bot is a real remote participant, not a local puppet
+  assert.equal(JSON.stringify(host.state), JSON.stringify(bot.state), 'host and bot peer agree on state');
 });
 
 // ---- seat races, late join, determinism ------------------------------------

@@ -116,17 +116,23 @@ export class NetTable {
   state: GameState | null = null;
   private seats = new Map<number, { who: string; name: string; bot: boolean }>();
   mySeat: number | null = null;
-  private myBots = new Set<number>();
+  private autoPlay: boolean;          // a SIMULATED player: auto-plays ONLY its own seat
   private seen = new Set<string>();   // de-dup so our own optimistic apply + the relay echo apply once
   private botTimer: ((cb: () => void) => void) | null;
 
-  /** `scheduleBot` lets tests run the optional bot synchronously; default = setTimeout. */
-  constructor(relay: Relay, name: string, onUpdate: () => void, scheduleBot?: (cb: () => void) => void) {
+  /**
+   * `autoPlay` makes this peer a simulated player that plays ONLY its own seat
+   * automatically (it never controls another seat — that would be a cheat). Run
+   * such a peer as a separate process/window/daemon; it connects over the relay
+   * socket exactly like a remote human. `scheduleBot` lets tests pump it.
+   */
+  constructor(relay: Relay, name: string, onUpdate: () => void, opts?: { autoPlay?: boolean; scheduleBot?: (cb: () => void) => void }) {
     this.relay = relay;
     this.me = `${name || 'player'}-${Math.random().toString(36).slice(2, 8)}`;
     this.name = name || 'player';
     this.onUpdate = onUpdate;
-    this.botTimer = scheduleBot ?? null;
+    this.autoPlay = opts?.autoPlay ?? false;
+    this.botTimer = opts?.scheduleBot ?? null;
   }
 
   connect(): void { this.relay.subscribe((p) => this.ingest(p)); }
@@ -135,18 +141,12 @@ export class NetTable {
     this.host = this.me;
     this.send({ kind: 'table', maxSeats, network, host: this.me });
   }
-  joinSeat(): void {
+  /** Take a seat. `simulated` marks this peer as a bot to other players (it is a
+   *  separate connected peer running in auto-play, NOT controlled from anyone's app). */
+  joinSeat(simulated = false): void {
     const seat = this.lowestFree();
     if (seat < 0) return;
-    this.send({ kind: 'seat', seat, who: this.me, name: this.name, bot: false });
-  }
-  /** OPTION (host only): fill the lowest free seat with a simulated player (test). */
-  addBot(): void {
-    if (!this.iAmHost()) return;
-    const seat = this.lowestFree();
-    if (seat < 0) return;
-    this.myBots.add(seat);
-    this.send({ kind: 'seat', seat, who: `bot-${seat}-${Math.random().toString(36).slice(2, 6)}`, name: `Bot ${seat}`, bot: true });
+    this.send({ kind: 'seat', seat, who: this.me, name: this.name, bot: simulated });
   }
   /** HOST + HUMAN ONLY. */
   start(): void {
@@ -224,21 +224,22 @@ export class NetTable {
         break;
     }
     this.onUpdate();
-    this.maybePlayBot();
+    this.maybeAutoPlay();
   }
 
-  private maybePlayBot(): void {
+  /** A simulated player auto-plays ONLY its own seat (never another's). */
+  private maybeAutoPlay(): void {
+    if (!this.autoPlay) return;
     const s = this.state;
-    if (!this.started || !s || s.phase === 'GAME_OVER') return;
-    if (!this.myBots.has(s.current)) return;
+    if (!this.started || !s || s.phase === 'GAME_OVER' || !this.myTurn()) return;
     const at = s.current;
     const fire = () => {
-      if (this.state && this.state.current === at && this.state.phase !== 'GAME_OVER') {
+      if (this.myTurn() && this.state && this.state.current === at && this.state.phase !== 'GAME_OVER') {
         this.send({ kind: 'action', action: botAction(this.state) });
       }
     };
     if (this.botTimer) this.botTimer(fire);
-    else setTimeout(fire, 400);
+    else setTimeout(fire, 600);
   }
 }
 

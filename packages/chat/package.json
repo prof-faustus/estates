@@ -6,7 +6,8 @@
   "description": "ESTATES multiparty join + encrypted chat: Bitmessage-style addresses, broadcast encryption (multi-recipient ECIES over secp256k1 + AES-256-GCM) over the untrusted relay. Only current members decrypt; revocation drops a member from future envelopes.",
   "license": "MIT",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./server": "./src/server.ts"
   },
   "dependencies": {
     "@noble/ciphers": "1.1.0",

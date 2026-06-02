@@ -94,18 +94,27 @@ importers:
 
   packages/bot:
     dependencies:
+      '@estates/chat':
+        specifier: workspace:*
+        version: link:../chat
       '@estates/engine':
         specifier: workspace:*
         version: link:../engine
       '@estates/params':
         specifier: workspace:*
         version: link:../params
+      '@estates/table':
+        specifier: workspace:*
+        version: link:../table
       '@estates/trade':
         specifier: workspace:*
         version: link:../trade
       '@estates/turn':
         specifier: workspace:*
         version: link:../turn
+      '@estates/wallet':
+        specifier: workspace:*
+        version: link:../wallet
 
   packages/chainmap:
     dependencies:
