@@ -117,7 +117,7 @@ export class NetTable {
   private seats = new Map<number, { who: string; name: string; bot: boolean }>();
   mySeat: number | null = null;
   private autoPlay: boolean;          // a SIMULATED player: auto-plays ONLY its own seat
-  private seen = new Set<string>();   // de-dup so our own optimistic apply + the relay echo apply once
+  private lastBotKey = '';            // de-dup auto-play so one state fires one action
   private botTimer: ((cb: () => void) => void) | null;
 
   /**
@@ -135,7 +135,12 @@ export class NetTable {
     this.botTimer = opts?.scheduleBot ?? null;
   }
 
-  connect(): void { this.relay.subscribe((p) => this.ingest(p)); }
+  connect(): void {
+    // Drive state by replaying the relay's TOTAL-ORDER log (no optimistic apply,
+    // so peers can never diverge). The transport pushes the ordered log live and
+    // heals any gap, so every peer converges on one identical state.
+    if (this.relay.subscribeOrdered) this.relay.subscribeOrdered((log) => this.rebuild(log));
+  }
 
   createTable(maxSeats: number, network: NetworkMode = 'regtest'): void {
     this.host = this.me;
@@ -185,61 +190,71 @@ export class NetTable {
     };
   }
 
-  // Publish to the relay AND apply our own message locally + immediately, so the
-  // UI responds without waiting on (or depending on) the relay round-trip. The
-  // relay echo and other peers are de-duped by id. Turn-based play means only one
-  // seat acts at a time, so local-first apply stays consistent across peers.
+  // Publish only — no optimistic local apply. Our action enters the relay's
+  // total-order log; the ordered subscription replays it (live, within ms) so
+  // our own UI and every peer update from the SAME canonical order.
   private send(m: Msg): void {
     const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
     this.relay.publish(new TextEncoder().encode(JSON.stringify({ ...m, id })));
-    this.handle(m, id);
+    this.relay.refresh?.();
   }
 
-  private ingest(p: Uint8Array): void {
-    try {
-      const o = JSON.parse(new TextDecoder().decode(p)) as Msg & { id?: string };
-      const { id, ...rest } = o;
-      this.handle(rest as Msg, id ?? new TextDecoder().decode(p));
-    } catch { /* opaque payloads (e.g. lobby/chat) are ignored here */ }
-  }
-
-  private handle(m: Msg, id: string): void {
-    if (this.seen.has(id)) return;
-    this.seen.add(id);
-    switch (m.kind) {
-      case 'table':
-        if (this.maxSeats === null) { this.maxSeats = m.maxSeats; this.network = m.network; this.host = m.host; }
-        break;
-      case 'seat':
-        if (!this.started && !this.seats.has(m.seat) && ![...this.seats.values()].some((v) => v.who === m.who)) {
-          this.seats.set(m.seat, { who: m.who, name: m.name, bot: m.bot });
-          if (m.who === this.me) this.mySeat = m.seat;
-        }
-        break;
-      case 'start':
-        if (!this.started && m.by === this.host) { this.started = true; this.state = initialState(m.config); }
-        break;
-      case 'action':
-        if (this.started && this.state) { const r = apply(this.state, m.action); if (r.ok) this.state = r.state; }
-        break;
+  /** Recompute ALL state from the ordered log. Pure + deterministic, so every
+   *  peer replaying the same log lands on byte-identical state — never diverges. */
+  private rebuild(payloads: Uint8Array[]): void {
+    let maxSeats: number | null = null;
+    let network: NetworkMode = 'regtest';
+    let host: string | null = null;
+    let started = false;
+    let state: GameState | null = null;
+    const seats = new Map<number, { who: string; name: string; bot: boolean }>();
+    for (const p of payloads) {
+      let m: Msg;
+      try { const o = JSON.parse(new TextDecoder().decode(p)) as Msg & { id?: string }; m = o; } catch { continue; }
+      switch (m.kind) {
+        case 'table':
+          if (maxSeats === null) { maxSeats = m.maxSeats; network = m.network; host = m.host; }
+          break;
+        case 'seat':
+          if (!started && !seats.has(m.seat) && ![...seats.values()].some((v) => v.who === m.who)) {
+            seats.set(m.seat, { who: m.who, name: m.name, bot: m.bot });
+          }
+          break;
+        case 'start':
+          if (!started && m.by === host) { started = true; state = initialState(m.config); }
+          break;
+        case 'action':
+          if (started && state) { const r = apply(state, m.action); if (r.ok) state = r.state; }
+          break;
+      }
     }
+    this.maxSeats = maxSeats;
+    this.network = network;
+    this.host = host;
+    this.started = started;
+    this.state = state;
+    this.seats = seats;
+    this.mySeat = [...seats.entries()].find(([, v]) => v.who === this.me)?.[0] ?? null;
     this.onUpdate();
     this.maybeAutoPlay();
   }
 
-  /** A simulated player auto-plays ONLY its own seat (never another's). */
+  /** A simulated player auto-plays ONLY its own seat (never another's). Fires at
+   *  most once per distinct state, so a re-render never double-sends an action. */
   private maybeAutoPlay(): void {
     if (!this.autoPlay) return;
     const s = this.state;
     if (!this.started || !s || s.phase === 'GAME_OVER' || !this.myTurn()) return;
-    const at = s.current;
+    const key = `${s.turnIndex}:${s.phase}:${s.current}`;
+    if (key === this.lastBotKey) return;
+    this.lastBotKey = key;
     const fire = () => {
-      if (this.myTurn() && this.state && this.state.current === at && this.state.phase !== 'GAME_OVER') {
+      if (this.myTurn() && this.state && `${this.state.turnIndex}:${this.state.phase}:${this.state.current}` === key) {
         this.send({ kind: 'action', action: botAction(this.state) });
       }
     };
     if (this.botTimer) this.botTimer(fire);
-    else setTimeout(fire, 600);
+    else setTimeout(fire, 30);
   }
 }
 

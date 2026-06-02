@@ -15,6 +15,12 @@ body { margin: 0; font-family: system-ui, sans-serif; background: #2b2b2b; color
 header { display: flex; align-items: center; justify-content: space-between; }
 h1 { font-size: 22px; margin: 8px 0; }
 h1 .sub { font-size: 12px; color: #f5a623; font-weight: normal; }
+.relaystatus { font-size: 12px; display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-weight: 600; }
+.relaystatus .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.relaystatus.up { background: #143d14; color: #6fe06f; } .relaystatus.up .dot { background: #2ecc40; }
+.relaystatus.down { background: #4a1414; color: #ff6f6f; } .relaystatus.down .dot { background: #ff4136; }
+.relaystatus.pending { background: #333; color: #ccc; } .relaystatus.pending .dot { background: #aaa; }
+.rpcbox { border: 1px solid #333; border-radius: 6px; padding: 8px; margin: 6px 0; display: grid; gap: 6px; }
 .newgame { display: flex; gap: 8px; align-items: center; }
 .main { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
 .lobbywrap { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }

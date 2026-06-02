@@ -35,6 +35,9 @@ importers:
       '@estates/wallet':
         specifier: workspace:*
         version: link:../../packages/wallet
+      '@tauri-apps/api':
+        specifier: ^2.1.0
+        version: 2.11.0
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -164,11 +167,32 @@ importers:
         specifier: workspace:*
         version: link:../params
 
+  packages/deck:
+    dependencies:
+      '@noble/ciphers':
+        specifier: 1.1.0
+        version: 1.1.0
+      '@noble/hashes':
+        specifier: 1.5.0
+        version: 1.5.0
+      '@noble/secp256k1':
+        specifier: 2.1.0
+        version: 2.1.0
+
   packages/engine:
     dependencies:
       '@estates/params':
         specifier: workspace:*
         version: link:../params
+
+  packages/keys:
+    dependencies:
+      '@noble/hashes':
+        specifier: 1.5.0
+        version: 1.5.0
+      '@noble/secp256k1':
+        specifier: 2.1.0
+        version: 2.1.0
 
   packages/lobby:
     dependencies:
@@ -205,6 +229,12 @@ importers:
 
   packages/params: {}
 
+  packages/spv:
+    dependencies:
+      '@noble/hashes':
+        specifier: 1.5.0
+        version: 1.5.0
+
   packages/table:
     dependencies:
       '@estates/chat':
@@ -231,6 +261,18 @@ importers:
       '@estates/params':
         specifier: workspace:*
         version: link:../params
+
+  packages/txmap:
+    dependencies:
+      '@estates/chainmap':
+        specifier: workspace:*
+        version: link:../chainmap
+      '@estates/engine':
+        specifier: workspace:*
+        version: link:../engine
+      '@estates/onchain':
+        specifier: workspace:*
+        version: link:../onchain
 
   packages/wallet:
     dependencies:
@@ -618,6 +660,9 @@ packages:
     resolution: {integrity: sha512-tkuFxhvKO/HlGd0VsINF6vHSYH8AF8W0TcNxKDK6JZmrehngFj78pToc8iemtnvwilDjs2G/qSzYFhe9U8q+fw==}
     cpu: [x64]
     os: [win32]
+
+  '@tauri-apps/api@2.11.0':
+    resolution: {integrity: sha512-7CinYODhky9lmO23xHnUFv0Xt43fbtWMyxZcLcRBlFkcgXKuEirBvHpmtJ89YMhyeGcq20Wuc47Fa4XjyniywA==}
 
   '@tauri-apps/cli-darwin-arm64@2.11.2':
     resolution: {integrity: sha512-+4UZzLt+eOAEQCwgd+TqKgyUJMrvx+BgdXLLaqJYmPqzP+nE6YZr/hY6CWLYGQb8jFn99jEkmC6uA3tNvamA1w==}
@@ -1176,6 +1221,8 @@ snapshots:
 
   '@rollup/rollup-win32-x64-msvc@4.61.0':
     optional: true
+
+  '@tauri-apps/api@2.11.0': {}
 
   '@tauri-apps/cli-darwin-arm64@2.11.2':
     optional: true

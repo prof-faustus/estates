@@ -1,4 +1,4 @@
-import { useReducer, useRef, useState } from 'react';
+import { useEffect, useReducer, useRef, useState } from 'react';
 import type { Action } from '@estates/engine';
 import { Wallet, type Network } from '@estates/wallet';
 import { Board } from './board';
@@ -7,7 +7,7 @@ import { WalletPanel } from './WalletPanel';
 import {
   P, SEAT_COLORS, GROUP_COLOR, NetTable, LobbyClient, makeRelay, newAddress,
   rollDice, ownedBy, buildable, mortgageable, unmortgageable, lastCard,
-  LOBBY_CHANNEL, type NetworkMode, type TableView, type OpenTable,
+  LOBBY_CHANNEL, DEFAULT_RELAY, type NetworkMode, type TableView, type OpenTable,
 } from './game';
 
 const NETWORKS: NetworkMode[] = ['regtest', 'testnet', 'mainnet'];
@@ -16,6 +16,7 @@ export function App() {
   const [, force] = useReducer((x: number) => x + 1, 0);
   const lobbyRef = useRef<LobbyClient | null>(null);
   const tableRef = useRef<NetTable | null>(null);
+  const tableAddrRef = useRef<string>('');   // the relay channel of the table we're at (to spawn bot windows)
 
   const [stage, setStage] = useState<'enter' | 'lobby' | 'table'>('enter');
   const [name, setName] = useState('player');
@@ -47,7 +48,7 @@ export function App() {
     const t = new NetTable(makeRelay(addr), identity(), force, { autoPlay });
     t.connect();
     t.createTable(seatCount, network);
-    tableRef.current = t;
+    tableRef.current = t; tableAddrRef.current = addr;
     lobbyRef.current?.announce({ addr, name, maxSeats: seatCount, network, host: identity(), ts: Date.now() });
     setStage('table');
   }
@@ -55,9 +56,52 @@ export function App() {
     const t = new NetTable(makeRelay(ot.addr), identity(), force, { autoPlay });
     t.connect();
     setNetwork(ot.network);
-    tableRef.current = t;
+    tableRef.current = t; tableAddrRef.current = ot.addr;
     setStage('table');
   }
+
+  // Open a NEW WINDOW that is a SEPARATE simulated player joined to THIS table.
+  // It connects over the relay socket like any remote human and auto-plays only
+  // its own seat. Desktop → a native Tauri window; web → a popup. You watch it.
+  async function spawnBotWindow() {
+    const addr = tableAddrRef.current;
+    if (!addr) return;
+    const net = v?.network ?? network;
+    const botName = `bot-${Math.random().toString(36).slice(2, 6)}`;
+    const url = `index.html?autoplay=1&table=${encodeURIComponent(addr)}&network=${net}&name=${botName}`;
+    if (typeof (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== 'undefined') {
+      const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+      new WebviewWindow(`bot-${Date.now()}`, { url, title: `ESTATES — ${botName} (simulated player)`, width: 1100, height: 880 });
+    } else {
+      window.open(url, '_blank', 'width=1100,height=880');
+    }
+  }
+
+  // If launched with ?autoplay=1&table=…, THIS window is a simulated player:
+  // auto-enter, connect to the given table over the relay, and claim our own seat.
+  useEffect(() => {
+    const q = new URLSearchParams(location.search);
+    if (q.get('autoplay') !== '1' || !q.get('table') || tableRef.current) return;
+    const addr = q.get('table')!;
+    const botName = q.get('name') || 'bot';
+    const net = (q.get('network') as NetworkMode) || 'regtest';
+    const key = Wallet.random('testnet').key.toWif();
+    setWif(key); setName(botName); setNetwork(net); setAutoPlay(true);
+    const t = new NetTable(makeRelay(addr), botName, force, { autoPlay: true });
+    t.connect();
+    tableRef.current = t; tableAddrRef.current = addr;
+    setStage('table');
+    // Claim our own seat once the table definition has propagated over the relay.
+    const deadline = Date.now() + 20000;
+    const iv = setInterval(() => {
+      const view = t.view();
+      if (view.mySeat !== null) { clearInterval(iv); return; }
+      if (view.maxSeats !== null && view.freeSeats.length > 0) t.joinSeat(true);
+      if (Date.now() > deadline) clearInterval(iv);
+    }, 500);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   function returnToLobby() {
     tableRef.current?.leaveGame();   // leaving mid-game gives your money + assets to the leading player
     tableRef.current = null; setBeBanker(false); setStage('lobby'); force();
@@ -144,6 +188,7 @@ export function App() {
             </ol>
             <div className="lobby-actions">
               {v.mySeat === null && v.freeSeats.length > 0 && <button className="primary" onClick={() => t!.joinSeat(autoPlay)}>{autoPlay ? 'Take a seat (simulated player)' : 'Take a seat'}</button>}
+              {!autoPlay && v.freeSeats.length > 0 && <button onClick={spawnBotWindow}>Add simulated player (opens a new window)</button>}
               {v.iAmHost && <button className="primary" disabled={!v.canStart} onClick={() => t!.start()}>{v.canStart ? 'Start game' : 'Start (fill all seats)'}</button>}
               {!v.iAmHost && <span className="hint">waiting for the host to start…</span>}
               <button onClick={returnToLobby}>Return to lobby</button>
@@ -155,7 +200,10 @@ export function App() {
               </div>
             )}
           </section>
-          <WalletPanel wif={wif} network={walletNet} />
+          <aside className="panel">
+            <WalletPanel wif={wif} network={walletNet} />
+            <ChatPanel channel={`chat-${tableAddrRef.current}`} />
+          </aside>
         </div>
       )}
 
@@ -225,7 +273,7 @@ export function App() {
 
             <WalletPanel wif={wif} network={walletNet} />
             <section className="log"><h3>Transcript</h3><ol>{v.state.log.slice(-10).map((line, i) => <li key={i}>{line}</li>)}</ol></section>
-            <ChatPanel />
+            <ChatPanel channel={`chat-${tableAddrRef.current}`} />
           </aside>
         </div>
       )}
@@ -236,8 +284,31 @@ export function App() {
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="app">
-      <header><h1>ESTATES <span className="sub">dealerless · on-chain · multiplayer</span></h1></header>
+      <header><h1>ESTATES <span className="sub">dealerless · on-chain · multiplayer</span></h1><RelayStatus /></header>
       {children}
     </div>
   );
+}
+
+// Ground-truth connection light: actually hits the relay over plain HTTP every
+// 2s and shows whether THIS window can reach it. If this is red, no window can
+// sync — so you see the real transport state, not a claim.
+function RelayStatus() {
+  const [ok, setOk] = useState<boolean | null>(null);
+  const [ms, setMs] = useState<number | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const ping = async () => {
+      const t0 = performance.now();
+      try {
+        const r = await fetch(`${DEFAULT_RELAY}/history/__ping__`, { cache: 'no-store' });
+        if (alive) { setOk(r.ok); setMs(Math.round(performance.now() - t0)); }
+      } catch { if (alive) { setOk(false); setMs(null); } }
+    };
+    void ping();
+    const iv = setInterval(ping, 2000);
+    return () => { alive = false; clearInterval(iv); };
+  }, []);
+  const label = ok === null ? 'relay: checking…' : ok ? `relay: connected${ms !== null ? ` (${ms}ms)` : ''}` : 'relay: NOT REACHABLE';
+  return <span className={`relaystatus ${ok === null ? 'pending' : ok ? 'up' : 'down'}`}><span className="dot" /> {label}</span>;
 }

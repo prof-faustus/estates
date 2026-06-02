@@ -11,7 +11,7 @@ import { makeRelay } from './game';
 type Transport = 'bitmessage' | 'direct';
 type Mode = 'broadcast' | '2party';
 
-export function ChatPanel() {
+export function ChatPanel({ channel = 'estates-table' }: { channel?: string }) {
   const [, force] = useReducer((x: number) => x + 1, 0);
   const [peer] = useState<Peer>(() => genPeer());
   const [transport, setTransport] = useState<Transport>('bitmessage');
@@ -27,8 +27,8 @@ export function ChatPanel() {
 
   function connect() {
     const relay = transport === 'direct' && directUrl.trim()
-      ? new HttpRelay(directUrl.trim(), 'estates-table')   // direct IP/URL
-      : makeRelay('estates-table');                        // built-in Bitmessage-style relay
+      ? new HttpRelay(directUrl.trim(), channel)   // direct IP/URL
+      : makeRelay(channel);                         // built-in Bitmessage-style relay
     const room = new ChatRoom(relay, peer, `seat-${peer.address.slice(0, 6)}`);
     room.onMessage((m) => setMsgs((prev) => [...prev, m]));
     room.connect();

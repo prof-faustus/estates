@@ -18,7 +18,7 @@
  * The bot funds/defunds with its OWN wallet only — it is given no one else's key.
  */
 import { Wallet, type Network } from '@estates/wallet';
-import { NetTable, makeRelay, DEFAULT_RELAY, type NetworkMode } from '@estates/table';
+import { NetTable, LobbyClient, makeRelay, DEFAULT_RELAY, LOBBY_CHANNEL, type NetworkMode } from '@estates/table';
 import { ChatRoom, HttpRelay, genPeer } from '@estates/chat';
 
 function parse(argv: string[]): Record<string, string | true> {
@@ -37,11 +37,6 @@ const str = (f: Record<string, string | true>, k: string): string | undefined =>
 
 function main(): void {
   const flags = parse(process.argv.slice(2));
-  const tableAddr = str(flags, 'table');
-  if (!tableAddr) {
-    console.error('usage: estates-bot --table <address> [--relay <url>] [--name <n>] [--network <regtest|testnet|mainnet>] [--wif <own-WIF>] [--say <msg>]');
-    process.exit(2);
-  }
   const relayUrl = str(flags, 'relay') ?? DEFAULT_RELAY;
   const name = str(flags, 'name') ?? 'sim';
   const network = (str(flags, 'network') ?? 'regtest') as NetworkMode;
@@ -53,10 +48,34 @@ function main(): void {
 
   console.log(`# estates-bot "${name}" — simulated remote player`);
   console.log(`#   relay:   ${relayUrl}`);
-  console.log(`#   table:   ${tableAddr}`);
   console.log(`#   network: ${network}`);
   console.log(`#   wallet:  ${wallet.address}   (its OWN funds — fund this address to give the bot money)`);
 
+  const tableAddr = str(flags, 'table');
+  if (tableAddr) {
+    joinTable(tableAddr, relayUrl, name, flags);     // a specific table address was given
+  } else {
+    // No URL to type: discover open tables on the lobby and join the newest one.
+    console.log('# no --table given; watching the lobby for an open table to join…');
+    const lobby = new LobbyClient(makeRelay(LOBBY_CHANNEL, relayUrl), () => {});
+    lobby.connect();
+    let joined = false;
+    const tick = setInterval(() => {
+      if (joined) return;
+      const open = lobby.list().filter((t) => t.network === network);
+      if (open.length > 0) {
+        joined = true; clearInterval(tick);
+        const t = open[0]!;
+        console.log(`# found open table "${t.name}" (${t.maxSeats}p · ${t.network}) at ${t.addr.slice(0, 8)}… — joining over the socket.`);
+        joinTable(t.addr, relayUrl, name, flags);
+      }
+    }, 500);
+  }
+}
+
+/** Connect to a table OVER THE RELAY as a separate remote simulated player. */
+function joinTable(tableAddr: string, relayUrl: string, name: string, flags: Record<string, string | true>): void {
+  console.log(`#   table:   ${tableAddr}`);
   let lastTurn = -1;
   const render = (): void => {
     const v = table.view();

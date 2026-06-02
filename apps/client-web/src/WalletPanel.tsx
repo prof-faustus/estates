@@ -17,22 +17,63 @@ export function WalletPanel({ wif, network }: { wif: string; network: Network })
   const [confirmReal, setConfirmReal] = useState(false);
   const [status, setStatus] = useState('');
   const [balance, setBalance] = useState<number | null>(null);
-  const onChain = network !== 'regtest';
+  // regtest spends need YOUR node's JSON-RPC (there is no WhatsOnChain for regtest).
+  const [rpcUrl, setRpcUrl] = useState('');
+  const [rpcUser, setRpcUser] = useState('');
+  const [rpcPass, setRpcPass] = useState('');
+  const isReg = network === 'regtest';
+  const canSend = !isReg || rpcUrl.trim() !== '';
+
+  // Browser-safe regtest RPC (uses btoa, not Node's Buffer).
+  async function rpc(method: string, params: unknown[]): Promise<any> {
+    const r = await fetch(rpcUrl.trim(), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Basic ' + btoa(`${rpcUser}:${rpcPass}`) },
+      body: JSON.stringify({ jsonrpc: '1.0', id: 'estates', method, params }),
+    });
+    const j = (await r.json()) as { result?: any; error?: { message: string } };
+    if (j.error) throw new Error(`${method}: ${j.error.message}`);
+    return j.result;
+  }
 
   async function refreshBalance() {
     if (!wallet) return;
     setStatus('checking balance…');
-    try { setBalance(await wallet.getBalance()); setStatus(''); } catch (e) { setStatus(err(e)); }
+    try {
+      if (isReg) {
+        const scan = await rpc('scantxoutset', ['start', [`addr(${wallet.address})`]]);
+        setBalance(Math.round((scan.total_amount as number) * 1e8));
+      } else {
+        setBalance(await wallet.getBalance());
+      }
+      setStatus('');
+    } catch (e) { setStatus(err(e)); }
   }
+
   async function doSend() {
     if (!wallet) return;
     const sats = Number(amount);
     if (!to.trim() || !Number.isFinite(sats) || sats <= 0) { setStatus('enter a destination address and a positive amount'); return; }
+    if (isReg && !rpcUrl.trim()) { setStatus('regtest: paste your node’s RPC URL below to spend (regtest coins come from your node)'); return; }
     if (network === 'mainnet' && !confirmReal) { setStatus('tick “spend real value” to send on mainnet'); return; }
     setStatus('signing + broadcasting…');
     try {
-      const r = await wallet.send(to.trim(), sats, network === 'mainnet' ? confirmReal : true);
-      setStatus(`sent ✓ txid ${r.txid}`);
+      if (isReg) {
+        const scan = await rpc('scantxoutset', ['start', [`addr(${wallet.address})`]]);
+        const unspents = (scan.unspents as { txid: string; vout: number; amount: number }[]) ?? [];
+        if (unspents.length === 0) throw new Error('no regtest funds at your address — fund it from your node first');
+        const utxos = [] as { sourceTxHex: string; vout: number; satoshis: number }[];
+        for (const u of unspents) {
+          const raw = (await rpc('getrawtransaction', [u.txid])) as string; // needs txindex=1
+          utxos.push({ sourceTxHex: raw, vout: u.vout, satoshis: Math.round(u.amount * 1e8) });
+        }
+        const { hex } = await wallet.buildAndSign(utxos, [{ address: to.trim(), satoshis: sats }]);
+        const txid = (await rpc('sendrawtransaction', [hex])) as string;
+        setStatus(`sent ✓ txid ${txid}`);
+      } else {
+        const r = await wallet.send(to.trim(), sats, network === 'mainnet' ? confirmReal : true);
+        setStatus(`sent ✓ txid ${r.txid}`);
+      }
       setAmount('');
     } catch (e) { setStatus(err(e)); }
   }
@@ -57,19 +98,33 @@ export function WalletPanel({ wif, network }: { wif: string; network: Network })
 
       {wallet && tab === 'send' && (
         <div className="wtab">
-          {!onChain && <p className="hint">send/spend is over WhatsOnChain — switch to testnet or mainnet.</p>}
           <input placeholder="destination address" value={to} onChange={(e) => setTo(e.target.value)} />
           <input placeholder="amount (sat)" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          {isReg && (
+            <div className="rpcbox">
+              <p className="hint">regtest spends use YOUR node’s RPC (regtest coins come from your node):</p>
+              <input placeholder="RPC URL e.g. http://127.0.0.1:18443" value={rpcUrl} onChange={(e) => setRpcUrl(e.target.value)} />
+              <input placeholder="RPC user" value={rpcUser} onChange={(e) => setRpcUser(e.target.value)} />
+              <input placeholder="RPC pass" type="password" value={rpcPass} onChange={(e) => setRpcPass(e.target.value)} />
+            </div>
+          )}
           {network === 'mainnet' && <label><input type="checkbox" checked={confirmReal} onChange={(e) => setConfirmReal(e.target.checked)} /> spend real value</label>}
-          <button className="primary" disabled={!onChain} onClick={doSend}>Send</button>
+          <button className="primary" disabled={!canSend} onClick={doSend}>Send</button>
           {status && <p className="hint">{status}</p>}
         </div>
       )}
 
       {wallet && tab === 'balance' && (
         <div className="wtab">
-          <button disabled={!onChain} onClick={refreshBalance}>Refresh balance</button>
-          {!onChain && <p className="hint">balance is via WhatsOnChain — testnet/mainnet only.</p>}
+          {isReg && (
+            <div className="rpcbox">
+              <p className="hint">regtest balance uses YOUR node’s RPC:</p>
+              <input placeholder="RPC URL e.g. http://127.0.0.1:18443" value={rpcUrl} onChange={(e) => setRpcUrl(e.target.value)} />
+              <input placeholder="RPC user" value={rpcUser} onChange={(e) => setRpcUser(e.target.value)} />
+              <input placeholder="RPC pass" type="password" value={rpcPass} onChange={(e) => setRpcPass(e.target.value)} />
+            </div>
+          )}
+          <button disabled={isReg && !rpcUrl.trim()} onClick={refreshBalance}>Refresh balance</button>
           {balance !== null && <p>balance: <b>{balance}</b> sat</p>}
           {status && <p className="hint">{status}</p>}
         </div>

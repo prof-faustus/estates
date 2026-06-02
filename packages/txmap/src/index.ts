@@ -3,7 +3,7 @@
  *
  * For any engine transition (pre, action) → post, this emits the transaction:
  *   • a 1-sat ACTION-COMMITMENT output `<commit> OP_DROP <P2PKH(one-use)>` that
- *     records the exact action on chain as pushdata (never OP_RETURN), and
+ *     records the exact action on chain as pushdata consumed by OP_DROP, and
  *   • the VALUE LEGS: a native-sat output to each seat / the bank whose balance
  *     went UP (paid to a fresh ONE-USE key), funded by those whose balance went
  *     DOWN — so sats move, none are minted (conservation is asserted).

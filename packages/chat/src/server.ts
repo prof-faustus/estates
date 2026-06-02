@@ -13,7 +13,13 @@ interface Channel { log: string[]; clients: Set<ServerResponse>; }
 
 export interface RelayServer { url: string; port: number; close: () => Promise<void>; channelCount: () => number; }
 
-export function startRelayServer(port = 0): Promise<RelayServer> {
+/**
+ * @param dropRate test-only [0,1): probability a LIVE SSE frame is skipped
+ *        (the payload still lands in the log, so the client's history poll heals
+ *        it). Lets tests prove sync survives a lossy at-least-once transport.
+ */
+export function startRelayServer(port = 0, opts?: { dropRate?: number }): Promise<RelayServer> {
+  const dropRate = opts?.dropRate ?? 0;
   const channels = new Map<string, Channel>();
   const chan = (name: string): Channel => {
     let c = channels.get(name);
@@ -31,9 +37,20 @@ export function startRelayServer(port = 0): Promise<RelayServer> {
     const url = req.url ?? '';
     const pub = url.match(/^\/publish\/([\w.-]+)/);
     const sub = url.match(/^\/subscribe\/([\w.-]+)/);
+    const hist = url.match(/^\/history\/([\w.-]+)/);
 
     // CORS preflight (so the desktop/browser webview can POST + stream)
     if (req.method === 'OPTIONS') { res.writeHead(204, CORS).end(); return; }
+
+    // Full ordered history as newline-separated hex. Clients poll this to HEAL
+    // any SSE frame that was dropped in flight (live store-and-forward catch-up),
+    // so a single lost packet can never permanently desync a turn-based game.
+    if (req.method === 'GET' && hist) {
+      const c = chan(hist[1]!);
+      res.writeHead(200, { 'content-type': 'text/plain', 'cache-control': 'no-cache', ...CORS });
+      res.end(c.log.join('\n'));
+      return;
+    }
 
     if (req.method === 'POST' && pub) {
       const c = chan(pub[1]!);
@@ -43,7 +60,9 @@ export function startRelayServer(port = 0): Promise<RelayServer> {
         const hex = body.trim();
         if (hex) {
           c.log.push(hex);
-          for (const client of c.clients) client.write(`data: ${hex}\n\n`);
+          // Always logged; live fan-out may "drop" frames (test-only) — the
+          // client's history poll then heals the gap. dropRate 0 = perfect.
+          for (const client of c.clients) if (dropRate === 0 || Math.random() >= dropRate) client.write(`data: ${hex}\n\n`);
         }
         res.writeHead(204, CORS).end();
       });
