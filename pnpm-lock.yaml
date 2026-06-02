@@ -125,6 +125,21 @@ importers:
         specifier: 2.1.0
         version: 2.1.0
 
+  packages/cli:
+    dependencies:
+      '@bsv/sdk':
+        specifier: ^1.4.0
+        version: 1.10.4
+      '@estates/bank':
+        specifier: workspace:*
+        version: link:../bank
+      '@estates/params':
+        specifier: workspace:*
+        version: link:../params
+      '@estates/wallet':
+        specifier: workspace:*
+        version: link:../wallet
+
   packages/conformance:
     dependencies:
       '@estates/engine':

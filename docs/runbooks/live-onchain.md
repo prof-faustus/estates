@@ -36,6 +36,28 @@ This round-trip was run live and confirmed on a regtest node:
 > the node accepted the broadcast and mined it; the 0.5 BSV output is on-chain.
 > The node runs in the VM (host stays clean). Use port 18443 if 18332 is taken.
 
+## the launcher (`@estates/cli`) — you choose the network
+
+Create a real on-chain table (funds N seats + a **covenant reserve**) on the
+network you pick. Verified live against the running `nftbsv-regtest` node:
+
+```
+estates table --network regtest --seats 2 \
+  --rpc-url http://127.0.0.1:18332 --rpc-user <U> --rpc-pass <P>
+# regtest auto-funds the funder from the node, builds + signs the genesis tx,
+# broadcasts it, prints the genesis txid + seat keys + reserve outpoint.
+
+estates table --network testnet --seats 2 --funder-wif <WIF> \
+  --funding <txid>:<vout>:<sats>:<rawhex>          # broadcasts via WhatsOnChain
+estates table --network mainnet ... --confirm-real-value   # REAL value (guarded)
+estates keygen --network testnet                            # a fresh key/address
+```
+
+> **Verified live:** `estates table --network regtest …` against the running node
+> minted a genesis tx (2 seat outputs @ 1500 sat + a 40,000-sat covenant reserve)
+> — the node accepted + mined it (txid `57b8bb4e…`). The covenant reserve is
+> spendable only by a rules-legal payout (no trusted banker).
+
 ## testnet (live, free coins)
 
 1. Fund the wallet address from a BSV **testnet faucet**.

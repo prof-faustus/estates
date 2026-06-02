@@ -1,0 +1,19 @@
+{
+  "name": "@estates/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ESTATES launcher — create a real on-chain table (fund seats + covenant reserve) and broadcast to the network YOU choose: a regtest node (RPC), testnet, or mainnet (guarded).",
+  "license": "MIT",
+  "exports": { ".": "./src/index.ts" },
+  "bin": { "estates": "./src/cli.ts" },
+  "dependencies": {
+    "@estates/params": "workspace:*",
+    "@estates/bank": "workspace:*",
+    "@estates/wallet": "workspace:*",
+    "@bsv/sdk": "^1.4.0"
+  },
+  "scripts": {
+    "test": "node --test --experimental-strip-types \"test/**/*.test.ts\""
+  }
+}
