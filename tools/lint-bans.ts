@@ -27,6 +27,7 @@ const ALLOW = [
   /tools[/]ci\.ts$/,
   /[/]opcodes\.ts$/,
   /[/]interpreter\.ts$/,
+  /[/]script\.ts$/, // the script model legitimately defines + bans OP_RETURN
   /\.test\.ts$/,
   /[/]bans\.test\.ts$/,
 ];
