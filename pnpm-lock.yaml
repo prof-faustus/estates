@@ -119,6 +119,24 @@ importers:
         specifier: workspace:*
         version: link:../params
 
+  packages/net:
+    dependencies:
+      '@estates/audit':
+        specifier: workspace:*
+        version: link:../audit
+      '@estates/beacon':
+        specifier: workspace:*
+        version: link:../beacon
+      '@estates/conformance':
+        specifier: workspace:*
+        version: link:../conformance
+      '@estates/engine':
+        specifier: workspace:*
+        version: link:../engine
+      '@estates/params':
+        specifier: workspace:*
+        version: link:../params
+
   packages/onchain:
     dependencies:
       '@estates/params':
