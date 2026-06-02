@@ -15,6 +15,21 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  packages/conformance:
+    dependencies:
+      '@estates/engine':
+        specifier: workspace:*
+        version: link:../engine
+      '@estates/params':
+        specifier: workspace:*
+        version: link:../params
+
+  packages/engine:
+    dependencies:
+      '@estates/params':
+        specifier: workspace:*
+        version: link:../params
+
   packages/params: {}
 
 packages:
