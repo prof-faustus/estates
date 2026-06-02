@@ -1,0 +1,20 @@
+{
+  "name": "@estates/audit",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ESTATES audit/replay (R7): record a beacon-backed game transcript and independently reconstruct + verify it — every dice roll recomputed, every action re-checked, final state hash confirmed.",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@estates/params": "workspace:*",
+    "@estates/engine": "workspace:*",
+    "@estates/beacon": "workspace:*",
+    "@estates/conformance": "workspace:*"
+  },
+  "scripts": {
+    "test": "node --test --experimental-strip-types \"test/**/*.test.ts\""
+  }
+}

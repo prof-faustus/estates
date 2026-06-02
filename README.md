@@ -62,9 +62,16 @@ for the C1–C8 capability bindings. Design decisions: [`DECISIONS.md`](DECISION
   `@estates/params` **isomorphic** (static JSON import, no `node:fs`) so the engine
   stack bundles for the browser. `vite build` green.
 
-Remaining: Phase 6 (full multiplayer wiring, chain audit/replay, reproducible VM
-build, Tauri packaging). Also pending: wire on-chain build/mortgage re-mint to the
-engine, and the bank covenant upgrade (D-BANK-ENFORCE).
+- **Phase 6 — audit/replay (R7)** (`v0.6.0-phase6`): `@estates/audit` — records a
+  beacon-backed game transcript and **independently reconstructs + verifies** it:
+  every dice roll re-derived from the seats' reveals (chaining `prev_beacon`), every
+  action re-checked through the pure engine, and the final state hash confirmed.
+  Forged dice, swapped reveals, illegal actions, and wrong final hashes are all
+  rejected — the proof that a complete game verifies from chain data alone.
+
+Remaining (integration/ops): full multiplayer transport (C7 relay/SSE), reproducible
+VM build, Tauri desktop packaging; plus wiring on-chain build/mortgage re-mint into
+the engine and the bank covenant upgrade (D-BANK-ENFORCE).
 
 ## Toolchain
 
