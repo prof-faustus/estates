@@ -1,8 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { InMemoryRelay } from '@estates/net';
 import {
-  genPeer, addressOf, encryptBroadcast, decryptBroadcast, ChatRoom, type ChatMessage,
+  genPeer, addressOf, encryptBroadcast, decryptBroadcast, ChatRoom, InMemoryRelay, type ChatMessage,
 } from '../src/index.ts';
 
 const td = (b: Uint8Array) => new TextDecoder().decode(b);

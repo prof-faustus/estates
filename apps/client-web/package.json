@@ -15,6 +15,7 @@
     "@estates/engine": "workspace:*",
     "@estates/params": "workspace:*",
     "@estates/turn": "workspace:*",
+    "@estates/chat": "workspace:*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

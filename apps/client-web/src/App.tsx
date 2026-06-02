@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { GameState, Action } from '@estates/engine';
 import { Board } from './board';
+import { ChatPanel } from './ChatPanel';
 import {
   P, SEAT_COLORS, HUMAN, newGame, rollDice, humanDispatch, ownedBy, GROUP_COLOR,
 } from './game';
@@ -112,6 +113,8 @@ export function App() {
             <h3>Transcript</h3>
             <ol>{s.log.slice(-14).map((line, i) => <li key={i}>{line}</li>)}</ol>
           </section>
+
+          <ChatPanel />
         </aside>
       </div>
     </div>

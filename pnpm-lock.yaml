@@ -17,6 +17,9 @@ importers:
 
   apps/client-web:
     dependencies:
+      '@estates/chat':
+        specifier: workspace:*
+        version: link:../../packages/chat
       '@estates/engine':
         specifier: workspace:*
         version: link:../../packages/engine
@@ -112,9 +115,15 @@ importers:
 
   packages/chat:
     dependencies:
-      '@estates/net':
-        specifier: workspace:*
-        version: link:../net
+      '@noble/ciphers':
+        specifier: 1.1.0
+        version: 1.1.0
+      '@noble/hashes':
+        specifier: 1.5.0
+        version: 1.5.0
+      '@noble/secp256k1':
+        specifier: 2.1.0
+        version: 2.1.0
 
   packages/conformance:
     dependencies:
@@ -419,6 +428,17 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@noble/ciphers@1.1.0':
+    resolution: {integrity: sha512-gwcX7IKSuCtlepJVa6sDLMB2EDaoLguFL6HxagKeFIzWGRfFE3mwcHs8mjx4yQY+rV736XGBhfl6Lw80YrTDTw==}
+    engines: {node: ^14.21.3 || >=16}
+
+  '@noble/hashes@1.5.0':
+    resolution: {integrity: sha512-1j6kQFb7QRru7eKN3ZDvRcP13rugwdxZqCjbiAVZfIJwgj2A65UmT4TgARXGlXgnRkORLTDTrO19ZErt7+QXgA==}
+    engines: {node: ^14.21.3 || >=16}
+
+  '@noble/secp256k1@2.1.0':
+    resolution: {integrity: sha512-XLEQQNdablO0XZOIniFQimiXsZDNwaYgL96dZwC54Q30imSbAOFf3NKtepc+cXyuZf5Q1HCgbqgZ2UFFuHVcEw==}
 
   '@rolldown/pluginutils@1.0.0-beta.27':
     resolution: {integrity: sha512-+d0F4MKMCbeVUJwG96uQ4SgAznZNSq93I3V+9NHA4OpvqG8mRCpGdKmK8l/dl02h2CCDHwW2FqilnTyDcAnqjA==}
@@ -1020,6 +1040,12 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  '@noble/ciphers@1.1.0': {}
+
+  '@noble/hashes@1.5.0': {}
+
+  '@noble/secp256k1@2.1.0': {}
 
   '@rolldown/pluginutils@1.0.0-beta.27': {}
 

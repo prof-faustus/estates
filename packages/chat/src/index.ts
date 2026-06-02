@@ -1,16 +1,17 @@
 /**
- * @estates/chat — multiparty join + end-to-end-encrypted chat over the untrusted
- * relay (@estates/net). Peers join a table channel by announcing their
- * Bitmessage-style address + public key; messages are broadcast-encrypted to the
- * current member set, so the relay (and non-members) only ever see ciphertext.
+ * @estates/chat — multiparty join + end-to-end-encrypted chat over an untrusted
+ * relay. Peers join a table channel by announcing their Bitmessage-style address
+ * + public key; messages are broadcast-encrypted to the current member set, so
+ * the relay (and non-members) only ever see ciphertext. Fully isomorphic
+ * (Node + browser) — the crypto is @noble/* and the relay is fetch/SSE.
  */
-import type { Relay } from '@estates/net';
+import { type Relay, InMemoryRelay, HttpRelay } from './relay.ts';
 import {
   genPeer, addressOf, encryptBroadcast, decryptBroadcast, type Peer, type Envelope,
 } from './broadcast.ts';
 
-export { genPeer, addressOf, encryptBroadcast, decryptBroadcast };
-export type { Peer, Envelope };
+export { genPeer, addressOf, encryptBroadcast, decryptBroadcast, InMemoryRelay, HttpRelay };
+export type { Peer, Envelope, Relay };
 
 type NetMsg =
   | { kind: 'join'; address: string; pub: string; name?: string }
@@ -49,7 +50,7 @@ export class ChatRoom {
 
   /** Subscribe to the channel (replays history, then streams live). */
   connect(): void {
-    this.unsub = this.relay.subscribe((p) => this.ingest(p), 0);
+    this.unsub = this.relay.subscribe((p) => this.ingest(p));
   }
   disconnect(): void { this.unsub?.(); this.unsub = null; }
 
