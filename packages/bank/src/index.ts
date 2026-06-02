@@ -20,6 +20,9 @@ import {
 } from '@estates/onchain';
 import { sighashPreimage, signInput, type Tx, type TxInput, type KeyPair } from '@estates/trade';
 
+// Trustless covenant bank (D-BANK-ENFORCE upgrade) + banker role.
+export * from './covenant.ts';
+
 const P: EstatesParams = loadParams();
 const GROUP_IDS = Object.keys(P.groups);
 const groupOrdinal = (g: string): number => Math.max(0, GROUP_IDS.indexOf(g));
