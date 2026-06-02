@@ -32,10 +32,12 @@ const ALLOW = [
 ];
 
 // Opcode bans: textual opcode identifiers in produced source.
+// Match the actual opcode identifiers that could appear in produced script
+// (not the CLTV/CSV abbreviations, which legitimately appear in prose/docs).
 const OPCODE_BANS: { name: string; re: RegExp }[] = [
   { name: 'OP_RETURN', re: /\bOP_RETURN\b/ },
-  { name: 'OP_CHECKLOCKTIMEVERIFY (CLTV)', re: /\bOP_CHECKLOCKTIMEVERIFY\b|\bCLTV\b/ },
-  { name: 'OP_CHECKSEQUENCEVERIFY (CSV)', re: /\bOP_CHECKSEQUENCEVERIFY\b|\bCSV\b/ },
+  { name: 'OP_CHECKLOCKTIMEVERIFY (CLTV)', re: /\bOP_CHECKLOCKTIMEVERIFY\b/ },
+  { name: 'OP_CHECKSEQUENCEVERIFY (CSV)', re: /\bOP_CHECKSEQUENCEVERIFY\b/ },
 ];
 
 // Branded / trademarked strings that must never appear in game content.

@@ -84,6 +84,7 @@ export function buildVectors(): Vector[] {
   // guards
   vectors.push(vec('v15-wrong-phase', 'an action for the wrong phase is rejected', fresh(), { type: 'BUY' }));
   vectors.push(vec('v16-invalid-dice', 'out-of-range dice are rejected', fresh(), { type: 'ROLL', dice: [0, 7] }));
+  vectors.push(vec('v17-forfeit', 'AWAIT_ROLL timeout default forfeits the turn (no move, next seat)', fresh(), { type: 'FORFEIT' }));
 
   return vectors;
 }

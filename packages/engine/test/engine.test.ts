@@ -25,7 +25,7 @@ test('initial state: seats funded, all titles with the bank, AWAIT_ROLL', () => 
   assert.equal(s.housesRemaining, 32);
   assert.equal(s.estatesRemaining, 12);
   assert.equal(Object.values(s.titles).every((t) => t.owner === null), true);
-  assert.deepEqual(legalActions(s), ['ROLL']);
+  assert.deepEqual(legalActions(s), ['ROLL', 'FORFEIT']);
 });
 
 test('buy flow: roll to a property, BUY transfers deed + sats', () => {

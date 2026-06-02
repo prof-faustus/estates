@@ -53,6 +53,12 @@
     "max_double_attempts": 3,
     "doubles_to_holding": 3
   },
+  "timeouts": {
+    "decision_blocks": 6,
+    "recovery_blocks": 144,
+    "invitation_window_blocks": 18,
+    "note": "per-state default-branch maturity is a RELATIVE window (nSequence); recovery is the global branch. No CLTV/CSV."
+  },
   "board": [
     { "id": 0,  "name": "The Gate",          "type": "corner",   "corner": "start" },
     { "id": 1,  "name": "Tanyard Lane",      "type": "property", "group": "Sienna",    "base_price": 60 },

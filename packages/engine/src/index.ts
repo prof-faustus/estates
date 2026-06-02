@@ -61,7 +61,7 @@ export function initialState(cfg: EngineConfig): GameState {
 
 export function legalActions(s: GameState): Action['type'][] {
   switch (s.phase) {
-    case 'AWAIT_ROLL': return ['ROLL'];
+    case 'AWAIT_ROLL': return ['ROLL', 'FORFEIT'];
     case 'AWAIT_BUY': return ['BUY', 'DECLINE'];
     case 'AWAIT_TAX': return ['PAY_TAX'];
     case 'AWAIT_POST': return ['BUILD', 'SELL_BUILD', 'MORTGAGE', 'UNMORTGAGE', 'END_TURN'];
@@ -99,7 +99,7 @@ function countCategoryOwned(s: GameState, seatId: number, type: 'station' | 'uti
   return n;
 }
 /** Net worth in sats: cash + unmortgaged build value + mortgage values held. */
-function worth(s: GameState, seatId: number): number {
+export function netWorth(s: GameState, seatId: number): number {
   let w = seat(s, seatId).balance;
   for (const sp of BOARD) {
     if (!isTitled(sp)) continue;
@@ -361,8 +361,16 @@ export function apply(s: GameState, a: Action): ApplyResult {
     case 'SELL_BUILD': return doSellBuild(s, a.propertyId);
     case 'MORTGAGE': return doMortgage(s, a.propertyId);
     case 'UNMORTGAGE': return doUnmortgage(s, a.propertyId);
+    case 'FORFEIT': return doForfeit(s);
     case 'END_TURN': return doEndTurn(s);
   }
+}
+
+function doForfeit(s: GameState): ApplyResult {
+  if (s.phase !== 'AWAIT_ROLL') return reject('WRONG_PHASE', `cannot FORFEIT in ${s.phase}`);
+  // Turn forfeited (no move). Clear any doubles and advance to the next seat.
+  const st = note({ ...s, phase: 'AWAIT_POST', doublesPending: false, doublesCount: 0 }, `seat ${s.current} forfeits the turn`);
+  return ok(endTurnTransition(st));
 }
 
 function doRoll(s: GameState, dice: readonly [number, number]): ApplyResult {
@@ -435,7 +443,7 @@ function doDecline(s: GameState): ApplyResult {
 function doTax(s: GameState, choice: 'flat' | 'percent'): ApplyResult {
   if (s.phase !== 'AWAIT_TAX') return reject('WRONG_PHASE', `cannot PAY_TAX in ${s.phase}`);
   const id = s.current; const t = P.taxes['income_levy']!;
-  const amount = choice === 'flat' ? t.flat : Math.round(worth(s, id) * (t.percent_of_worth ?? 0));
+  const amount = choice === 'flat' ? t.flat : Math.round(netWorth(s, id) * (t.percent_of_worth ?? 0));
   const st = note(charge(s, id, amount, null), `seat ${id} pays Income Levy ${amount} (${choice})`);
   return ok({ ...st, phase: 'AWAIT_POST' });
 }

@@ -1,0 +1,18 @@
+{
+  "name": "@estates/turn",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ESTATES turn driver + cooperative/timeout default-branch model (nLockTime/nSequence; no CLTV/CSV) for each actionable FSM state.",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@estates/params": "workspace:*",
+    "@estates/engine": "workspace:*"
+  },
+  "scripts": {
+    "test": "node --test --experimental-strip-types \"test/**/*.test.ts\""
+  }
+}

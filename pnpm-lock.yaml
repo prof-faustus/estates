@@ -43,6 +43,15 @@ importers:
 
   packages/params: {}
 
+  packages/turn:
+    dependencies:
+      '@estates/engine':
+        specifier: workspace:*
+        version: link:../engine
+      '@estates/params':
+        specifier: workspace:*
+        version: link:../params
+
 packages:
 
   '@types/node@22.19.19':

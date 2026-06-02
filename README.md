@@ -35,9 +35,14 @@ for the C1–C8 capability bindings. Design decisions: [`DECISIONS.md`](DECISION
   - `@estates/lobby` — join/ready/start-authority/override-start; network fixed at
     genesis; regtest auto-funding; emits the `EngineConfig` that seeds the core.
 
-Remaining: Phase 2 (board/turn wiring to live play) → Phase 3 (on-chain 1-sat NFTs,
-native-sat payments, bank reserve, atomic trade, mortgage/build/auction) → Phase 4
-(bots) → Phase 5 (React/SVG client) → Phase 6 (full game, audit/replay, packaging).
+- **Phase 2 complete** (`v0.2.0-phase2`): `@estates/turn` — the cooperative/timeout
+  default-branch model (each actionable state's default, maturing on an `nSequence`
+  relative window; no CLTV/CSV) plus a full-turn/whole-game driver. The engine gained
+  a `FORFEIT` action (the AWAIT_ROLL timeout default).
+
+Remaining: Phase 3 (on-chain 1-sat NFTs, native-sat payments, bank reserve, atomic
+trade, mortgage/build/auction) → Phase 4 (bots) → Phase 5 (React/SVG client) →
+Phase 6 (full game, audit/replay, packaging).
 
 ## Toolchain
 

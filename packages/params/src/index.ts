@@ -72,6 +72,7 @@ export interface EstatesParams {
   readonly groups: Readonly<Record<string, GroupDef>>;
   readonly taxes: Readonly<Record<string, { space_id: number; flat: number; percent_of_worth?: number; timeout_default?: string }>>;
   readonly holding_yard: { space_id: number; summons_space_id: number; pay_to_leave: number; max_double_attempts: number; doubles_to_holding: number };
+  readonly timeouts: { decision_blocks: number; recovery_blocks: number; invitation_window_blocks: number };
   readonly board: readonly BoardSpace[];
   readonly decks: Readonly<Record<string, readonly Card[]>>;
   readonly nfts: {

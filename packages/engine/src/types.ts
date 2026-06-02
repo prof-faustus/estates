@@ -62,6 +62,7 @@ export type Action =
   | { type: 'SELL_BUILD'; propertyId: number }
   | { type: 'MORTGAGE'; propertyId: number }
   | { type: 'UNMORTGAGE'; propertyId: number }
+  | { type: 'FORFEIT' }   // AWAIT_ROLL timeout default: forfeit the turn, no move
   | { type: 'END_TURN' };
 
 export type RejectCode =
