@@ -18,12 +18,17 @@ export interface RelayServer { url: string; port: number; close: () => Promise<v
  *        (the payload still lands in the log, so the client's history poll heals
  *        it). Lets tests prove sync survives a lossy at-least-once transport.
  */
-export function startRelayServer(port = 0, opts?: { dropRate?: number; maxBody?: number; maxLog?: number; maxChannels?: number }): Promise<RelayServer> {
+export function startRelayServer(port = 0, opts?: { dropRate?: number; maxBody?: number; maxLog?: number; maxChannels?: number; token?: string }): Promise<RelayServer> {
   const dropRate = opts?.dropRate ?? 0;
   // DoS bounds (audit #5): treat the relay as hostile even on loopback.
   const MAX_BODY = opts?.maxBody ?? 256 * 1024;       // bytes per published message
   const MAX_LOG = opts?.maxLog ?? 200_000;            // messages retained per channel
   const MAX_CHANNELS = opts?.maxChannels ?? 10_000;   // distinct channels
+  // Optional per-relay capability token (audit #5): a high-entropy secret carried
+  // in a NON-SIMPLE custom header, so a random local page/process cannot poison a
+  // table channel even before message-signature checks. Defense-in-depth, not the
+  // sole auth (messages are signed at the protocol layer).
+  const TOKEN = opts?.token;
   const channels = new Map<string, Channel>();
   /** Get/create a channel; returns null if a NEW channel would exceed the cap. */
   const chan = (name: string): Channel | null => {
@@ -47,6 +52,13 @@ export function startRelayServer(port = 0, opts?: { dropRate?: number; maxBody?:
     // CORS preflight (so the desktop/browser webview can POST + stream)
     if (req.method === 'OPTIONS') { res.writeHead(204, CORS).end(); return; }
 
+    // capability token (audit #5): if configured, a non-simple custom header must
+    // carry the secret — a random cross-origin page can't even attempt a POST.
+    if (TOKEN && req.headers['x-estates-cap'] !== TOKEN) { res.writeHead(401, CORS).end(); return; }
+    // the relay binds loopback; reject a mismatched Host (rebinding/confusion).
+    const reqHost = (req.headers.host ?? '').split(':')[0];
+    if (reqHost && reqHost !== '127.0.0.1' && reqHost !== 'localhost') { res.writeHead(421, CORS).end(); return; }
+
     // Full ordered history as newline-separated hex. Clients poll this to HEAL
     // any SSE frame that was dropped in flight (live store-and-forward catch-up),
     // so a single lost packet can never permanently desync a turn-based game.
@@ -59,6 +71,8 @@ export function startRelayServer(port = 0, opts?: { dropRate?: number; maxBody?:
     }
 
     if (req.method === 'POST' && pub) {
+      const ct = (req.headers['content-type'] ?? '').toString();
+      if (ct && !ct.startsWith('text/plain')) { res.writeHead(415, CORS).end(); return; } // opaque hex only
       const c = chan(pub[1]!);
       if (!c) { res.writeHead(503, CORS).end(); return; } // channel cap reached
       let body = '';

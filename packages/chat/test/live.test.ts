@@ -93,3 +93,22 @@ test('relay rejects new channels past the cap (503)', async () => {
     assert.equal((await fetch(`${relay.url}/publish/second`, { method: 'POST', body: 'aa' })).status, 503, 'channel cap enforced');
   } finally { await relay.close(); }
 });
+
+// ---- audit #5: relay capability token + content-type enforcement -------------
+test('relay enforces a capability token (401) and content-type (415)', async () => {
+  const relay = await startRelayServer(0, { token: 'high-entropy-cap' });
+  try {
+    const noTok = await fetch(`${relay.url}/publish/t`, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: 'aa' });
+    assert.equal(noTok.status, 401, 'no capability token → 401');
+    const ok = await fetch(`${relay.url}/publish/t`, { method: 'POST', headers: { 'content-type': 'text/plain', 'x-estates-cap': 'high-entropy-cap' }, body: 'aa' });
+    assert.equal(ok.status, 204, 'with the token → accepted');
+    const badCt = await fetch(`${relay.url}/publish/t`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-estates-cap': 'high-entropy-cap' }, body: '{}' });
+    assert.equal(badCt.status, 415, 'non-text/plain → 415');
+    // an HttpRelay configured with the token round-trips through the gate
+    const hr = new HttpRelay(relay.url, 't', { token: 'high-entropy-cap' });
+    const got: string[] = []; const stop = hr.subscribe((p) => got.push(new TextDecoder().decode(p)));
+    await delay(80); hr.publish(new TextEncoder().encode('via-token'));
+    await waitFor(() => got.includes('via-token'));
+    stop();
+  } finally { await relay.close(); }
+});

@@ -57,17 +57,21 @@ export class HttpRelay implements Relay {
   readonly base: string;
   readonly channel: string;
   private pollMs: number;
+  private token?: string;
   private pokers: (() => void)[] = [];
-  constructor(baseUrl: string, channel: string, opts?: { pollMs?: number }) {
+  constructor(baseUrl: string, channel: string, opts?: { pollMs?: number; token?: string }) {
     this.base = baseUrl.replace(/\/$/, '');
     this.channel = channel;
     this.pollMs = opts?.pollMs ?? 70;   // ≤100ms cross-window sync; own actions reflect instantly via the publish poke
+    this.token = opts?.token;
   }
+  /** Relay capability token header (audit #5), if configured. */
+  private cap(): Record<string, string> { return this.token ? { 'x-estates-cap': this.token } : {}; }
 
   publish(payload: Uint8Array): void {
     void fetch(`${this.base}/publish/${this.channel}`, {
       method: 'POST',
-      headers: { 'content-type': 'text/plain' },
+      headers: { 'content-type': 'text/plain', ...this.cap() },
       body: toHex(payload),
     }).then(() => this.refresh()).catch(() => { /* untrusted relay: failures are non-fatal */ });
   }
@@ -120,7 +124,7 @@ export class HttpRelay implements Relay {
   private async pollLoop(onHexes: (hexes: string[]) => void, signal: AbortSignal): Promise<void> {
     while (!signal.aborted) {
       try {
-        const res = await fetch(`${this.base}/history/${this.channel}`, { signal });
+        const res = await fetch(`${this.base}/history/${this.channel}`, { signal, headers: this.cap() });
         const text = (await res.text()).trim();
         onHexes(text ? text.split('\n').map((l) => l.trim()).filter(Boolean) : []);
       } catch { /* relay down/aborted: retry next tick */ }
@@ -130,7 +134,7 @@ export class HttpRelay implements Relay {
 
   private async stream(onHex: (hex: string) => void, signal: AbortSignal): Promise<void> {
     try {
-      const res = await fetch(`${this.base}/subscribe/${this.channel}`, { signal, headers: { accept: 'text/event-stream' } });
+      const res = await fetch(`${this.base}/subscribe/${this.channel}`, { signal, headers: { accept: 'text/event-stream', ...this.cap() } });
       const reader = res.body!.getReader();
       const dec = new TextDecoder();
       let buf = '';
