@@ -60,7 +60,7 @@ test('a forged die is rejected', () => {
   assert.match(r.reason, /forged roll|do not match/);
 });
 
-test('a swapped reveal is rejected (recomputed dice diverge)', () => {
+test('a swapped reveal is rejected (it no longer opens its commitment)', () => {
   const t = record();
   const i = firstIndex(t, 'roll');
   const e = t.entries[i] as Extract<Entry, { kind: 'roll' }>;
@@ -69,7 +69,42 @@ test('a swapped reveal is rejected (recomputed dice diverge)', () => {
   entries[i] = { ...e, reveals };
   const r = audit(withEntries(t, entries));
   assert.equal(r.ok, false);
-  assert.match(r.reason, /forged roll|do not match/);
+  assert.match(r.reason, /does not open its commitment|forged roll|do not match/);
+});
+
+// ---- audit #3: commitments, participant set, and binding are verified --------
+test('a reveal from a NON-SEAT (or bankrupt) is rejected', () => {
+  const t = record();
+  const i = firstIndex(t, 'roll');
+  const e = t.entries[i] as Extract<Entry, { kind: 'roll' }>;
+  const entries = [...t.entries];
+  entries[i] = { ...e, commits: [...e.commits, { seat: 99, c: 'ab'.repeat(32) }], reveals: [...e.reveals, { seat: 99, secret: 'cd'.repeat(32) }] };
+  const r = audit(withEntries(t, entries));
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /non-live|non-seat/);
+});
+
+test('a reveal with NO prior commitment is rejected', () => {
+  const t = record();
+  const i = firstIndex(t, 'roll');
+  const e = t.entries[i] as Extract<Entry, { kind: 'roll' }>;
+  const entries = [...t.entries];
+  // drop the commitment but keep the reveal for seat 0
+  entries[i] = { ...e, commits: e.commits.filter((c) => c.seat !== e.reveals[0]!.seat) };
+  const r = audit(withEntries(t, entries));
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /no prior commitment|non-live/);
+});
+
+test('a duplicate reveal seat is rejected', () => {
+  const t = record();
+  const i = firstIndex(t, 'roll');
+  const e = t.entries[i] as Extract<Entry, { kind: 'roll' }>;
+  const entries = [...t.entries];
+  entries[i] = { ...e, reveals: [...e.reveals, e.reveals[0]!] };
+  const r = audit(withEntries(t, entries));
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /duplicate reveal/);
 });
 
 test('an illegal action is rejected', () => {

@@ -12,12 +12,17 @@
  * data alone (design spec R7), with no trust in the player who produced it.
  */
 import { initialState, apply, type GameState, type Action, type EngineConfig } from '@estates/engine';
-import { roll, ZERO_BEACON, type PartyReveal } from '@estates/beacon';
+import { roll, commit, verifyReveal, ZERO_BEACON, type PartyReveal } from '@estates/beacon';
 import { hashState } from '@estates/conformance';
 import { loadParams } from '@estates/params';
 
 export type Entry =
-  | { readonly kind: 'roll'; readonly reveals: readonly { seat: number; secret: string }[]; readonly dice: readonly [number, number] }
+  | {
+      readonly kind: 'roll';
+      readonly commits: readonly { seat: number; c: string }[]; // commitments, published BEFORE reveals
+      readonly reveals: readonly { seat: number; secret: string }[];
+      readonly dice: readonly [number, number];
+    }
   | { readonly kind: 'action'; readonly action: Action };
 
 export interface GameTranscript {
@@ -51,7 +56,12 @@ export function recordGame(genesis: EngineConfig, decide: Decide, secret: Secret
       const br = roll(reveals, s.turnIndex, prev);
       const r = apply(s, { type: 'ROLL', dice: br.dice });
       if (!r.ok) break;
-      entries.push({ kind: 'roll', reveals: reveals.map((rv) => ({ seat: rv.seat, secret: toHex(rv.secret) })), dice: br.dice });
+      entries.push({
+        kind: 'roll',
+        commits: reveals.map((rv) => ({ seat: rv.seat, c: toHex(commit(rv.secret)) })), // one per live seat
+        reveals: reveals.map((rv) => ({ seat: rv.seat, secret: toHex(rv.secret) })),
+        dice: br.dice,
+      });
       prev = br.beacon;
       rollIndex++;
       s = r.state;
@@ -86,11 +96,32 @@ export function audit(t: GameTranscript): AuditResult {
   for (let i = 0; i < t.entries.length; i++) {
     const e = t.entries[i]!;
     if (e.kind === 'roll') {
-      // re-derive the dice from the reveals; reject if they don't match the claim
-      const reveals: PartyReveal[] = e.reveals.map((rv) => ({ seat: rv.seat, secret: fromHex(rv.secret) }));
+      const fail = (why: string): AuditResult => ({ ok: false, steps: i, rollsVerified: rolls, finalHash: '', reason: `entry ${i}: ${why}` });
+      // the ELIGIBLE set = live (non-bankrupt) seats this turn
+      const live = new Set(s.seats.filter((p) => !p.bankrupt).map((p) => p.id));
+      // commitments: one per live seat, no duplicates, none from a non-live seat
+      const cSeats = e.commits.map((c) => c.seat);
+      if (new Set(cSeats).size !== cSeats.length) return fail('duplicate commitment seat');
+      for (const c of e.commits) if (!live.has(c.seat)) return fail(`commitment from a non-live seat ${c.seat}`);
+      const commitMap = new Map<number, Uint8Array>();
+      for (const c of e.commits) commitMap.set(c.seat, fromHex(c.c));
+      // reveals: each must open a prior commitment, be a live seat, and be unique
+      const rSeats = e.reveals.map((rv) => rv.seat);
+      if (new Set(rSeats).size !== rSeats.length) return fail('duplicate reveal seat');
+      const reveals: PartyReveal[] = [];
+      for (const rv of e.reveals) {
+        if (!live.has(rv.seat)) return fail(`reveal from a non-live / non-seat ${rv.seat}`);
+        const c = commitMap.get(rv.seat);
+        if (!c) return fail(`reveal from seat ${rv.seat} with no prior commitment`);
+        const sec = fromHex(rv.secret);
+        if (!verifyReveal(sec, c)) return fail(`reveal from seat ${rv.seat} does not open its commitment`);
+        reveals.push({ seat: rv.seat, secret: sec });
+      }
+      if (reveals.length === 0) return fail('no honest reveal (beacon unbiasable condition fails)');
+      // dice are derived ONLY from the canonical, commitment-verified reveal set
       const br = roll(reveals, s.turnIndex, prev);
       if (br.dice[0] !== e.dice[0] || br.dice[1] !== e.dice[1]) {
-        return { ok: false, steps: i, rollsVerified: rolls, finalHash: '', reason: `entry ${i}: dice ${e.dice} do not match the beacon (recomputed ${br.dice}) — forged roll` };
+        return fail(`dice ${e.dice} do not match the beacon (recomputed ${br.dice}) — forged roll`);
       }
       const r = apply(s, { type: 'ROLL', dice: br.dice });
       if (!r.ok) return { ok: false, steps: i, rollsVerified: rolls, finalHash: '', reason: `entry ${i}: ROLL rejected (${r.code})` };
