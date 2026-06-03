@@ -4,11 +4,11 @@
  */
 import type { GameState } from '@estates/engine';
 export {
-  P, NetTable, makeRelay, rollDice, botAction,
+  P, NetTable, makeRelay, rollDice, botAction, identityFrom,
   LobbyClient, newAddress, buildable, mortgageable, unmortgageable, lastCard,
   DEFAULT_RELAY, LOBBY_CHANNEL,
 } from '@estates/table';
-export type { NetworkMode, TableView, SeatInfo, OpenTable } from '@estates/table';
+export type { NetworkMode, TableView, SeatInfo, OpenTable, Identity } from '@estates/table';
 import { P } from '@estates/table';
 
 export const SEAT_COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4'];

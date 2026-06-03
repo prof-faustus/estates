@@ -5,10 +5,16 @@ import { Board } from './board';
 import { ChatPanel } from './ChatPanel';
 import { WalletPanel } from './WalletPanel';
 import {
-  P, SEAT_COLORS, GROUP_COLOR, NetTable, LobbyClient, makeRelay, newAddress,
+  P, SEAT_COLORS, GROUP_COLOR, NetTable, LobbyClient, makeRelay, newAddress, identityFrom,
   rollDice, ownedBy, buildable, mortgageable, unmortgageable, lastCard,
-  LOBBY_CHANNEL, DEFAULT_RELAY, type NetworkMode, type TableView, type OpenTable,
+  LOBBY_CHANNEL, DEFAULT_RELAY, type NetworkMode, type TableView, type OpenTable, type Identity,
 } from './game';
+
+/** The player's table identity DERIVED from their wallet master key — the same
+ *  key signs moves + addresses chat (audit #1; "use the player keys"). */
+function playerIdentity(wif: string, net: Network): Identity | undefined {
+  try { return identityFrom(new Uint8Array(Wallet.fromWif(wif, net).key.toArray('be', 32))); } catch { return undefined; }
+}
 
 const NETWORKS: NetworkMode[] = ['regtest', 'testnet', 'mainnet'];
 
@@ -37,7 +43,7 @@ export function App() {
   function enter() {
     const key = ownWif.trim() || Wallet.random('testnet').key.toWif();
     setWif(key);
-    const lobby = new LobbyClient(makeRelay(LOBBY_CHANNEL), force);
+    const lobby = new LobbyClient(makeRelay(LOBBY_CHANNEL), force, playerIdentity(key, 'testnet'));
     lobby.connect();
     lobbyRef.current = lobby;
     setStage('lobby');
@@ -45,7 +51,8 @@ export function App() {
 
   function createTable() {
     const addr = newAddress();
-    const t = new NetTable(makeRelay(addr), identity(), force, { autoPlay });
+    const myId = playerIdentity(wif, 'testnet');
+    const t = new NetTable(makeRelay(addr), identity(), force, { autoPlay, ...(myId ? { identity: myId } : {}) });
     t.connect();
     t.createTable(seatCount, network);
     tableRef.current = t; tableAddrRef.current = addr;
@@ -53,7 +60,8 @@ export function App() {
     setStage('table');
   }
   function joinTable(ot: OpenTable) {
-    const t = new NetTable(makeRelay(ot.addr), identity(), force, { autoPlay });
+    const myId = playerIdentity(wif, 'testnet');
+    const t = new NetTable(makeRelay(ot.addr), identity(), force, { autoPlay, ...(myId ? { identity: myId } : {}) });
     t.connect();
     setNetwork(ot.network);
     tableRef.current = t; tableAddrRef.current = ot.addr;
@@ -87,7 +95,8 @@ export function App() {
     const net = (q.get('network') as NetworkMode) || 'regtest';
     const key = Wallet.random('testnet').key.toWif();
     setWif(key); setName(botName); setNetwork(net); setAutoPlay(true);
-    const t = new NetTable(makeRelay(addr), botName, force, { autoPlay: true });
+    const botId = playerIdentity(key, 'testnet');
+    const t = new NetTable(makeRelay(addr), botName, force, { autoPlay: true, ...(botId ? { identity: botId } : {}) });
     t.connect();
     tableRef.current = t; tableAddrRef.current = addr;
     setStage('table');
@@ -224,7 +233,8 @@ export function App() {
             {v.myTurn && (
               <section className="controls">
                 {v.state.phase === 'AWAIT_ROLL' && <>
-                  <button className="primary" onClick={() => act({ type: 'ROLL', dice: rollDice() })}>Roll</button>
+                  {/* dealerless commit→reveal beacon: dice are NOT chosen by the player */}
+                  <p className="hint">🎲 rolling… provably-fair dice (commit→reveal beacon, all seats)</p>
                   <button onClick={() => act({ type: 'FORFEIT' })}>Forfeit</button>
                 </>}
                 {v.state.phase === 'AWAIT_BUY' && <>
