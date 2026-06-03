@@ -93,7 +93,11 @@ importers:
         specifier: workspace:*
         version: link:../trade
 
-  packages/beacon: {}
+  packages/beacon:
+    dependencies:
+      '@noble/hashes':
+        specifier: 1.5.0
+        version: 1.5.0
 
   packages/beef:
     dependencies:
@@ -357,6 +361,12 @@ importers:
 
   packages/table:
     dependencies:
+      '@estates/beacon':
+        specifier: workspace:*
+        version: link:../beacon
+      '@estates/channel':
+        specifier: workspace:*
+        version: link:../channel
       '@estates/chat':
         specifier: workspace:*
         version: link:../chat

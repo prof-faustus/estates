@@ -32,3 +32,26 @@ node --experimental-strip-types tools/ci.ts   # bans → typecheck → 264 tests
 
 - The **desktop UI** still uses the legacy `@estates/table` path; migrating the shell to drive the secure `@estates/sidecar` peer is the next integration step (the secure protocol it will use is done and tested).
 - #7's full Bitcoin **script-satisfaction** verification (locking-script execution) is the remaining production step for real-value trades; value conservation against real UTXOs + fee is enforced now.
+
+## Second audit (live-protocol) — all 10 closed + extras
+
+A follow-up audit re-examined the live multiplayer boundary. All items are now fixed:
+
+| # | Finding | Fix |
+|---|---|---|
+| 1 | `@estates/table` messages unsigned | Every table/seat/start/action/commit/reveal message signed with the player's Ed25519 key; rebuild verifies + binds host/seat/active-seat; forged dropped |
+| 2 | Seat ownership spoofable | A seat is claimed only by the key that SIGNED it (who==signer), one key one seat; `start` binds the final seat map |
+| 3 | Legacy table raw dice | `submit(ROLL)` is a no-op; a dealerless commit→reveal beacon over the relay resolves every roll (signed, roll-seq keyed for doubles, shared `verifyRollEntry`) |
+| 4 | `@estates/net` laxer than audit | Both use the SAME `@estates/beacon.verifyRollEntry` (commitments + participant set) |
+| 5 | Relay open to poisoning | Capability token (401), content-type (415), loopback Host (421), on top of message signatures |
+| 6 | Lobby announcements unauth | Signed by the host key; host := the signing pub; forged dropped |
+| 7 | Trade not a full BSV verifier | `verifyTradeValue` conserves vs real prev UTXO sats + fee (full script-satisfaction = production) |
+| 8 | Bank quorum-trust only | `BankMode = quorum | covenant` — `reserveOutput`/`verifyReserveSpend` give an explicit CHOICE of M-of-N or trustless script-covenant |
+| 9 | NFT group not semantic | `chainmap.validateTitleSemantics` ties groupId to the property's group; no buildings on stations/utilities |
+| 10 | Loose toolchain pins | Exact `@types/node`/`typescript`, pnpm engine pin, `ci`/`reproduce` use `--frozen-lockfile` |
+
+**Identity model (your requirement):** every player has ONE master key (the secp256k1
+wallet key that derives single-use address/payment keys); the Ed25519 protocol-signing
+key is DERIVED from that same master (`channel.signingKeyFromMaster`), bound through the
+IP-to-IP handshake. The same master signs moves and addresses Bitmessage chat — no
+throwaway keys. CI green: 270 tests + web build.
