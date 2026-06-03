@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { gameTag, paymentOutput, type TitleState, type Outpoint } from '@estates/onchain';
-import { genKeyPair, buildTrade, cosign, verifyTrade, valueConserved, type Leg } from '../src/index.ts';
+import { genKeyPair, buildTrade, cosign, verifyTrade, valueConserved, verifyTradeValue, type Leg } from '../src/index.ts';
 
 const GAME = new Uint8Array(32).fill(9);
 const outpoint = (tag: string, vout = 0): Outpoint => ({ txid: tag.repeat(32).slice(0, 64), vout });
@@ -81,4 +81,24 @@ test('a wrong-key signature does not satisfy an input it does not own', () => {
   st = cosign(st, a.party);
   st = cosign(st, intruder); // intruder owns no inputs -> B's input still unsigned
   assert.equal(verifyTrade(st).valid, false);
+});
+
+// ---- audit #7: real-value conservation against actual prev UTXO amounts -------
+test('verifyTradeValue checks conservation against REAL prev UTXO values + fee', () => {
+  const { a, b } = legs();
+  let st = buildTrade(a, b); st = cosign(st, a.party); st = cosign(st, b.party);
+  const tx = st.tx;
+  const totalOut = tx.outputs.reduce((s, o) => s + o.satoshis, 0);
+  const fee = 50;
+  // real prev UTXO amounts that conserve (toy distribution: all value on input 0)
+  const prev = tx.inputs.map((_, i) => (i === 0 ? totalOut + fee : 0));
+  assert.ok(verifyTradeValue(tx, prev, fee).valid, 'conserving inputs+fee verify');
+  // off-by-one fee → not conserved
+  assert.equal(verifyTradeValue(tx, prev, fee + 1).valid, false);
+  // prevAmounts length must match inputs
+  assert.equal(verifyTradeValue(tx, prev.slice(1), fee).valid, false);
+  // negative prev UTXO value rejected
+  assert.equal(verifyTradeValue(tx, tx.inputs.map((_, i) => (i === 0 ? -1 : 0)), 0).valid, false);
+  // negative fee rejected
+  assert.equal(verifyTradeValue(tx, prev, -1).valid, false);
 });

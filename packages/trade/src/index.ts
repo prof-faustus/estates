@@ -155,6 +155,27 @@ export function verifyTrade(st: SignedTrade): TradeCheck {
   return { valid: true, reason: 'all inputs signed; signatures commit to the full output set' };
 }
 
+/**
+ * REAL value verification (audit #7): conservation against the ACTUAL satoshis of
+ * the previous outputs being spent (not the claimed give amounts) plus the fee.
+ * `prevAmounts[i]` is the satoshi value of the UTXO that `tx.inputs[i]` spends —
+ * the verifier (a peer / the indexer) supplies these from the real spent outputs.
+ * Asserts sum(prev UTXO values) == sum(output values) + fee, NFT outputs are
+ * exactly 1 sat, and the fee is non-negative. (Production additionally checks
+ * locking-script satisfaction; the on-chain move path uses @estates/tx real
+ * serialization for that.)
+ */
+export function verifyTradeValue(tx: Tx, prevAmounts: readonly number[], fee: number): TradeCheck {
+  if (prevAmounts.length !== tx.inputs.length) return { valid: false, reason: `prevAmounts (${prevAmounts.length}) must match inputs (${tx.inputs.length})` };
+  if (!Number.isInteger(fee) || fee < 0) return { valid: false, reason: 'fee must be a non-negative integer' };
+  for (const v of prevAmounts) if (!Number.isInteger(v) || v < 0) return { valid: false, reason: 'each prev UTXO value must be a non-negative integer (real satoshis)' };
+  for (const o of tx.outputs) if (!Number.isInteger(o.satoshis) || o.satoshis < 0) return { valid: false, reason: 'output satoshis must be a non-negative integer' };
+  const totalIn = prevAmounts.reduce((s, v) => s + v, 0);
+  const totalOut = tx.outputs.reduce((s, o) => s + o.satoshis, 0);
+  if (totalIn !== totalOut + fee) return { valid: false, reason: `value not conserved: ${totalIn} in != ${totalOut} out + ${fee} fee` };
+  return { valid: true, reason: `value conserved against real UTXOs: ${totalIn} in = ${totalOut} out + ${fee} fee` };
+}
+
 /** Conservation check: sum of NFT (1-sat) + sats inputs equals outputs. */
 export function valueConserved(a: Leg, b: Leg, st: SignedTrade): boolean {
   const nftIn = a.giveNfts.length + b.giveNfts.length; // 1 sat each
