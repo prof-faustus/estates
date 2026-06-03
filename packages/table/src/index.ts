@@ -82,16 +82,30 @@ export class LobbyClient {
   readonly tables = new Map<string, OpenTable>();
   private relay: Relay;
   private onUpdate: () => void;
-  constructor(relay: Relay, onUpdate: () => void) { this.relay = relay; this.onUpdate = onUpdate; }
+  private id: Identity;
+  constructor(relay: Relay, onUpdate: () => void, identity?: Identity) { this.relay = relay; this.onUpdate = onUpdate; this.id = identity ?? genIdentity(); }
   connect(): void {
     this.relay.subscribe((p) => {
       try {
-        const m = JSON.parse(new TextDecoder().decode(p)) as { kind: string } & OpenTable;
-        if (m.kind === 'announce') { this.tables.set(m.addr, { addr: m.addr, name: m.name, maxSeats: m.maxSeats, network: m.network, host: m.host, ts: m.ts }); this.onUpdate(); }
+        const o = JSON.parse(new TextDecoder().decode(p)) as { kind: string; signPub: string; sig: string } & OpenTable;
+        if (o.kind !== 'announce') return;
+        const t: OpenTable = { addr: o.addr, name: o.name, maxSeats: o.maxSeats, network: o.network, host: o.host, ts: o.ts };
+        // SIGNED announcements only (audit #6): the host field MUST be the signer's
+        // key, and the signature must verify — no fake hosts / tables / labels.
+        let signer: Uint8Array, signature: Uint8Array;
+        try { signer = fromHex(o.signPub); signature = fromHex(o.sig); } catch { return; }
+        if (signer.length !== 32 || t.host !== o.signPub) return;
+        if (!verifyData(encJSON(t), signature, signer)) return;
+        this.tables.set(t.addr, t); this.onUpdate();
       } catch { /* opaque */ }
     });
   }
-  announce(t: OpenTable): void { this.relay.publish(new TextEncoder().encode(JSON.stringify({ kind: 'announce', ...t }))); }
+  /** Announce an open table, SIGNED by the host key (host := the signing pubkey). */
+  announce(t: OpenTable): void {
+    const signed: OpenTable = { ...t, host: toHex(this.id.signPub) };
+    const sig = toHex(signData(encJSON(signed), this.id.signPriv));
+    this.relay.publish(encJSON({ kind: 'announce', ...signed, signPub: toHex(this.id.signPub), sig }));
+  }
   list(): OpenTable[] { return [...this.tables.values()].sort((a, b) => b.ts - a.ts); }
 }
 

@@ -286,3 +286,21 @@ test('an UNSIGNED / forged table message is rejected (relay ordering is not auth
   host.submit({ type: 'ROLL', dice: [3, 4] });
   assert.notEqual(JSON.stringify(host.view().state), before, 'the seat-key-signed move advanced the game');
 });
+
+// ---- audit #6: lobby announcements are signed by the host key ----------------
+test('lobby announcements are signed; forged/unsigned announces are rejected', () => {
+  const relay = new InMemoryRelay();
+  const announcer = new LobbyClient(relay, () => {});       // its own host key
+  const viewer = new LobbyClient(relay, () => {}); viewer.connect();
+  announcer.announce({ addr: 'aa'.repeat(20), name: 'Real Table', maxSeats: 2, network: 'regtest', host: 'ignored', ts: 1 });
+  assert.equal(viewer.list().length, 1, 'a signed announce is listed');
+  assert.equal(viewer.list()[0]!.name, 'Real Table');
+  assert.match(viewer.list()[0]!.host, /^[0-9a-f]{64}$/, 'host is the announcer’s signing key');
+
+  // a forged announce (random key, host != signer, bad sig) straight onto the relay
+  relay.publish(new TextEncoder().encode(JSON.stringify({
+    kind: 'announce', addr: 'bb'.repeat(20), name: 'FAKE', maxSeats: 6, network: 'mainnet',
+    host: 'ab'.repeat(32), ts: 2, signPub: 'cd'.repeat(32), sig: 'ef'.repeat(64),
+  })));
+  assert.equal(viewer.list().length, 1, 'forged announce dropped');
+});
