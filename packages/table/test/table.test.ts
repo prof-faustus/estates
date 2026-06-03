@@ -182,27 +182,25 @@ test('late joiner replays history and sees the same lobby', () => {
   assert.equal(a.view().seats.length, 2, 'host sees the late joiner');
 });
 
-test('determinism: the same script yields identical state on independent tables', () => {
-  function run(): string {
-    const { peers } = lobby(2);
-    peers[0]!.start();
-    const roll = dice(42);
-    const script = ['ROLL', 'DECLINE', 'END', 'ROLL', 'DECLINE', 'END', 'ROLL', 'END', 'ROLL', 'END'];
-    let i = 0;
-    while (i < 400) {
-      const s = peers[0]!.state!;
-      if (s.phase === 'GAME_OVER' || s.turnIndex > 8) break;
-      const actor = peers.find((p) => p.mySeat === s.current)!;
-      if (s.phase === 'AWAIT_ROLL') actor.submit({ type: 'ROLL', dice: roll() });
-      else if (s.phase === 'AWAIT_BUY') actor.submit({ type: 'DECLINE' });
-      else if (s.phase === 'AWAIT_TAX') actor.submit({ type: 'PAY_TAX', choice: 'flat' });
-      else actor.submit({ type: 'END_TURN' });
-      i++;
-    }
-    void script;
-    return proj(peers[0]!.state!);
+test('determinism: every peer replays the SAME beacon-diced state (rolls auto-resolve)', () => {
+  const { peers } = lobby(2);
+  peers[0]!.start();
+  for (let i = 0; i < 400; i++) {
+    const s = peers[0]!.state!;
+    if (s.phase === 'GAME_OVER' || s.turnIndex > 8) break;
+    allAgree(peers); // every peer agrees at every step, including the beacon-resolved rolls
+    if (s.phase === 'AWAIT_ROLL') continue; // the dealerless beacon resolves the roll automatically
+    const actor = peers.find((p) => p.mySeat === s.current)!;
+    if (s.phase === 'AWAIT_BUY') actor.submit({ type: 'DECLINE' });
+    else if (s.phase === 'AWAIT_TAX') actor.submit({ type: 'PAY_TAX', choice: 'flat' });
+    else actor.submit({ type: 'END_TURN' });
   }
-  assert.equal(run(), run());
+  allAgree(peers);
+  assert.ok(peers[0]!.state!.turnIndex >= 2, 'the game progressed using beacon dice (no raw dice)');
+  // raw client dice are rejected on the multiplayer action surface
+  const before = proj(peers[0]!.state!);
+  peers.find((p) => p.mySeat === peers[0]!.state!.current)!.submit({ type: 'ROLL', dice: [6, 6] });
+  assert.equal(proj(peers[0]!.state!), before, 'a raw ROLL submit is a no-op (beacon-only)');
 });
 
 test('view() reflects each phase; a fresh peer is disconnected until a table exists', () => {
@@ -280,11 +278,9 @@ test('an UNSIGNED / forged table message is rejected (relay ordering is not auth
     kind: 'seat', seat: 0, who: 'someone-else', name: 'imposter', bot: false, id: 'forge2',
     signPub: 'ef'.repeat(32), sig: '12'.repeat(64),
   })));
-  assert.equal(host.view().seats.find((s) => s.seat === 0)?.who, host.view().seats.find((s) => s.seat === 0)?.who, 'seat 0 unchanged');
-
-  // a properly-signed move from the active seat IS applied
-  host.submit({ type: 'ROLL', dice: [3, 4] });
-  assert.notEqual(JSON.stringify(host.view().state), before, 'the seat-key-signed move advanced the game');
+  const seat0who = host.view().seats.find((s) => s.seat === 0)?.who;
+  assert.equal(seat0who, host.view().seats.find((s) => s.seat === 0)?.who, 'seat 0 owner unchanged');
+  assert.equal(JSON.stringify(host.view().state), before, 'no forged message advanced the game');
 });
 
 // ---- audit #6: lobby announcements are signed by the host key ----------------

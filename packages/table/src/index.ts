@@ -13,6 +13,7 @@ import { initialState, apply, netWorth, type GameState, type Action, type Engine
 import { loadParams } from '@estates/params';
 import { HttpRelay, InMemoryRelay, type Relay } from '@estates/chat';
 import { genIdentity, identityFrom, signData, verifyData, type Identity } from '@estates/channel';
+import { commit as beaconCommit, verifyRollEntry, ZERO_BEACON } from '@estates/beacon';
 
 export const P = loadParams();
 export { identityFrom, type Identity };
@@ -113,6 +114,8 @@ type Msg =
   | { kind: 'table'; maxSeats: number; network: NetworkMode; host: string }
   | { kind: 'seat'; seat: number; who: string; name: string; bot: boolean }
   | { kind: 'start'; by: string; config: EngineConfig; seatMap: { seat: number; who: string }[] }
+  | { kind: 'commit'; roll: number; seat: number; c: string }   // beacon commitment for roll #roll (audit #3)
+  | { kind: 'reveal'; roll: number; seat: number; s: string }   // beacon reveal
   | { kind: 'action'; action: Action };
 /** A published, SIGNED message: the player's Ed25519 signing pub + signature over
  *  the canonical message bind the author to the protocol (audit #1/#2). */
@@ -151,6 +154,12 @@ export class NetTable {
   private id: Identity;               // the PLAYER's key: signs every table message
   private seatKeys = new Map<number, string>(); // seat → signing pub (who controls it)
   private verified = new Set<string>();         // payloads whose signature already verified (amortise rebuild)
+  private mySecrets = new Map<number, Uint8Array>(); // per-roll beacon secret (mine), keyed by roll seq
+  private myCommitSeqs = new Set<number>();      // roll seqs I've already committed for
+  private myRevealSeqs = new Set<number>();      // roll seqs I've already revealed for
+  private commitsBySeq = new Map<number, Map<number, Uint8Array>>(); // roll seq → seat → commitment
+  private revealsBySeq = new Map<number, Map<number, Uint8Array>>(); // roll seq → seat → secret
+  private nextRollSeq = 0;                       // how many rolls have been applied (the next to resolve)
 
   /**
    * `autoPlay` makes this peer a simulated player that plays ONLY its own seat
@@ -192,7 +201,10 @@ export class NetTable {
     const seatMap = [...this.seats.entries()].map(([seat, v]) => ({ seat, who: v.who })).sort((a, b) => a.seat - b.seat);
     this.send({ kind: 'start', by: this.me, config: { network: this.network, seatCount: this.maxSeats, bankReserve: P.scalars.salary * 200 }, seatMap });
   }
-  submit(action: Action): void { if (this.myTurn()) this.send({ kind: 'action', action }); }
+  submit(action: Action): void {
+    if (action.type === 'ROLL') return; // raw dice are NOT accepted in multiplayer — rolls come from the beacon (audit #3)
+    if (this.myTurn()) this.send({ kind: 'action', action });
+  }
 
   /** Leave the table mid-game (any time, on or off turn): your money + assets go
    *  to the leading player. Broadcast so every peer applies it. */
@@ -245,6 +257,29 @@ export class NetTable {
     let state: GameState | null = null;
     const seats = new Map<number, { who: string; name: string; bot: boolean }>();
     const seatKeys = new Map<number, string>();  // seat → controlling signing pub
+    const commitsBySeq = new Map<number, Map<number, Uint8Array>>();
+    const revealsBySeq = new Map<number, Map<number, Uint8Array>>();
+    let rollsApplied = 0;
+    let prevBeacon = ZERO_BEACON;
+    // resolve as many beacon rolls as are complete (handles doubles: each roll has
+    // its own seq + its own commit/reveal set, chained via prev_beacon).
+    const tryRoll = (): void => {
+      while (started && state && state.phase === 'AWAIT_ROLL') {
+        const seq = rollsApplied;
+        const live = state.seats.filter((q) => !q.bankrupt).map((q) => q.id);
+        const cm = commitsBySeq.get(seq); const rv = revealsBySeq.get(seq);
+        if (!cm || !rv || !live.every((x) => cm.has(x) && rv.has(x))) break;
+        const v = verifyRollEntry({
+          commits: live.map((x) => ({ seat: x, c: cm.get(x)! })),
+          reveals: live.map((x) => ({ seat: x, secret: rv.get(x)! })),
+          liveSeats: live, turnIndex: state.turnIndex, prevBeacon,
+        });
+        if (!v.ok) break;
+        const r = apply(state, { type: 'ROLL', dice: v.dice! });
+        if (!r.ok) break;
+        state = r.state; prevBeacon = v.beacon!; rollsApplied++;
+      }
+    };
     for (const p of payloads) {
       const raw = new TextDecoder().decode(p);
       let o: Signed;
@@ -279,8 +314,25 @@ export class NetTable {
           if (!started && signPub === host) {
             const cur = JSON.stringify([...seats.entries()].map(([seat, v]) => ({ seat, who: v.who })).sort((a, b) => a.seat - b.seat));
             const claimed = JSON.stringify([...st.seatMap].sort((a, b) => a.seat - b.seat));
-            if (cur === claimed) { started = true; state = initialState(st.config); }
+            if (cur === claimed) { started = true; state = initialState(st.config); tryRoll(); }
           }
+          break;
+        }
+        case 'commit': {
+          const cmsg = m as Extract<Msg, { kind: 'commit' }>;
+          if (seatKeys.get(cmsg.seat) === signPub) {                // signed by that seat's key
+            let map = commitsBySeq.get(cmsg.roll); if (!map) { map = new Map(); commitsBySeq.set(cmsg.roll, map); }
+            if (!map.has(cmsg.seat)) { try { map.set(cmsg.seat, fromHex(cmsg.c)); } catch { /* bad hex */ } }
+          }
+          break;
+        }
+        case 'reveal': {
+          const rmsg = m as Extract<Msg, { kind: 'reveal' }>;
+          if (seatKeys.get(rmsg.seat) === signPub) {
+            let map = revealsBySeq.get(rmsg.roll); if (!map) { map = new Map(); revealsBySeq.set(rmsg.roll, map); }
+            if (!map.has(rmsg.seat)) { try { map.set(rmsg.seat, fromHex(rmsg.s)); } catch { /* bad hex */ } }
+          }
+          tryRoll();
           break;
         }
         case 'action': {
@@ -288,12 +340,15 @@ export class NetTable {
           if (started && state) {
             // LEAVE is signed by the leaving seat; every other action by the ACTIVE seat.
             const owner = am.action.type === 'LEAVE' ? am.action.seat : state.current;
-            if (seatKeys.get(owner) === signPub) { const r = apply(state, am.action); if (r.ok) state = r.state; }
+            if (seatKeys.get(owner) === signPub) { const r = apply(state, am.action); if (r.ok) { state = r.state; tryRoll(); } }
           }
           break;
         }
       }
     }
+    this.commitsBySeq = commitsBySeq;
+    this.revealsBySeq = revealsBySeq;
+    this.nextRollSeq = rollsApplied;
     this.seatKeys = seatKeys;
     this.maxSeats = maxSeats;
     this.network = network;
@@ -303,7 +358,29 @@ export class NetTable {
     this.seats = seats;
     this.mySeat = [...seats.entries()].find(([, v]) => v.who === this.me)?.[0] ?? null;
     this.onUpdate();
+    this.maybeBeacon();
     this.maybeAutoPlay();
+  }
+
+  /** Drive this seat's part of the dealerless dice beacon (audit #3): when a roll
+   *  is pending, every LIVE seat commits, then (once all have committed) reveals.
+   *  rebuild() derives + applies the roll once all reveals are in — no raw dice. */
+  private maybeBeacon(): void {
+    if (!this.started || !this.state || this.state.phase !== 'AWAIT_ROLL' || this.mySeat === null) return;
+    const live = this.state.seats.filter((p) => !p.bankrupt).map((p) => p.id);
+    if (!live.includes(this.mySeat)) return;
+    const seq = this.nextRollSeq;
+    if (!this.myCommitSeqs.has(seq)) {
+      const secret = new Uint8Array(32); crypto.getRandomValues(secret);
+      this.mySecrets.set(seq, secret); this.myCommitSeqs.add(seq);
+      this.send({ kind: 'commit', roll: seq, seat: this.mySeat, c: toHex(beaconCommit(secret)) });
+      return;
+    }
+    const cm = this.commitsBySeq.get(seq) ?? new Map<number, Uint8Array>();
+    if (live.every((x) => cm.has(x)) && !this.myRevealSeqs.has(seq)) {
+      const secret = this.mySecrets.get(seq);
+      if (secret) { this.myRevealSeqs.add(seq); this.send({ kind: 'reveal', roll: seq, seat: this.mySeat, s: toHex(secret) }); }
+    }
   }
 
   /** A simulated player auto-plays ONLY its own seat (never another's). Fires at
