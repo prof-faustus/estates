@@ -12,7 +12,7 @@
  * then streams live; publish fans out). Wire bytes are JSON-encoded envelopes.
  */
 import { initialState, apply, type GameState, type EngineConfig } from '@estates/engine';
-import { roll, ZERO_BEACON, type PartyReveal } from '@estates/beacon';
+import { verifyRollEntry, ZERO_BEACON } from '@estates/beacon';
 import { hashState } from '@estates/conformance';
 import type { Entry } from '@estates/audit';
 
@@ -68,12 +68,18 @@ export class PeerSession {
   /** Apply one transcript entry. Returns false (and leaves state) if invalid. */
   private applyEntry(e: Entry): boolean {
     if (e.kind === 'roll') {
-      const reveals: PartyReveal[] = e.reveals.map((rv) => ({ seat: rv.seat, secret: fromHex(rv.secret) }));
-      const br = roll(reveals, this.state.turnIndex, this.prevBeacon);
-      if (br.dice[0] !== e.dice[0] || br.dice[1] !== e.dice[1]) return false; // forged roll
-      const r = apply(this.state, { type: 'ROLL', dice: br.dice });
+      // SAME verifier as @estates/audit (audit #4): commitments + participant set
+      // + reveal openings + canonical dice — the live path is no longer laxer.
+      const v = verifyRollEntry({
+        commits: e.commits.map((c) => ({ seat: c.seat, c: fromHex(c.c) })),
+        reveals: e.reveals.map((rv) => ({ seat: rv.seat, secret: fromHex(rv.secret) })),
+        liveSeats: this.state.seats.filter((p) => !p.bankrupt).map((p) => p.id),
+        turnIndex: this.state.turnIndex, prevBeacon: this.prevBeacon, claimedDice: e.dice,
+      });
+      if (!v.ok) return false; // forged / unverified roll
+      const r = apply(this.state, { type: 'ROLL', dice: v.dice! });
       if (!r.ok) return false;
-      this.prevBeacon = br.beacon;
+      this.prevBeacon = v.beacon!;
       this.state = r.state;
       return true;
     }

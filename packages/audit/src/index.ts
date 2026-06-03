@@ -12,7 +12,7 @@
  * data alone (design spec R7), with no trust in the player who produced it.
  */
 import { initialState, apply, type GameState, type Action, type EngineConfig } from '@estates/engine';
-import { roll, commit, verifyReveal, ZERO_BEACON, type PartyReveal } from '@estates/beacon';
+import { roll, commit, verifyRollEntry, ZERO_BEACON, type PartyReveal } from '@estates/beacon';
 import { hashState } from '@estates/conformance';
 import { loadParams } from '@estates/params';
 
@@ -96,36 +96,17 @@ export function audit(t: GameTranscript): AuditResult {
   for (let i = 0; i < t.entries.length; i++) {
     const e = t.entries[i]!;
     if (e.kind === 'roll') {
-      const fail = (why: string): AuditResult => ({ ok: false, steps: i, rollsVerified: rolls, finalHash: '', reason: `entry ${i}: ${why}` });
-      // the ELIGIBLE set = live (non-bankrupt) seats this turn
-      const live = new Set(s.seats.filter((p) => !p.bankrupt).map((p) => p.id));
-      // commitments: one per live seat, no duplicates, none from a non-live seat
-      const cSeats = e.commits.map((c) => c.seat);
-      if (new Set(cSeats).size !== cSeats.length) return fail('duplicate commitment seat');
-      for (const c of e.commits) if (!live.has(c.seat)) return fail(`commitment from a non-live seat ${c.seat}`);
-      const commitMap = new Map<number, Uint8Array>();
-      for (const c of e.commits) commitMap.set(c.seat, fromHex(c.c));
-      // reveals: each must open a prior commitment, be a live seat, and be unique
-      const rSeats = e.reveals.map((rv) => rv.seat);
-      if (new Set(rSeats).size !== rSeats.length) return fail('duplicate reveal seat');
-      const reveals: PartyReveal[] = [];
-      for (const rv of e.reveals) {
-        if (!live.has(rv.seat)) return fail(`reveal from a non-live / non-seat ${rv.seat}`);
-        const c = commitMap.get(rv.seat);
-        if (!c) return fail(`reveal from seat ${rv.seat} with no prior commitment`);
-        const sec = fromHex(rv.secret);
-        if (!verifyReveal(sec, c)) return fail(`reveal from seat ${rv.seat} does not open its commitment`);
-        reveals.push({ seat: rv.seat, secret: sec });
-      }
-      if (reveals.length === 0) return fail('no honest reveal (beacon unbiasable condition fails)');
-      // dice are derived ONLY from the canonical, commitment-verified reveal set
-      const br = roll(reveals, s.turnIndex, prev);
-      if (br.dice[0] !== e.dice[0] || br.dice[1] !== e.dice[1]) {
-        return fail(`dice ${e.dice} do not match the beacon (recomputed ${br.dice}) — forged roll`);
-      }
-      const r = apply(s, { type: 'ROLL', dice: br.dice });
+      // THE shared roll verifier (same logic @estates/net uses — audit #4)
+      const v = verifyRollEntry({
+        commits: e.commits.map((c) => ({ seat: c.seat, c: fromHex(c.c) })),
+        reveals: e.reveals.map((rv) => ({ seat: rv.seat, secret: fromHex(rv.secret) })),
+        liveSeats: s.seats.filter((p) => !p.bankrupt).map((p) => p.id),
+        turnIndex: s.turnIndex, prevBeacon: prev, claimedDice: e.dice,
+      });
+      if (!v.ok) return { ok: false, steps: i, rollsVerified: rolls, finalHash: '', reason: `entry ${i}: ${v.reason}` };
+      const r = apply(s, { type: 'ROLL', dice: v.dice! });
       if (!r.ok) return { ok: false, steps: i, rollsVerified: rolls, finalHash: '', reason: `entry ${i}: ROLL rejected (${r.code})` };
-      prev = br.beacon; rolls++; s = r.state;
+      prev = v.beacon!; rolls++; s = r.state;
     } else {
       const r = apply(s, e.action);
       if (!r.ok) return { ok: false, steps: i, rollsVerified: rolls, finalHash: '', reason: `entry ${i}: ${e.action.type} rejected (${r.code}) — illegal action` };

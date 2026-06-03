@@ -103,6 +103,46 @@ export function roll(reveals: readonly PartyReveal[], turnIndex: number, prevBea
   };
 }
 
+export interface RollEntryInput {
+  readonly commits: readonly { seat: number; c: Uint8Array }[];
+  readonly reveals: readonly { seat: number; secret: Uint8Array }[];
+  readonly liveSeats: readonly number[];  // eligible (non-bankrupt) seats this turn
+  readonly turnIndex: number;
+  readonly prevBeacon: Uint8Array;
+  readonly claimedDice?: readonly [number, number];
+}
+export interface RollEntryResult { readonly ok: boolean; readonly reason: string; readonly dice?: readonly [number, number]; readonly beacon?: Uint8Array }
+
+/**
+ * THE single roll verifier (shared by @estates/audit AND @estates/net, audit #4):
+ * one commitment per live seat, no duplicate commit/reveal, no non-live reveal,
+ * each reveal opens its prior commitment, ≥1 honest reveal, and the dice derived
+ * ONLY from the canonical commitment-verified reveal set (matching any claim).
+ */
+export function verifyRollEntry(inp: RollEntryInput): RollEntryResult {
+  const live = new Set(inp.liveSeats);
+  const cSeats = inp.commits.map((c) => c.seat);
+  if (new Set(cSeats).size !== cSeats.length) return { ok: false, reason: 'duplicate commitment seat' };
+  for (const c of inp.commits) if (!live.has(c.seat)) return { ok: false, reason: `commitment from a non-live seat ${c.seat}` };
+  const cmap = new Map<number, Uint8Array>(inp.commits.map((c) => [c.seat, c.c]));
+  const rSeats = inp.reveals.map((r) => r.seat);
+  if (new Set(rSeats).size !== rSeats.length) return { ok: false, reason: 'duplicate reveal seat' };
+  const reveals: PartyReveal[] = [];
+  for (const rv of inp.reveals) {
+    if (!live.has(rv.seat)) return { ok: false, reason: `reveal from a non-live / non-seat ${rv.seat}` };
+    const c = cmap.get(rv.seat);
+    if (!c) return { ok: false, reason: `reveal from seat ${rv.seat} with no prior commitment` };
+    if (!verifyReveal(rv.secret, c)) return { ok: false, reason: `reveal from seat ${rv.seat} does not open its commitment` };
+    reveals.push({ seat: rv.seat, secret: rv.secret });
+  }
+  if (reveals.length === 0) return { ok: false, reason: 'no honest reveal (beacon unbiasable condition fails)' };
+  const br = roll(reveals, inp.turnIndex, inp.prevBeacon);
+  if (inp.claimedDice && (br.dice[0] !== inp.claimedDice[0] || br.dice[1] !== inp.claimedDice[1])) {
+    return { ok: false, reason: `dice ${inp.claimedDice} do not match the beacon (recomputed ${br.dice})` };
+  }
+  return { ok: true, reason: 'roll verified', dice: br.dice, beacon: br.beacon };
+}
+
 /**
  * Verify a set of (seat, secret, commitment) and return only the reveals whose
  * secret matches its commitment — the honest set used to roll (timeout default
