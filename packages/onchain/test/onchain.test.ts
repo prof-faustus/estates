@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   OP, op, push, serializeScript, containsOpReturn, scriptHex, p2pkh,
   encodeTitleState, decodeTitleState, nftLockingScript, nftOutput, paymentOutput,
-  gameTag, hasGenesis, NFT_SATS, type TitleState,
+  gameTag, hasGenesis, NFT_SATS, validateTitleState, type TitleState,
 } from '../src/index.ts';
 
 const pkh = (n: number): Uint8Array => { const b = new Uint8Array(20); b.fill(n); return b; };
@@ -88,4 +88,33 @@ test('p2pkh requires a 20-byte HASH160', () => {
 
 test('game tags are domain-separated by kind', () => {
   assert.notDeepEqual([...gameTag(GAME, 'TITLE')], [...gameTag(GAME, 'REPRIEVE')]);
+});
+
+// ---- audit #6: reject impossible / adversarial NFT state ---------------------
+test('encodeTitleState rejects out-of-range / non-canonical state (no silent masking)', () => {
+  assert.throws(() => encodeTitleState(title({ propertyId: 40 })), /propertyId/);
+  assert.throws(() => encodeTitleState(title({ propertyId: -1 })), /propertyId/);
+  assert.throws(() => encodeTitleState(title({ buildLevel: 6 })), /buildLevel/);
+  assert.throws(() => encodeTitleState(title({ groupId: 300 })), /groupId/);
+  assert.throws(() => encodeTitleState(title({ kind: 'REPRIEVE', propertyId: 5 })), /REPRIEVE/);
+  assert.throws(() => encodeTitleState(title({ genesis: { txid: 'ab'.repeat(32), vout: -1 } })), /vout/);
+  assert.throws(() => encodeTitleState(title({ genesis: { txid: 'zz'.repeat(32), vout: 0 } })), /hex/);
+});
+
+test('decodeTitleState rejects a non-canonical mortgaged byte and impossible fields', () => {
+  const good = encodeTitleState(title({ buildLevel: 2 }));
+  // tamper the mortgaged byte (offset 1+32+1+1+1 = 36) to a non-canonical value
+  const badMort = good.slice(); badMort[36] = 2;
+  assert.throws(() => decodeTitleState(badMort), /mortgaged/);
+  // tamper buildLevel (offset 35) above 5
+  const badLevel = good.slice(); badLevel[35] = 9;
+  assert.throws(() => decodeTitleState(badLevel), /buildLevel/);
+  // tamper propertyId (offset 33) past the board
+  const badProp = good.slice(); badProp[33] = 200;
+  assert.throws(() => decodeTitleState(badProp), /propertyId/);
+});
+
+test('validateTitleState accepts every legal title and a canonical REPRIEVE', () => {
+  for (let p = 0; p < 40; p++) for (const lvl of [0, 1, 5]) validateTitleState(title({ propertyId: p, buildLevel: lvl }));
+  validateTitleState(title({ kind: 'REPRIEVE', propertyId: 0, groupId: 0, buildLevel: 0 }));
 });

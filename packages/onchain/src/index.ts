@@ -34,25 +34,39 @@ const KIND_BYTE: Record<NftKind, number> = { TITLE: 0x01, REPRIEVE: 0x02 };
 const STATE_LEN = 1 + 32 + 1 + 1 + 1 + 1 + 32 + 4; // = 73 bytes, fixed layout
 
 function fromHex(h: string): Uint8Array {
-  if (h.length % 2 !== 0) throw new Error('hex length');
+  if (typeof h !== 'string' || h.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(h)) throw new Error('invalid hex');
   const b = new Uint8Array(h.length / 2);
   for (let i = 0; i < b.length; i++) b[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
   return b;
+}
+
+export const BOARD_SIZE = 40; // board spaces 0..39
+/** Reject impossible NFT state (audit #6): out-of-range ids/levels, non-canonical
+ *  REPRIEVE, bad vout — so a malformed/adversarial title can never encode. */
+export function validateTitleState(s: TitleState): void {
+  if (s.kind !== 'TITLE' && s.kind !== 'REPRIEVE') throw new Error('bad kind');
+  if (s.gameTag.length !== 32) throw new Error('gameTag must be 32 bytes');
+  if (!Number.isInteger(s.propertyId) || s.propertyId < 0 || s.propertyId >= BOARD_SIZE) throw new Error('propertyId out of range 0..39');
+  if (!Number.isInteger(s.groupId) || s.groupId < 0 || s.groupId > 255) throw new Error('groupId out of range 0..255');
+  if (!Number.isInteger(s.buildLevel) || s.buildLevel < 0 || s.buildLevel > 5) throw new Error('buildLevel out of range 0..5');
+  if (typeof s.mortgaged !== 'boolean') throw new Error('mortgaged must be boolean');
+  if (s.kind === 'REPRIEVE' && (s.propertyId !== 0 || s.groupId !== 0 || s.buildLevel !== 0)) throw new Error('REPRIEVE must have propertyId=groupId=buildLevel=0');
+  if (!Number.isInteger(s.genesis.vout) || s.genesis.vout < 0 || s.genesis.vout > 0xffffffff) throw new Error('genesis.vout must be a uint32');
 }
 const toHex = (b: Uint8Array): string => Buffer.from(b).toString('hex');
 
 /** Canonical fixed-layout encoding of an NFT's state blob. */
 export function encodeTitleState(s: TitleState): Uint8Array {
-  if (s.gameTag.length !== 32) throw new Error('gameTag must be 32 bytes');
+  validateTitleState(s); // reject impossible state rather than masking it (audit #6)
   const txid = fromHex(s.genesis.txid);
   if (txid.length !== 32) throw new Error('genesis.txid must be 32 bytes (64 hex)');
   const out = new Uint8Array(STATE_LEN);
   let o = 0;
   out[o++] = KIND_BYTE[s.kind];
   out.set(s.gameTag, o); o += 32;
-  out[o++] = s.propertyId & 0xff;
-  out[o++] = s.groupId & 0xff;
-  out[o++] = s.buildLevel & 0xff;
+  out[o++] = s.propertyId;
+  out[o++] = s.groupId;
+  out[o++] = s.buildLevel;
   out[o++] = s.mortgaged ? 1 : 0;
   out.set(txid, o); o += 32;
   out[o++] = (s.genesis.vout >>> 24) & 0xff;
@@ -72,10 +86,14 @@ export function decodeTitleState(blob: Uint8Array): TitleState {
   const propertyId = blob[o++]!;
   const groupId = blob[o++]!;
   const buildLevel = blob[o++]!;
-  const mortgaged = blob[o++] === 1;
+  const mortByte = blob[o++]!;
+  if (mortByte !== 0 && mortByte !== 1) throw new Error('non-canonical mortgaged byte');
+  const mortgaged = mortByte === 1;
   const txid = toHex(blob.slice(o, o + 32)); o += 32;
   const vout = ((blob[o]! << 24) | (blob[o + 1]! << 16) | (blob[o + 2]! << 8) | blob[o + 3]!) >>> 0;
-  return { kind, gameTag, propertyId, groupId, buildLevel, mortgaged, genesis: { txid, vout } };
+  const state: TitleState = { kind, gameTag, propertyId, groupId, buildLevel, mortgaged, genesis: { txid, vout } };
+  validateTitleState(state); // reject impossible decoded state (audit #6)
+  return state;
 }
 
 /** Locking script for a 1-sat NFT: `<state> OP_DROP <P2PKH(owner)>`. */
