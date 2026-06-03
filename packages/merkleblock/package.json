@@ -1,0 +1,18 @@
+{
+  "name": "@estates/merkleblock",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ESTATES BIP-37 partial Merkle tree (the node's gettxoutproof / CMerkleBlock): build + parse + extract an @estates/spv-compatible inclusion proof. The native SPV proof bridge. Isomorphic (@noble).",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@noble/hashes": "1.5.0",
+    "@estates/spv": "workspace:*"
+  },
+  "scripts": {
+    "test": "node --test --experimental-strip-types \"test/**/*.test.ts\""
+  }
+}
