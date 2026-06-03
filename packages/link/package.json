@@ -1,0 +1,17 @@
+{
+  "name": "@estates/link",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ESTATES true IP-to-IP peer transport over real TCP sockets (Node), running the @estates/channel mutual-auth handshake + authenticated framing. No relay server. The sidecar's networking core.",
+  "license": "MIT",
+  "dependencies": {
+    "@estates/channel": "workspace:*"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --test --experimental-strip-types \"test/**/*.test.ts\""
+  }
+}
