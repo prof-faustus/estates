@@ -11,7 +11,8 @@
 import { createHash } from 'node:crypto';
 import type { PeerLink } from '@estates/link';
 import { initialState, apply, type GameState, type Action, type EngineConfig } from '@estates/engine';
-import { txForAction, type MapContext } from '@estates/txmap';
+import { txForAction } from '@estates/txmap';
+import { type MapContext } from '@estates/chainmap';
 import { MoveChain } from '@estates/ledger';
 
 /** Deterministic one-use key hash both peers derive identically (table‖turn‖role). */
