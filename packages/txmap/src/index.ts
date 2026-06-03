@@ -43,6 +43,29 @@ export function encodeActionCommit(action: Action, turnIndex: number, actor: num
   return out;
 }
 
+const CODE_ACTION: Record<number, Action['type']> = Object.fromEntries(Object.entries(ACTION_CODE).map(([k, v]) => [v, k as Action['type']]));
+const rd32 = (b: Uint8Array, o: number): number => ((b[o]! << 24) | (b[o + 1]! << 16) | (b[o + 2]! << 8) | b[o + 3]!) >>> 0;
+
+export interface DecodedMove { readonly turnIndex: number; readonly actor: number; readonly action: Action }
+/** Read an on-chain action commitment back into the move it records (auditable). */
+export function decodeActionCommit(blob: Uint8Array): DecodedMove {
+  for (let i = 0; i < COMMIT_TAG.length; i++) if (blob[i] !== COMMIT_TAG[i]) throw new Error('not an ESTATES move commitment');
+  let o = COMMIT_TAG.length;
+  const turnIndex = rd32(blob, o); o += 4;
+  const actor = blob[o++]!;
+  const type = CODE_ACTION[blob[o++]!];
+  if (!type) throw new Error('unknown action code');
+  let action: Action;
+  switch (type) {
+    case 'ROLL': action = { type, dice: [blob[o]!, blob[o + 1]!] as const }; break;
+    case 'PAY_TAX': action = { type, choice: blob[o] === 0 ? 'flat' : 'percent' }; break;
+    case 'BUILD': case 'SELL_BUILD': case 'MORTGAGE': case 'UNMORTGAGE': action = { type, propertyId: rd32(blob, o) }; break;
+    case 'LEAVE': action = { type, seat: rd32(blob, o) }; break;
+    default: action = { type } as Action; break;
+  }
+  return { turnIndex, actor, action };
+}
+
 /** The 1-sat on-chain action-commitment output (state in live script, OP_DROP). */
 export function commitOutput(commit: Uint8Array, oneUsePkh: Uint8Array): TxOutput {
   return { satoshis: NFT_SATS, script: serializeScript([push(commit), op(OP.OP_DROP), ...p2pkh(oneUsePkh)]) };

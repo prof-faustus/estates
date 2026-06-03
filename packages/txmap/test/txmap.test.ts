@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { initialState, apply, type GameState, type Action } from '@estates/engine';
 import { type MapContext } from '@estates/chainmap';
-import { encodeActionCommit, commitOutput, txForAction, balanceDeltas } from '../src/index.ts';
+import { encodeActionCommit, decodeActionCommit, commitOutput, txForAction, balanceDeltas } from '../src/index.ts';
 
 // A deterministic one-use pkh generator (each call distinct = no reuse).
 function pkhGen() {
@@ -35,6 +35,20 @@ test('action commitment encodes the action on-chain (pushdata) and round-trips f
   const out = commitOutput(c, ctx.seatPkhs[0]!);
   assert.equal(out.satoshis, 1, 'commitment rides a 1-sat output');
   assert.ok(out.script.length > c.length, 'state is in the live script');
+});
+
+test('on-chain commitments decode back to the exact move (auditable from chain)', () => {
+  const cases: Action[] = [
+    { type: 'ROLL', dice: [2, 5] }, { type: 'BUY' }, { type: 'DECLINE' },
+    { type: 'PAY_TAX', choice: 'percent' }, { type: 'BUILD', propertyId: 39 },
+    { type: 'MORTGAGE', propertyId: 12 }, { type: 'LEAVE', seat: 3 }, { type: 'END_TURN' },
+  ];
+  for (const action of cases) {
+    const dec = decodeActionCommit(encodeActionCommit(action, 123, 4));
+    assert.equal(dec.turnIndex, 123); assert.equal(dec.actor, 4);
+    assert.deepEqual(dec.action, action, `${action.type} round-trips from chain`);
+  }
+  assert.throws(() => decodeActionCommit(new Uint8Array([1, 2, 3])), /not an ESTATES move/);
 });
 
 test('EVERY move maps to a tx with an on-chain commitment AND conserves sats', () => {
