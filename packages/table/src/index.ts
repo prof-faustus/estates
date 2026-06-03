@@ -12,8 +12,20 @@
 import { initialState, apply, netWorth, type GameState, type Action, type EngineConfig } from '@estates/engine';
 import { loadParams } from '@estates/params';
 import { HttpRelay, InMemoryRelay, type Relay } from '@estates/chat';
+import { genIdentity, identityFrom, signData, verifyData, type Identity } from '@estates/channel';
 
 export const P = loadParams();
+export { identityFrom, type Identity };
+
+const toHex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+function fromHex(h: string): Uint8Array {
+  if (typeof h !== 'string' || h.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(h)) throw new Error('invalid hex');
+  const b = new Uint8Array(h.length / 2); for (let i = 0; i < b.length; i++) b[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
+  return b;
+}
+const encJSON = (o: unknown): Uint8Array => new TextEncoder().encode(JSON.stringify(o));
+/** The canonical bytes a message signature commits to (the message + the author). */
+const signedBytes = (m: Msg, signPub: string): Uint8Array => encJSON({ ...m, signPub });
 export type NetworkMode = EngineConfig['network'];
 
 export function rollDice(): [number, number] {
@@ -86,8 +98,11 @@ export class LobbyClient {
 type Msg =
   | { kind: 'table'; maxSeats: number; network: NetworkMode; host: string }
   | { kind: 'seat'; seat: number; who: string; name: string; bot: boolean }
-  | { kind: 'start'; by: string; config: EngineConfig }
+  | { kind: 'start'; by: string; config: EngineConfig; seatMap: { seat: number; who: string }[] }
   | { kind: 'action'; action: Action };
+/** A published, SIGNED message: the player's Ed25519 signing pub + signature over
+ *  the canonical message bind the author to the protocol (audit #1/#2). */
+type Signed = Msg & { id: string; signPub: string; sig: string };
 
 export interface SeatInfo { seat: number; who: string; name: string; bot: boolean }
 export interface TableView {
@@ -119,6 +134,9 @@ export class NetTable {
   private autoPlay: boolean;          // a SIMULATED player: auto-plays ONLY its own seat
   private lastBotKey = '';            // de-dup auto-play so one state fires one action
   private botTimer: ((cb: () => void) => void) | null;
+  private id: Identity;               // the PLAYER's key: signs every table message
+  private seatKeys = new Map<number, string>(); // seat → signing pub (who controls it)
+  private verified = new Set<string>();         // payloads whose signature already verified (amortise rebuild)
 
   /**
    * `autoPlay` makes this peer a simulated player that plays ONLY its own seat
@@ -126,9 +144,10 @@ export class NetTable {
    * such a peer as a separate process/window/daemon; it connects over the relay
    * socket exactly like a remote human. `scheduleBot` lets tests pump it.
    */
-  constructor(relay: Relay, name: string, onUpdate: () => void, opts?: { autoPlay?: boolean; scheduleBot?: (cb: () => void) => void }) {
+  constructor(relay: Relay, name: string, onUpdate: () => void, opts?: { autoPlay?: boolean; scheduleBot?: (cb: () => void) => void; identity?: Identity }) {
     this.relay = relay;
-    this.me = `${name || 'player'}-${Math.random().toString(36).slice(2, 8)}`;
+    this.id = opts?.identity ?? genIdentity();      // the player's non-custodial key
+    this.me = toHex(this.id.signPub);                // identity = the player's signing pubkey, not a random string
     this.name = name || 'player';
     this.onUpdate = onUpdate;
     this.autoPlay = opts?.autoPlay ?? false;
@@ -153,10 +172,11 @@ export class NetTable {
     if (seat < 0) return;
     this.send({ kind: 'seat', seat, who: this.me, name: this.name, bot: simulated });
   }
-  /** HOST + HUMAN ONLY. */
+  /** HOST + HUMAN ONLY. Binds the final seat map into the signed start. */
   start(): void {
     if (!this.iAmHost() || this.started || this.maxSeats === null) return;
-    this.send({ kind: 'start', by: this.me, config: { network: this.network, seatCount: this.maxSeats, bankReserve: P.scalars.salary * 200 } });
+    const seatMap = [...this.seats.entries()].map(([seat, v]) => ({ seat, who: v.who })).sort((a, b) => a.seat - b.seat);
+    this.send({ kind: 'start', by: this.me, config: { network: this.network, seatCount: this.maxSeats, bankReserve: P.scalars.salary * 200 }, seatMap });
   }
   submit(action: Action): void { if (this.myTurn()) this.send({ kind: 'action', action }); }
 
@@ -195,7 +215,9 @@ export class NetTable {
   // our own UI and every peer update from the SAME canonical order.
   private send(m: Msg): void {
     const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
-    this.relay.publish(new TextEncoder().encode(JSON.stringify({ ...m, id })));
+    const signPub = toHex(this.id.signPub);
+    const sig = toHex(signData(signedBytes(m, signPub), this.id.signPriv)); // sign with the player's Ed25519 key
+    this.relay.publish(encJSON({ ...m, id, signPub, sig }));
     this.relay.refresh?.();
   }
 
@@ -204,30 +226,61 @@ export class NetTable {
   private rebuild(payloads: Uint8Array[]): void {
     let maxSeats: number | null = null;
     let network: NetworkMode = 'regtest';
-    let host: string | null = null;
+    let host: string | null = null;             // the host = the signing key that opened the table
     let started = false;
     let state: GameState | null = null;
     const seats = new Map<number, { who: string; name: string; bot: boolean }>();
+    const seatKeys = new Map<number, string>();  // seat → controlling signing pub
     for (const p of payloads) {
-      let m: Msg;
-      try { const o = JSON.parse(new TextDecoder().decode(p)) as Msg & { id?: string }; m = o; } catch { continue; }
-      switch (m.kind) {
+      const raw = new TextDecoder().decode(p);
+      let o: Signed;
+      try { o = JSON.parse(raw) as Signed; } catch { continue; }
+      const { id, signPub, sig, ...m } = o;
+      // AUTHENTICATE: every message must be signed by its author's key (audit #1).
+      // Relay ordering is NOT authentication; an unsigned/forged message is dropped.
+      // Each unique payload is verified ONCE (cached) so repeated rebuilds stay O(n).
+      if (!this.verified.has(raw)) {
+        let signer: Uint8Array, signature: Uint8Array;
+        try { signer = fromHex(signPub); signature = fromHex(sig); } catch { continue; }
+        if (signer.length !== 32 || !verifyData(signedBytes(m as Msg, signPub), signature, signer)) continue;
+        this.verified.add(raw);
+      }
+      switch ((m as Msg).kind) {
         case 'table':
-          if (maxSeats === null) { maxSeats = m.maxSeats; network = m.network; host = m.host; }
+          if (maxSeats === null) { const t = m as Extract<Msg, { kind: 'table' }>; maxSeats = t.maxSeats; network = t.network; host = signPub; }
           break;
-        case 'seat':
-          if (!started && !seats.has(m.seat) && ![...seats.values()].some((v) => v.who === m.who)) {
-            seats.set(m.seat, { who: m.who, name: m.name, bot: m.bot });
+        case 'seat': {
+          const sm = m as Extract<Msg, { kind: 'seat' }>;
+          // a seat is claimed by the key that SIGNED the claim (no spoofing, audit #2);
+          // one key controls at most one seat.
+          if (!started && !seats.has(sm.seat) && sm.who === signPub && ![...seatKeys.values()].includes(signPub)) {
+            seats.set(sm.seat, { who: signPub, name: sm.name, bot: sm.bot });
+            seatKeys.set(sm.seat, signPub);
           }
           break;
-        case 'start':
-          if (!started && m.by === host) { started = true; state = initialState(m.config); }
+        }
+        case 'start': {
+          const st = m as Extract<Msg, { kind: 'start' }>;
+          // host-signed AND the bound seat map must match the claimed seats (audit #2)
+          if (!started && signPub === host) {
+            const cur = JSON.stringify([...seats.entries()].map(([seat, v]) => ({ seat, who: v.who })).sort((a, b) => a.seat - b.seat));
+            const claimed = JSON.stringify([...st.seatMap].sort((a, b) => a.seat - b.seat));
+            if (cur === claimed) { started = true; state = initialState(st.config); }
+          }
           break;
-        case 'action':
-          if (started && state) { const r = apply(state, m.action); if (r.ok) state = r.state; }
+        }
+        case 'action': {
+          const am = m as Extract<Msg, { kind: 'action' }>;
+          if (started && state) {
+            // LEAVE is signed by the leaving seat; every other action by the ACTIVE seat.
+            const owner = am.action.type === 'LEAVE' ? am.action.seat : state.current;
+            if (seatKeys.get(owner) === signPub) { const r = apply(state, am.action); if (r.ok) state = r.state; }
+          }
           break;
+        }
       }
     }
+    this.seatKeys = seatKeys;
     this.maxSeats = maxSeats;
     this.network = network;
     this.host = host;

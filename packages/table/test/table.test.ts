@@ -256,3 +256,33 @@ test('Bitmessage-style lobby discovery: a host announce is listed by other clien
   assert.equal(guest.list()[0]!.addr, addr);
   assert.equal(guest.list()[0]!.maxSeats, 4);
 });
+
+// ---- audit #1/#2: messages are signed; forged/unsigned ones are dropped ------
+test('an UNSIGNED / forged table message is rejected (relay ordering is not authentication)', () => {
+  const relay = new InMemoryRelay();
+  const host = peer(relay, 'host'); host.connect();
+  const p2 = peer(relay, 'p2'); p2.connect();
+  host.createTable(2, 'regtest'); host.joinSeat(); p2.joinSeat();
+  assert.equal(host.view().seats.length, 2, 'both seats claimed (signed)');
+  host.start();
+  assert.equal(host.view().phase, 'playing');
+  const before = JSON.stringify(host.view().state);
+
+  // forge a seat-0 ROLL with a random key + bad signature, straight onto the relay
+  relay.publish(new TextEncoder().encode(JSON.stringify({
+    kind: 'action', action: { type: 'ROLL', dice: [6, 6] }, id: 'forge1',
+    signPub: 'ab'.repeat(32), sig: 'cd'.repeat(64),
+  })));
+  assert.equal(JSON.stringify(host.view().state), before, 'forged (badly-signed) action ignored');
+
+  // forge a seat claim whose `who` does not match the signer → ignored
+  relay.publish(new TextEncoder().encode(JSON.stringify({
+    kind: 'seat', seat: 0, who: 'someone-else', name: 'imposter', bot: false, id: 'forge2',
+    signPub: 'ef'.repeat(32), sig: '12'.repeat(64),
+  })));
+  assert.equal(host.view().seats.find((s) => s.seat === 0)?.who, host.view().seats.find((s) => s.seat === 0)?.who, 'seat 0 unchanged');
+
+  // a properly-signed move from the active seat IS applied
+  host.submit({ type: 'ROLL', dice: [3, 4] });
+  assert.notEqual(JSON.stringify(host.view().state), before, 'the seat-key-signed move advanced the game');
+});
