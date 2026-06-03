@@ -57,7 +57,7 @@ export class HttpRelay implements Relay {
   readonly base: string;
   readonly channel: string;
   private pollMs: number;
-  private token?: string;
+  private token: string | undefined;
   private pokers: (() => void)[] = [];
   constructor(baseUrl: string, channel: string, opts?: { pollMs?: number; token?: string }) {
     this.base = baseUrl.replace(/\/$/, '');
