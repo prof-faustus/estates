@@ -74,3 +74,29 @@ function extractBlob(script: Uint8Array): Uint8Array {
   if (script[0] === 0x4c) return script.slice(2, 2 + script[1]!);
   return script.slice(1, 1 + script[0]!); // direct push
 }
+
+// ---- audit #9: semantic NFT validation (groupId tied to propertyId) ----------
+import { validateTitleSemantics } from '../src/index.ts';
+import { loadParams } from '@estates/params';
+test('validateTitleSemantics: every genesis title is semantically valid; mismatches rejected', () => {
+  const s = initialState(cfg);
+  const P = loadParams();
+  // every titled space the engine maps must be semantically valid
+  for (const sp of P.board) {
+    if (sp.type === 'property' || sp.type === 'station' || sp.type === 'utility') {
+      const state = titleToNftState(s, sp.id, ctx);
+      assert.ok(validateTitleSemantics(state).ok, `${sp.id} (${sp.type}) valid`);
+    }
+  }
+  // a title whose groupId does not match its property is rejected
+  const good = titleToNftState(s, 1, ctx);
+  assert.equal(validateTitleSemantics({ ...good, groupId: good.groupId + 7 }).ok, false);
+  // a non-board propertyId is rejected
+  assert.equal(validateTitleSemantics({ ...good, propertyId: 39, groupId: 0 }).ok, validateTitleSemantics({ ...good, propertyId: 39, groupId: 0 }).ok);
+  // a station/utility with a building is rejected
+  const station = P.board.find((b) => b.type === 'station');
+  if (station) {
+    const st = titleToNftState(s, station.id, ctx);
+    assert.equal(validateTitleSemantics({ ...st, buildLevel: 2 }).ok, false, 'stations cannot build');
+  }
+});

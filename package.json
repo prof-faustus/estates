@@ -7,17 +7,18 @@
   "license": "MIT",
   "packageManager": "pnpm@9.0.0",
   "engines": {
-    "node": ">=24.0.0"
+    "node": ">=24.0.0",
+    "pnpm": "9.0.0"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test --experimental-strip-types \"packages/**/test/**/*.test.ts\"",
     "lint:bans": "node --experimental-strip-types tools/lint-bans.ts",
-    "ci": "node --experimental-strip-types tools/ci.ts",
-    "reproduce": "node --experimental-strip-types tools/ci.ts && pnpm --filter @estates/conformance generate"
+    "ci": "pnpm install --frozen-lockfile && node --experimental-strip-types tools/ci.ts",
+    "reproduce": "pnpm install --frozen-lockfile && node --experimental-strip-types tools/ci.ts && pnpm --filter @estates/conformance generate"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
-    "typescript": "^5.8.3"
+    "@types/node": "22.19.19",
+    "typescript": "5.9.3"
   }
 }

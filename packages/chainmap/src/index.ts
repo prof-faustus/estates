@@ -54,6 +54,24 @@ export function nftReflectsEngine(s: GameState, propertyId: number, ctx: MapCont
     && dec.groupId === groupOrdinal(P.board[propertyId]?.group);
 }
 
+export interface SemanticCheck { readonly ok: boolean; readonly reason: string }
+/**
+ * SEMANTIC NFT validation (audit #9): beyond range-checking, tie the title's
+ * groupId to the ACTUAL group of its propertyId, and forbid buildings on
+ * stations/utilities. (Structural validation lives in @estates/onchain
+ * validateTitleState; semantic validation needs params and lives here.)
+ */
+export function validateTitleSemantics(s: TitleState): SemanticCheck {
+  if (s.kind !== 'TITLE') return { ok: true, reason: 'not a title (no group semantics)' };
+  const sp = P.board[s.propertyId];
+  if (!sp) return { ok: false, reason: `propertyId ${s.propertyId} is not a board space` };
+  if (sp.type !== 'property' && sp.type !== 'station' && sp.type !== 'utility') return { ok: false, reason: `propertyId ${s.propertyId} (${sp.type}) is not a titled space` };
+  const expected = groupOrdinal(sp.group);
+  if (s.groupId !== expected) return { ok: false, reason: `groupId ${s.groupId} does not match property ${s.propertyId}'s group (${expected})` };
+  if ((sp.type === 'station' || sp.type === 'utility') && s.buildLevel !== 0) return { ok: false, reason: `${sp.type} cannot carry buildings (buildLevel ${s.buildLevel})` };
+  return { ok: true, reason: 'semantically valid title' };
+}
+
 export interface ActionTx {
   readonly outputs: readonly TxOutput[];
   readonly note: string;
