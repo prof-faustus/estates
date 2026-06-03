@@ -26,12 +26,14 @@ const genesis = buildGenesis({ fundingOutpoint: { txid: 'ab'.repeat(32), vout: 0
 
 const aliceId = genIdentity(); const bobId = genIdentity();
 let bob: GamePeer | null = null;
-const server = await listen(0, bobId, (link: PeerLink) => { bob = new GamePeer(link, 1, config, ctx, genesis); });
+const server = await listen(0, bobId, (link: PeerLink) => { bob = new GamePeer(link, bobId, 1, 0, config, ctx, genesis); });
 const port = (server.address() as AddressInfo).port;
 console.log(`# Bob listening on 127.0.0.1:${port}; Alice dialing… (real TCP, mutually authenticated)`);
 
 const aliceLink = await connect('127.0.0.1', port, aliceId);
-const alice = new GamePeer(aliceLink, 0, config, ctx, genesis);
+const alice = new GamePeer(aliceLink, aliceId, 0, 1, config, ctx, genesis);
+bob!.onChat((text, from) => console.log(`  [chat] ${from.slice(0, 8)}…: ${text}`));
+alice.chat('gl hf — every move signed, every sat on chain');
 await waitFor(() => bob !== null);
 console.log(`# connected. genesis ${genesis.cursor.txid.slice(0, 16)}…  every move below is a real on-chain tx sent over the socket\n`);
 

@@ -17,45 +17,65 @@ async function waitFor(p: () => boolean, ms = 5000): Promise<void> { const t0 = 
 const config: EngineConfig = { network: 'regtest', seatCount: 2, bankReserve: 1_000_000 };
 const ctx: MapContext = { gameId: new Uint8Array(32).fill(7), genesis: { txid: 'ef'.repeat(32), vout: 0 }, seatPkhs: [pkh(1), pkh(2)], bankPkh: pkh(9) };
 function makeGenesis() {
-  return buildGenesis({
-    fundingOutpoint: { txid: 'ab'.repeat(32), vout: 0 },
-    cursorScript: commitOutput(encodeActionCommit({ type: 'END_TURN' }, 0, 0), pkh(9)).script,
-    seatFunds: [{ satoshis: 1500, script: pkh(1) }, { satoshis: 1500, script: pkh(2) }],
-  });
+  return buildGenesis({ fundingOutpoint: { txid: 'ab'.repeat(32), vout: 0 }, cursorScript: commitOutput(encodeActionCommit({ type: 'END_TURN' }, 0, 0), pkh(9)).script, seatFunds: [{ satoshis: 1500, script: pkh(1) }, { satoshis: 1500, script: pkh(2) }] });
 }
 
-test('two peers play a full game over real IP-to-IP sockets and converge byte-for-byte', async () => {
+/** Stand up an authenticated alice(seat0) ↔ bob(seat1) pair over real sockets. */
+async function pair(): Promise<{ alice: GamePeer; bob: GamePeer; server: any; aliceLink: PeerLink }> {
   const aliceId = genIdentity(); const bobId = genIdentity();
   const genesis = makeGenesis();
-  let bobPeer: GamePeer | null = null;
-
-  const server = await listen(0, bobId, (link: PeerLink) => { bobPeer = new GamePeer(link, 1, config, ctx, genesis); });
+  let bob: GamePeer | null = null;
+  const server = await listen(0, bobId, (link: PeerLink) => { bob = new GamePeer(link, bobId, 1, 0, config, ctx, genesis); });
   const port = (server.address() as AddressInfo).port;
+  const aliceLink = await connect('127.0.0.1', port, aliceId);
+  const alice = new GamePeer(aliceLink, aliceId, 0, 1, config, ctx, genesis);
+  await waitFor(() => bob !== null);
+  return { alice, bob: bob!, server, aliceLink };
+}
+
+test('two peers play a full SIGNED game over real sockets and converge byte-for-byte', async () => {
+  const { alice, bob, server, aliceLink } = await pair();
   try {
-    const clientLink = await connect('127.0.0.1', port, aliceId);
-    const alicePeer = new GamePeer(clientLink, 0, config, ctx, genesis);
-    await waitFor(() => bobPeer !== null);
-
-    // drive the game: whichever peer's seat is to move takes its turn over the wire
     for (let i = 0; i < 400; i++) {
-      if (alicePeer.state.phase === 'GAME_OVER' || alicePeer.state.turnIndex > 16) break;
-      if (alicePeer.myTurn()) alicePeer.takeTurn();
-      else if (bobPeer!.myTurn()) bobPeer!.takeTurn();
+      if (alice.state.phase === 'GAME_OVER' || alice.state.turnIndex > 16) break;
+      if (alice.myTurn()) alice.takeTurn();
+      else if (bob.myTurn()) bob.takeTurn();
       else { await delay(10); continue; }
-      // wait for the move to propagate so both peers are back in lockstep
-      await waitFor(() => alicePeer.state.turnIndex === bobPeer!.state.turnIndex && alicePeer.state.current === bobPeer!.state.current);
+      await waitFor(() => alice.state.turnIndex === bob.state.turnIndex && alice.state.current === bob.state.current);
     }
+    assert.deepEqual(alice.state, bob.state, 'engine state identical (all moves signature-verified)');
+    assert.deepEqual(alice.transcript(), bob.transcript(), 'on-chain transcript identical');
+    assert.ok(alice.transcript().length > 10);
+    const total = alice.state.seats.reduce((n, s) => n + s.balance, 0) + alice.state.bankReserve;
+    assert.equal(total, 1_003_000, 'no sats minted');
+  } finally { aliceLink.close(); server.close(); }
+});
 
-    // both peers independently reached the SAME state and the SAME on-chain transcript
-    assert.deepEqual(alicePeer.state, bobPeer!.state, 'engine state identical on both peers');
-    assert.deepEqual(alicePeer.transcript(), bobPeer!.transcript(), 'on-chain transcript identical on both peers');
-    assert.ok(alicePeer.transcript().length > 10, `played ${alicePeer.transcript().length - 1} on-chain moves over the socket`);
-    // sat conservation across the whole game
-    const total = alicePeer.state.seats.reduce((n, s) => n + s.balance, 0) + alicePeer.state.bankReserve;
-    assert.equal(total, 1500 + 1500 + 1_000_000, 'no sats minted across the whole on-chain game');
+test('a FORGED move (bad signature) is rejected — relay/transport ordering is not authentication', async () => {
+  const { alice, bob, server, aliceLink } = await pair();
+  try {
+    await waitFor(() => alice.myTurn());
+    const beforeForge = JSON.stringify(bob.state);
+    // Inject a raw frame onto Bob's link impersonating a seat-0 move with a junk signature
+    (aliceLink as any).send(new TextEncoder().encode(JSON.stringify({ t: 'move', action: { type: 'ROLL', dice: [6, 6] }, sig: 'deadbeef'.repeat(16) })));
+    await delay(250);
+    assert.equal(JSON.stringify(bob.state), beforeForge, 'Bob ignored the forged, badly-signed move (state unchanged)');
+    // a legitimately SIGNED move from Alice IS accepted and advances Bob's state
+    alice.takeTurn();
+    await waitFor(() => JSON.stringify(bob.state) !== beforeForge);
+    assert.notEqual(JSON.stringify(bob.state), beforeForge, 'a properly-signed move is accepted');
+  } finally { aliceLink.close(); server.close(); }
+});
 
-    clientLink.close();
-  } finally {
-    server.close();
-  }
+test('Bitmessage-style ENCRYPTED chat: peer reads it, the wire carries only ciphertext', async () => {
+  const { alice, bob, server, aliceLink } = await pair();
+  try {
+    const got: { text: string; from: string }[] = [];
+    bob.onChat((text, from) => got.push({ text, from }));
+    alice.chat('gl hf — see you on chain');
+    await waitFor(() => got.length > 0);
+    assert.equal(got[0]!.text, 'gl hf — see you on chain', 'Bob decrypts Alice’s chat');
+    assert.equal(got[0]!.from, alice.address, 'Bitmessage-style sender address');
+    assert.ok(/^[0-9a-f]{40}$/.test(alice.address), 'address = ripemd160(sha256(pub))');
+  } finally { aliceLink.close(); server.close(); }
 });

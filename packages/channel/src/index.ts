@@ -36,6 +36,11 @@ const H = (...parts: Uint8Array[]): Uint8Array => sha256(concatBytes(...parts));
 const sign = (msg: Uint8Array, priv: Uint8Array): Uint8Array => secp.sign(msg, priv).toCompactRawBytes();
 const verify = (sig: Uint8Array, msg: Uint8Array, pub: Uint8Array): boolean => { try { return secp.verify(sig, msg, pub); } catch { return false; } };
 
+/** Sign arbitrary data with an identity key (ECDSA over sha256(data)). */
+export function signData(data: Uint8Array, priv: Uint8Array): Uint8Array { return sign(sha256(data), priv); }
+/** Verify a signature over `data` by `pub`. Safe (false on any error). */
+export function verifyData(data: Uint8Array, sig: Uint8Array, pub: Uint8Array): boolean { return verify(sig, sha256(data), pub); }
+
 function sessionKey(myEphPriv: Uint8Array, theirEphPub: Uint8Array): Uint8Array {
   const shared = secp.getSharedSecret(myEphPriv, theirEphPub, true).slice(1); // x-coord
   return hkdf(sha256, shared, new Uint8Array(0), enc.encode('estates-channel-v1'), 32);
