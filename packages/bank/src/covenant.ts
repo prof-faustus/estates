@@ -75,6 +75,37 @@ export function verifyCovenantPayout(prev: Covenant, tx: Tx, recipientPkh: Uint8
   return { valid: true, reason: `trustless payout of ${amount}; ${prev.reserve - amount} re-locked; no signatures required` };
 }
 
+/**
+ * Audit #8: a FULL covenant-spend check that BINDS the predicate to the chain,
+ * not just to caller-supplied recipient/amount. VALID iff:
+ *   - the tx actually spends the named covenant outpoint (input[0] === prevOutpoint),
+ *   - that input's previous locking script is exactly this covenant's script for
+ *     `prev.rulesHash` (so the rules hash / reserve are pinned to the real UTXO),
+ *   - and the outputs satisfy the payout predicate (pay exactly `amount` to
+ *     `recipientPkh`, re-lock the residual to the SAME covenant).
+ * `recipientPkh`/`amount` must be the canonical values the deterministic engine
+ * mandates for the current state — the caller derives them from state, and the
+ * residual re-lock binds the rules hash so a wrong-rules spend cannot validate.
+ */
+export function verifyCovenantSpend(
+  prev: Covenant,
+  prevOutpoint: { txid: string; vout: number },
+  prevScript: Uint8Array,
+  tx: Tx,
+  recipientPkh: Uint8Array,
+  amount: number,
+): CovenantCheck {
+  const inp = tx.inputs[0];
+  if (!inp || inp.outpoint.txid !== prevOutpoint.txid || inp.outpoint.vout !== prevOutpoint.vout) {
+    return { valid: false, reason: 'tx does not spend the covenant outpoint' };
+  }
+  const expectedPrev = covenantOutput(prev.reserve, prev.rulesHash).script;
+  if (!eq(prevScript, expectedPrev)) {
+    return { valid: false, reason: 'spent prevout script is not this covenant (rules hash / reserve mismatch)' };
+  }
+  return verifyCovenantPayout(prev, tx, recipientPkh, amount);
+}
+
 /** Build a well-formed covenant payout tx (the honest path). */
 export function buildCovenantPayout(prev: Covenant, prevOutpoint: { txid: string; vout: number }, recipientPkh: Uint8Array, amount: number): Tx {
   return {

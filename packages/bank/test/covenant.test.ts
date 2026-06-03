@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { genKeyPair, type Tx } from '@estates/trade';
 import { paymentOutput } from '@estates/onchain';
 import {
-  rulesHash, covenantOutput, verifyCovenantPayout, buildCovenantPayout, makeBanker,
+  rulesHash, covenantOutput, verifyCovenantPayout, verifyCovenantSpend, buildCovenantPayout, makeBanker,
   type Covenant,
 } from '../src/index.ts';
 
@@ -79,4 +79,22 @@ test('the covenant pins the rule-set hash (mismatched rules do not re-lock)', ()
   const tx = buildCovenantPayout(reserve, prevOutpoint, seatPkh, 200);
   const wrongRules: Covenant = { reserve: reserve.reserve, rulesHash: new Uint8Array(32).fill(1) };
   assert.equal(verifyCovenantPayout(wrongRules, tx, seatPkh, 200).valid, false);
+});
+
+// ---- audit #8: covenant spend bound to the real outpoint + prev script -------
+test('verifyCovenantSpend binds to the spent outpoint AND the prev covenant script', () => {
+  const prevScript = covenantOutput(reserve.reserve, reserve.rulesHash).script;
+  const tx = buildCovenantPayout(reserve, prevOutpoint, seatPkh, 200);
+  assert.ok(verifyCovenantSpend(reserve, prevOutpoint, prevScript, tx, seatPkh, 200).valid, 'legal bound spend verifies');
+
+  // spends a DIFFERENT outpoint than the covenant UTXO → rejected
+  const wrongIn = { ...tx, inputs: [{ ...tx.inputs[0]!, outpoint: { txid: 'cd'.repeat(32), vout: 1 } }] };
+  assert.equal(verifyCovenantSpend(reserve, prevOutpoint, prevScript, wrongIn, seatPkh, 200).valid, false);
+
+  // the spent prevout script is NOT this covenant (e.g. different rules hash) → rejected
+  const otherScript = covenantOutput(reserve.reserve, new Uint8Array(32).fill(1)).script;
+  assert.equal(verifyCovenantSpend(reserve, prevOutpoint, otherScript, tx, seatPkh, 200).valid, false);
+
+  // wrong amount / recipient still rejected (delegates to the payout predicate)
+  assert.equal(verifyCovenantSpend(reserve, prevOutpoint, prevScript, tx, attackerPkh, 200).valid, false);
 });
