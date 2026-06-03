@@ -39,13 +39,14 @@ function framedReader(sock: Socket, onMsg: (obj: any) => void): void {
 
 /** An authenticated, encrypted link to one peer. */
 export class PeerLink {
-  readonly peerIdPub: Uint8Array;
+  readonly peerIdPub: Uint8Array;     // the peer's secp256k1 identity (ECDH / wallet) pub
+  readonly peerSignPub: Uint8Array;   // the peer's Ed25519 signing pub (vouched for in the handshake)
   private sock: Socket;
   private session: Session;
   private handlers: ((m: Uint8Array) => void)[] = [];
   private inbox: Uint8Array[] = []; // frames received before a handler was attached
   constructor(sock: Socket, session: Session) {
-    this.sock = sock; this.session = session; this.peerIdPub = session.peerIdPub;
+    this.sock = sock; this.session = session; this.peerIdPub = session.peerIdPub; this.peerSignPub = session.peerSignPub;
   }
   /** Route post-handshake frames (called by listen/connect once the session is up). */
   bind(): void {

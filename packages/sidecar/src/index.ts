@@ -70,8 +70,10 @@ export class GamePeer {
 
   constructor(link: PeerLink, id: Identity, seat: number, peerSeat: number, config: EngineConfig, ctx: MapContext, genesis: { tx: Tx; cursor: { txid: string; vout: number } }) {
     this.link = link; this.id = id; this.seat = seat; this.peerSeat = peerSeat; this.ctx = ctx;
-    this.address = addressOf(id.pub);
-    this.seatKeys = new Map([[seat, id.pub], [peerSeat, link.peerIdPub]]);
+    this.address = addressOf(id.pub); // Bitmessage address = the player's master (wallet) pub
+    // move signatures use the Ed25519 signing key (derived from the master); register
+    // each seat's signing pub (ours + the peer's, vouched for in the handshake).
+    this.seatKeys = new Map([[seat, id.signPub], [peerSeat, link.peerSignPub]]);
     this.state = initialState(config);
     this.chain = new MoveChain(genesis);
     link.onMessage((m) => this.recv(m));
@@ -97,7 +99,7 @@ export class GamePeer {
     if (pre.current !== this.seat) return;
     const r = apply(pre, action); if (!r.ok) return;
     const post = r.state;
-    const sig = signData(this.movePayload(post.turnIndex, pre.current, action), this.id.priv);
+    const sig = signData(this.movePayload(post.turnIndex, pre.current, action), this.id.signPriv);
     this.chainMove(pre, post, action, pre.current);
     this.state = post;
     this.link.send(enc({ t: 'move', action, sig: toHex(sig) }));
@@ -143,7 +145,7 @@ export class GamePeer {
     const pre = this.state;
     const ar = apply(pre, action); if (!ar.ok) { this.round = null; return; }
     const post = ar.state;
-    const sig = signData(this.movePayload(post.turnIndex, pre.current, action), this.id.priv);
+    const sig = signData(this.movePayload(post.turnIndex, pre.current, action), this.id.signPriv);
     this.chainMove(pre, post, action, pre.current);
     this.prevBeacon = result.beacon;
     this.state = post;

@@ -68,7 +68,7 @@ test('a signed ROLL with MOVER-CHOSEN dice (not the beacon) is REJECTED (#2)', a
     const post = apply(initialState(config), action as any);
     assert.ok(post.ok);
     const payload = new TextEncoder().encode(JSON.stringify({ k: 'estates-move-v1', g: hex(ctx.gameId), turnIndex: post.state.turnIndex, actor: 0, action }));
-    const sig = signData(payload, aliceId.priv);
+    const sig = signData(payload, aliceId.signPriv);
     const frame = { t: 'move', action, sig: hex(sig), beacon: { cm: hex(cm), cp: hex(cp), sm: hex(sm), sp: hex(sp), seatM: 0, seatP: 1 } };
     (aliceLink as any).send(new TextEncoder().encode(JSON.stringify(frame)));
     await delay(250);
@@ -102,7 +102,7 @@ test('Bitmessage-style ENCRYPTED chat decrypts with the right address', async ()
 // ---- the seat identity IS the player's own non-custodial key (no throwaway) ---
 test('moves are signed by the PLAYER key, and chat is addressed by it', async () => {
   const { genMaster } = await import('@estates/keys');
-  const { identityFrom } = await import('@estates/channel');
+  const { identityFrom, signingKeyFromMaster } = await import('@estates/channel');
   const { addressOf } = await import('@estates/chat');
   const kA = genMaster(); const kB = genMaster();                 // players' non-custodial keys
   const idA = identityFrom(kA.priv); const idB = identityFrom(kB.priv);
@@ -118,7 +118,9 @@ test('moves are signed by the PLAYER key, and chat is addressed by it', async ()
     assert.equal(alice.address, addressOf(kA.pub), 'Alice’s address is her player key');
     assert.equal(bob!.address, addressOf(kB.pub), 'Bob’s address is his player key');
     // over the authenticated channel each peer learned the OTHER player's real key
-    assert.equal(hex(aliceLink.peerIdPub), hex(kB.pub), 'Alice’s link peer = Bob’s player key');
+    assert.equal(hex(aliceLink.peerIdPub), hex(kB.pub), 'Alice’s link peer = Bob’s master (wallet) key');
+    // the SIGNING key is the Ed25519 key DERIVED from the same master (not a throwaway)
+    assert.equal(hex(aliceLink.peerSignPub), hex(signingKeyFromMaster(kB.priv).pub), 'Bob’s signing key is derived from his master');
     // a real move from Alice is accepted (it is signed by her player key, which Bob registered for seat 0)
     const before = JSON.stringify(bob!.state);
     await waitFor(() => alice.myTurn());
