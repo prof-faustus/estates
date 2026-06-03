@@ -18,6 +18,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "node --test --experimental-strip-types \"test/**/*.test.ts\""
+    "test": "node --test --experimental-strip-types \"test/**/*.test.ts\"",
+    "demo": "node --experimental-strip-types demo.ts"
   }
 }
