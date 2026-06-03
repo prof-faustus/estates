@@ -72,3 +72,24 @@ test('a third peer reconnects live and joins the ongoing channel', async () => {
     await relay.close();
   }
 });
+
+// ---- audit #5: relay DoS bounds -------------------------------------------
+test('relay rejects oversized bodies (413) and a full channel log (503)', async () => {
+  const relay = await startRelayServer(0, { maxBody: 64, maxLog: 1 });
+  try {
+    const big = await fetch(`${relay.url}/publish/c1`, { method: 'POST', body: 'a'.repeat(200) });
+    assert.equal(big.status, 413, 'oversized body rejected');
+    const ok1 = await fetch(`${relay.url}/publish/c2`, { method: 'POST', body: 'aa' });
+    assert.equal(ok1.status, 204, 'first small message accepted');
+    const ok2 = await fetch(`${relay.url}/publish/c2`, { method: 'POST', body: 'bb' });
+    assert.equal(ok2.status, 503, 'channel log cap reached');
+  } finally { await relay.close(); }
+});
+
+test('relay rejects new channels past the cap (503)', async () => {
+  const relay = await startRelayServer(0, { maxChannels: 1 });
+  try {
+    assert.equal((await fetch(`${relay.url}/publish/only`, { method: 'POST', body: 'aa' })).status, 204);
+    assert.equal((await fetch(`${relay.url}/publish/second`, { method: 'POST', body: 'aa' })).status, 503, 'channel cap enforced');
+  } finally { await relay.close(); }
+});

@@ -18,12 +18,17 @@ export interface RelayServer { url: string; port: number; close: () => Promise<v
  *        (the payload still lands in the log, so the client's history poll heals
  *        it). Lets tests prove sync survives a lossy at-least-once transport.
  */
-export function startRelayServer(port = 0, opts?: { dropRate?: number }): Promise<RelayServer> {
+export function startRelayServer(port = 0, opts?: { dropRate?: number; maxBody?: number; maxLog?: number; maxChannels?: number }): Promise<RelayServer> {
   const dropRate = opts?.dropRate ?? 0;
+  // DoS bounds (audit #5): treat the relay as hostile even on loopback.
+  const MAX_BODY = opts?.maxBody ?? 256 * 1024;       // bytes per published message
+  const MAX_LOG = opts?.maxLog ?? 200_000;            // messages retained per channel
+  const MAX_CHANNELS = opts?.maxChannels ?? 10_000;   // distinct channels
   const channels = new Map<string, Channel>();
-  const chan = (name: string): Channel => {
+  /** Get/create a channel; returns null if a NEW channel would exceed the cap. */
+  const chan = (name: string): Channel | null => {
     let c = channels.get(name);
-    if (!c) { c = { log: [], clients: new Set() }; channels.set(name, c); }
+    if (!c) { if (channels.size >= MAX_CHANNELS) return null; c = { log: [], clients: new Set() }; channels.set(name, c); }
     return c;
   };
 
@@ -47,6 +52,7 @@ export function startRelayServer(port = 0, opts?: { dropRate?: number }): Promis
     // so a single lost packet can never permanently desync a turn-based game.
     if (req.method === 'GET' && hist) {
       const c = chan(hist[1]!);
+      if (!c) { res.writeHead(503, CORS).end(); return; }
       res.writeHead(200, { 'content-type': 'text/plain', 'cache-control': 'no-cache', ...CORS });
       res.end(c.log.join('\n'));
       return;
@@ -54,10 +60,18 @@ export function startRelayServer(port = 0, opts?: { dropRate?: number }): Promis
 
     if (req.method === 'POST' && pub) {
       const c = chan(pub[1]!);
+      if (!c) { res.writeHead(503, CORS).end(); return; } // channel cap reached
       let body = '';
-      req.on('data', (d) => { body += d; });
+      let over = false;
+      req.on('data', (d) => {
+        if (over) return;
+        body += d;
+        if (body.length > MAX_BODY) { over = true; res.writeHead(413, CORS).end(); req.destroy(); }
+      });
       req.on('end', () => {
+        if (over) return;
         const hex = body.trim();
+        if (hex && c.log.length >= MAX_LOG) { res.writeHead(503, CORS).end(); return; } // channel log full
         if (hex) {
           c.log.push(hex);
           // Always logged; live fan-out may "drop" frames (test-only) — the
@@ -71,6 +85,7 @@ export function startRelayServer(port = 0, opts?: { dropRate?: number }): Promis
 
     if (req.method === 'GET' && sub) {
       const c = chan(sub[1]!);
+      if (!c) { res.writeHead(503, CORS).end(); return; }
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', ...CORS });
       for (const hex of c.log) res.write(`data: ${hex}\n\n`); // history catch-up
       c.clients.add(res);

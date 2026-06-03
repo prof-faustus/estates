@@ -92,21 +92,19 @@ export class HttpRelay implements Relay {
     return () => ctrl.abort();
   }
 
-  // --- ordered (game): the FULL ordered log, grown in total order ---
-  // The live SSE stream is the PRIMARY path (a constant keep-alive connection:
-  // history first, then every new payload pushed instantly, in append order).
-  // The poll is only a heal backstop if the stream drops a frame or disconnects.
-  // Both feed `add`, which appends unseen payloads in order — so a peer always
-  // replays one identical total order and updates within milliseconds.
+  // --- ordered (game): the FULL ordered log from /history is the SINGLE source
+  // of total order (audit #4). The server's append order is authoritative; we
+  // NEVER append live frames into the local order (that could reorder after a
+  // dropped frame). The SSE stream only POKES an immediate re-poll, so updates
+  // are near-instant while the order is always exactly the server's. We re-emit
+  // the full ordered snapshot whenever the log grows.
   subscribeOrdered(onSnapshot: (ordered: Uint8Array[]) => void): () => void {
     const ctrl = new AbortController();
-    const seen = new Set<string>();
-    const ordered: Uint8Array[] = [];
-    let dirty = false;
-    const add = (hex: string): void => { if (hex && !seen.has(hex)) { seen.add(hex); ordered.push(fromHex(hex)); dirty = true; } };
-    const flush = (): void => { if (dirty) { dirty = false; onSnapshot([...ordered]); } };
-    void this.streamForever((hex) => { add(hex); flush(); }, ctrl.signal);     // instant push
-    void this.pollLoop((hexes) => { for (const h of hexes) add(h); flush(); }, ctrl.signal); // heal backstop
+    let lastLen = -1;
+    void this.streamForever(() => this.refresh(), ctrl.signal); // SSE = a poke to re-poll now
+    void this.pollLoop((hexes) => {
+      if (hexes.length !== lastLen) { lastLen = hexes.length; onSnapshot(hexes.map(fromHex)); }
+    }, ctrl.signal);
     return () => ctrl.abort();
   }
 
