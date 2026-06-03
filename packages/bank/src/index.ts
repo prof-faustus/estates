@@ -19,6 +19,7 @@ import {
   type TxOutput, type TitleState, type Outpoint,
 } from '@estates/onchain';
 import { sighashPreimage, signInput, type Tx, type TxInput, type KeyPair } from '@estates/trade';
+import { covenantOutput, verifyCovenantSpend, rulesHash, type Covenant, type CovenantCheck } from './covenant.ts';
 
 // Trustless covenant bank (D-BANK-ENFORCE upgrade) + banker role.
 export * from './covenant.ts';
@@ -96,6 +97,38 @@ export function legalOutputs(a: BankAction): TxOutput[] {
 export function certify(tx: Tx, expected: readonly TxOutput[]): boolean {
   if (tx.outputs.length !== expected.length) return false;
   return tx.outputs.every((o, i) => o.satoshis === expected[i]!.satoshis && eq(o.script, expected[i]!.script));
+}
+
+// ---------------------------------------------------------------------------
+// Bank reserve enforcement: a CHOICE of QUORUM or SCRIPT-COVENANT
+// ---------------------------------------------------------------------------
+
+/**
+ * The table chooses how the reserve is enforced:
+ *  - 'quorum'   — M-of-N honest seats co-sign only core-legal actions (v1; trust
+ *                 = honest quorum, explicitly stated).
+ *  - 'covenant' — the reserve sits under a covenant whose script self-enforces the
+ *                 legal payout with ZERO signatures (sighash-preimage introspection;
+ *                 trustless). No quorum assumption.
+ */
+export type BankMode = 'quorum' | 'covenant';
+
+/** The reserve output for the chosen enforcement mode. */
+export function reserveOutput(mode: BankMode, reserve: number, bankPkh: Uint8Array, rh: Uint8Array = rulesHash()): TxOutput {
+  return mode === 'covenant' ? covenantOutput(reserve, rh) : paymentOutput(reserve, bankPkh);
+}
+
+export type ReserveSpend =
+  | { readonly mode: 'quorum'; readonly tx: Tx; readonly sigs: readonly SeatSignature[]; readonly policy: BankPolicy; readonly action: BankAction }
+  | { readonly mode: 'covenant'; readonly tx: Tx; readonly covenant: Covenant; readonly prevOutpoint: { txid: string; vout: number }; readonly prevScript: Uint8Array; readonly recipientPkh: Uint8Array; readonly amount: number };
+
+/** Verify a reserve spend under the chosen mode (the bank's enforcement choice). */
+export function verifyReserveSpend(s: ReserveSpend): BankCheck | CovenantCheck {
+  if (s.mode === 'quorum') {
+    if (!certify(s.tx, legalOutputs(s.action))) return { valid: false, count: 0, reason: 'outputs do not match the certified legal action' };
+    return verifyBankSpend(s.tx, s.sigs, s.policy);
+  }
+  return verifyCovenantSpend(s.covenant, s.prevOutpoint, s.prevScript, s.tx, s.recipientPkh, s.amount);
 }
 
 // ---------------------------------------------------------------------------

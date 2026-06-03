@@ -5,7 +5,8 @@ import { gameTag, type TitleState } from '@estates/onchain';
 import { loadParams } from '@estates/params';
 import {
   pkhOf, signBankSpend, verifyBankSpend, legalOutputs, certify, buildGenesis,
-  type BankPolicy,
+  verifyReserveSpend, reserveOutput, rulesHash, buildCovenantPayout,
+  type BankPolicy, type Covenant,
 } from '../src/index.ts';
 
 const P = loadParams();
@@ -94,4 +95,32 @@ test('genesis output count is fully accounted for', () => {
   });
   // 28 titles + 2 reprieve + 3 seats + 1 reserve + 1 params + 1 beacon = 36
   assert.equal(g.tx.outputs.length, 28 + 2 + 3 + 1 + 1 + 1);
+});
+
+// ---- audit #8: the bank reserve has a CHOICE of quorum OR script-covenant -----
+test('reserve enforcement choice: quorum (M-of-N) and covenant (trustless) both verify', () => {
+  const seats = [genKeyPair(), genKeyPair(), genKeyPair()];
+  const policy: BankPolicy = { seatPubkeys: seats.map((k) => k.publicKey), threshold: 2 };
+
+  // QUORUM mode: M-of-N seats co-sign a certified-legal action
+  const action = { kind: 'salary', seatPkh: seats[0]!.pkh, amount: 200 } as const;
+  const qtx = bankSpendTx(legalOutputs(action));
+  const sigs = [
+    { pub: seats[0]!.publicKey, sig: signBankSpend(qtx, seats[0]!) },
+    { pub: seats[1]!.publicKey, sig: signBankSpend(qtx, seats[1]!) },
+  ];
+  assert.ok(verifyReserveSpend({ mode: 'quorum', tx: qtx, sigs, policy, action }).valid, 'quorum spend verifies');
+  // quorum with outputs not matching the certified action → rejected
+  const qbad = bankSpendTx(legalOutputs({ kind: 'salary', seatPkh: seats[0]!.pkh, amount: 999 }));
+  assert.equal(verifyReserveSpend({ mode: 'quorum', tx: qbad, sigs, policy, action }).valid, false);
+
+  // COVENANT mode: trustless, ZERO signatures, bound to the spent outpoint+script
+  const reserve: Covenant = { reserve: 40_000, rulesHash: rulesHash() };
+  const prevOutpoint = { txid: 'cd'.repeat(32), vout: 0 };
+  const prevScript = reserveOutput('covenant', reserve.reserve, seats[0]!.pkh, reserve.rulesHash).script;
+  const ctx = buildCovenantPayout(reserve, prevOutpoint, seats[0]!.pkh, 200);
+  assert.ok(verifyReserveSpend({ mode: 'covenant', tx: ctx, covenant: reserve, prevOutpoint, prevScript, recipientPkh: seats[0]!.pkh, amount: 200 }).valid, 'covenant spend verifies');
+
+  // the reserve OUTPUT differs by chosen mode (P2PKH-to-bank vs covenant script)
+  assert.notDeepEqual(reserveOutput('quorum', 40_000, seats[0]!.pkh).script, reserveOutput('covenant', 40_000, seats[0]!.pkh).script);
 });
