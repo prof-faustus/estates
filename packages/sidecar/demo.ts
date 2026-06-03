@@ -37,16 +37,18 @@ alice.chat('gl hf — every move signed, every sat on chain');
 await waitFor(() => bob !== null);
 console.log(`# connected. genesis ${genesis.cursor.txid.slice(0, 16)}…  every move below is a real on-chain tx sent over the socket\n`);
 
-let last = -1;
 for (let i = 0; i < 400 && alice.state.phase !== 'GAME_OVER' && alice.state.turnIndex <= 14; i++) {
   const mover = alice.myTurn() ? alice : bob!.myTurn() ? bob! : null;
   if (!mover) { await delay(10); continue; }
-  const before = mover.transcript().length;
+  const before = JSON.stringify(alice.state);
+  const beforeLen = alice.transcript().length;
+  const wasRoll = alice.state.phase === 'AWAIT_ROLL';
   mover.takeTurn();
-  await waitFor(() => alice.state.turnIndex === bob!.state.turnIndex && alice.state.current === bob!.state.current);
-  if (alice.state.turnIndex !== last) { last = alice.state.turnIndex; }
-  const id = alice.transcript()[before] ?? '';
-  console.log(`  seat ${mover.seat} move → tx ${id.slice(0, 16)}…  (turn ${alice.state.turnIndex})  balances ${alice.state.seats.map((s) => s.balance).join('/')}  reserve ${alice.state.bankReserve}`);
+  // wait for the move (incl. the commit→reveal beacon round for a ROLL) to settle
+  await waitFor(() => JSON.stringify(alice.state) === JSON.stringify(bob!.state) && JSON.stringify(alice.state) !== before);
+  const id = alice.transcript()[beforeLen] ?? '';
+  const dice = wasRoll && alice.state.lastRoll ? ` 🎲 ${alice.state.lastRoll[0]}+${alice.state.lastRoll[1]} (beacon)` : '';
+  console.log(`  seat ${mover.seat} move → tx ${id.slice(0, 16)}…${dice}  (turn ${alice.state.turnIndex})  balances ${alice.state.seats.map((s) => s.balance).join('/')}  reserve ${alice.state.bankReserve}`);
 }
 
 const same = JSON.stringify(alice.state) === JSON.stringify(bob!.state);
