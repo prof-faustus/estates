@@ -30,7 +30,7 @@ node --experimental-strip-types tools/ci.ts   # bans → typecheck → 264 tests
 
 ## Remaining production hardening (honest)
 
-- The **desktop UI** still uses the legacy `@estates/table` path; migrating the shell to drive the secure `@estates/sidecar` peer is the next integration step (the secure protocol it will use is done and tested).
+- The **desktop UI** drives the legacy `@estates/table` path, now fully authenticated and bound to the player's own wallet master key (`identityFrom(wallet.key)` → signed moves/announces, beacon dice). Migrating the shell to additionally drive the secure IP-to-IP `@estates/sidecar` peer (real sockets, no relay) is the next integration step (that protocol is done and tested).
 - #7's full Bitcoin **script-satisfaction** verification (locking-script execution) is the remaining production step for real-value trades; value conservation against real UTXOs + fee is enforced now.
 
 ## Second audit (live-protocol) — all 10 closed + extras
