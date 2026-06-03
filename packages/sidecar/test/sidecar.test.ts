@@ -98,3 +98,32 @@ test('Bitmessage-style ENCRYPTED chat decrypts with the right address', async ()
     assert.ok(/^[0-9a-f]{40}$/.test(alice.address));
   } finally { aliceLink.close(); server.close(); }
 });
+
+// ---- the seat identity IS the player's own non-custodial key (no throwaway) ---
+test('moves are signed by the PLAYER key, and chat is addressed by it', async () => {
+  const { genMaster } = await import('@estates/keys');
+  const { identityFrom } = await import('@estates/channel');
+  const { addressOf } = await import('@estates/chat');
+  const kA = genMaster(); const kB = genMaster();                 // players' non-custodial keys
+  const idA = identityFrom(kA.priv); const idB = identityFrom(kB.priv);
+  const genesis = makeGenesis();
+  let bob: GamePeer | null = null;
+  const server = await listen(0, idB, (link: PeerLink) => { bob = new GamePeer(link, idB, 1, 0, config, ctx, genesis); });
+  const port = (server.address() as AddressInfo).port;
+  const aliceLink = await connect('127.0.0.1', port, idA);
+  const alice = new GamePeer(aliceLink, idA, 0, 1, config, ctx, genesis);
+  await waitFor(() => bob !== null);
+  try {
+    // Bitmessage address = the player's own key (ripemd160(sha256(pub)))
+    assert.equal(alice.address, addressOf(kA.pub), 'Alice’s address is her player key');
+    assert.equal(bob!.address, addressOf(kB.pub), 'Bob’s address is his player key');
+    // over the authenticated channel each peer learned the OTHER player's real key
+    assert.equal(hex(aliceLink.peerIdPub), hex(kB.pub), 'Alice’s link peer = Bob’s player key');
+    // a real move from Alice is accepted (it is signed by her player key, which Bob registered for seat 0)
+    const before = JSON.stringify(bob!.state);
+    await waitFor(() => alice.myTurn());
+    alice.takeTurn();
+    await waitFor(() => JSON.stringify(bob!.state) !== before);
+    assert.notEqual(JSON.stringify(bob!.state), before, 'Bob applied Alice’s player-key-signed move');
+  } finally { aliceLink.close(); server.close(); }
+});

@@ -8,7 +8,8 @@
  */
 import { createHash } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
-import { genIdentity } from '@estates/channel';
+import { identityFrom } from '@estates/channel';
+import { genMaster } from '@estates/keys';
 import { listen, connect, type PeerLink } from '@estates/link';
 import { type MapContext } from '@estates/chainmap';
 import { commitOutput, encodeActionCommit } from '@estates/txmap';
@@ -24,7 +25,9 @@ const config: EngineConfig = { network: 'regtest', seatCount: 2, bankReserve: 1_
 const ctx: MapContext = { gameId: new Uint8Array(32).fill(7), genesis: { txid: 'ef'.repeat(32), vout: 0 }, seatPkhs: [pkh(1), pkh(2)], bankPkh: pkh(9) };
 const genesis = buildGenesis({ fundingOutpoint: { txid: 'ab'.repeat(32), vout: 0 }, cursorScript: commitOutput(encodeActionCommit({ type: 'END_TURN' }, 0, 0), pkh(9)).script, seatFunds: [{ satoshis: 1500, script: pkh(1) }, { satoshis: 1500, script: pkh(2) }] });
 
-const aliceId = genIdentity(); const bobId = genIdentity();
+// Each player's OWN non-custodial key is the seat identity (signs moves + addresses chat).
+const aliceKey = genMaster(); const bobKey = genMaster();
+const aliceId = identityFrom(aliceKey.priv); const bobId = identityFrom(bobKey.priv);
 let bob: GamePeer | null = null;
 const server = await listen(0, bobId, (link: PeerLink) => { bob = new GamePeer(link, bobId, 1, 0, config, ctx, genesis); });
 const port = (server.address() as AddressInfo).port;

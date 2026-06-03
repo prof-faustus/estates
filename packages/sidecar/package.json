@@ -14,7 +14,8 @@
     "@estates/channel": "workspace:*",
     "@estates/chainmap": "workspace:*",
     "@estates/chat": "workspace:*",
-    "@estates/beacon": "workspace:*"
+    "@estates/beacon": "workspace:*",
+    "@estates/keys": "workspace:*"
   },
   "exports": {
     ".": "./src/index.ts"

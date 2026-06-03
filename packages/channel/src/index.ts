@@ -25,6 +25,12 @@ secp.etc.hmacSha256Sync = (k: Uint8Array, ...m: Uint8Array[]): Uint8Array => hma
 
 export interface Identity { readonly priv: Uint8Array; readonly pub: Uint8Array }
 export function genIdentity(): Identity { const priv = secp.utils.randomPrivateKey(); return { priv, pub: secp.getPublicKey(priv, true) }; }
+/** Use a PLAYER'S existing non-custodial secp256k1 key as the channel identity —
+ *  the same key signs moves and addresses chat (no throwaway keys). */
+export function identityFrom(priv: Uint8Array): Identity {
+  if (priv.length !== 32) throw new Error('identity private key must be 32 bytes');
+  return { priv, pub: secp.getPublicKey(priv, true) };
+}
 
 export interface Hello { readonly idPub: string; readonly ephPub: string; readonly nonce: string; readonly sig: string }
 export type Ack = Hello;
