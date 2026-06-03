@@ -15,9 +15,16 @@
  * permutationFromEntropy). PROTOCOL-BINDING.md records the intent to swap to a
  * direct import once cross-repo workspace linking is wired.
  */
-import { createHash, createHmac } from 'node:crypto';
+import { sha256 as nobleSha256 } from '@noble/hashes/sha256';
+import { hmac } from '@noble/hashes/hmac';
 
 export const ZERO_BEACON: Uint8Array = new Uint8Array(32);
+
+function concatBytes(...parts: Uint8Array[]): Uint8Array {
+  let len = 0; for (const p of parts) len += p.length;
+  const out = new Uint8Array(len); let o = 0; for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
+}
 
 export interface PartyReveal {
   readonly seat: number;
@@ -32,9 +39,7 @@ export interface BeaconResult {
 }
 
 function sha256(...parts: Uint8Array[]): Uint8Array {
-  const h = createHash('sha256');
-  for (const p of parts) h.update(p);
-  return new Uint8Array(h.digest());
+  return nobleSha256(concatBytes(...parts));
 }
 
 /** Commitment to a secret: c = SHA-256(secret). Mirrors entropyCommitSync. */
@@ -76,7 +81,7 @@ export function beaconSeed(reveals: readonly PartyReveal[], turnIndex: number, p
  */
 function drawDie(seed: Uint8Array, label: number): number {
   for (let counter = 0; counter < 1 << 20; counter++) {
-    const mac = createHmac('sha256', seed).update(u32be(label)).update(u32be(counter)).digest();
+    const mac = hmac(nobleSha256, seed, concatBytes(u32be(label), u32be(counter)));
     for (const b of mac) {
       if (b < 252) return (b % 6) + 1;
     }
