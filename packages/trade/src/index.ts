@@ -59,7 +59,7 @@ function u32le(n: number): Uint8Array { const b = new Uint8Array(4); new DataVie
 function u64le(n: number): Uint8Array {
   const b = new Uint8Array(8); new DataView(b.buffer).setBigUint64(0, BigInt(n), true); return b;
 }
-function fromHex(h: string): Uint8Array { const b = new Uint8Array(h.length / 2); for (let i = 0; i < b.length; i++) b[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16); return b; }
+function fromHex(h: string): Uint8Array { if (typeof h !== 'string' || h.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(h)) throw new Error('invalid hex'); const b = new Uint8Array(h.length / 2); for (let i = 0; i < b.length; i++) b[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16); return b; }
 
 function serializeOutputs(outs: readonly TxOutput[]): Uint8Array {
   const parts: number[] = [];

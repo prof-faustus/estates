@@ -28,7 +28,7 @@ export interface Tx {
 export function hash256(b: Uint8Array): Uint8Array { return sha256(sha256(b)); }
 
 const fromHex = (h: string): Uint8Array => {
-  if (h.length % 2 !== 0) throw new Error('odd hex length');
+  if (typeof h !== 'string' || h.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(h)) throw new Error('invalid hex');
   const b = new Uint8Array(h.length / 2);
   for (let i = 0; i < b.length; i++) b[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
   return b;

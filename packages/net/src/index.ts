@@ -50,7 +50,7 @@ export class InMemoryRelay implements Relay {
 
 const enc = (e: Envelope): Uint8Array => new TextEncoder().encode(JSON.stringify(e));
 const dec = (p: Uint8Array): Envelope => JSON.parse(new TextDecoder().decode(p)) as Envelope;
-const fromHex = (h: string): Uint8Array => { const b = new Uint8Array(h.length / 2); for (let i = 0; i < b.length; i++) b[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16); return b; };
+const fromHex = (h: string): Uint8Array => { if (typeof h !== 'string' || h.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(h)) throw new Error('invalid hex'); const b = new Uint8Array(h.length / 2); for (let i = 0; i < b.length; i++) b[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16); return b; };
 
 /**
  * A peer's deterministic view. Applies the ordered transcript; a roll's dice

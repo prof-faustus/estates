@@ -28,7 +28,7 @@ export interface GameTranscript {
 }
 
 const toHex = (b: Uint8Array): string => Buffer.from(b).toString('hex');
-const fromHex = (h: string): Uint8Array => { const b = new Uint8Array(h.length / 2); for (let i = 0; i < b.length; i++) b[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16); return b; };
+const fromHex = (h: string): Uint8Array => { if (typeof h !== 'string' || h.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(h)) throw new Error('invalid hex'); const b = new Uint8Array(h.length / 2); for (let i = 0; i < b.length; i++) b[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16); return b; };
 
 /** A non-roll decision for the active seat (rolls are produced by the beacon). */
 export type Decide = (s: GameState) => Action;
