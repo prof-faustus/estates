@@ -1,0 +1,18 @@
+{
+  "name": "@estates/node",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ESTATES native node adapter: JSON-RPC to your own BSV node to broadcast moves and fetch real gettxoutproof (CMerkleBlock) SPV proofs, parsed into @estates/spv proofs. No third-party REST.",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@estates/spv": "workspace:*",
+    "@estates/merkleblock": "workspace:*"
+  },
+  "scripts": {
+    "test": "node --test --experimental-strip-types \"test/**/*.test.ts\""
+  }
+}

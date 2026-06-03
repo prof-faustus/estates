@@ -94,7 +94,11 @@ export function parsePartialMerkleTree(pmt: PartialMerkleTree): ParsedMerkle {
   };
 
   const top = traverse(h, 0);
-  if (bit !== flags.length || hi !== hashes.length) throw new Error('malformed partial merkle tree (unused flags/hashes)');
+  // All hashes must be consumed; leftover flag bits may only be zero padding to
+  // fill the last byte (BIP-37 packs flags into bytes, so up to 7 trailing zeros).
+  if (hi !== hashes.length) throw new Error('malformed partial merkle tree (unused hashes)');
+  if (flags.length - bit >= 8) throw new Error('malformed partial merkle tree (excess flag bits)');
+  for (let i = bit; i < flags.length; i++) if (flags[i] !== 0) throw new Error('malformed partial merkle tree (non-zero flag padding)');
   return {
     root: top.hash,
     matched: top.matches.map((m) => ({ index: m.index, hash: m.leafHash, proof: { index: m.index, branch: m.branch } as MerkleProof })),
