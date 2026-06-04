@@ -44,7 +44,13 @@ export function ChatPanel({ channel = 'estates-table', wif, network = 'regtest',
     const reann = setInterval(() => room.join(), 4000);
     const refresh = setInterval(force, 800); // refresh member list
     roomRef.current = room;
-    return () => { clearInterval(reann); clearInterval(refresh); room.leave(); room.disconnect(); roomRef.current = null; };
+    // Cleanup MUST NOT broadcast leave(): React StrictMode double-mounts in dev
+    // (and `tauri dev` runs the dev build), so the throwaway first mount would
+    // broadcast a `leave` that every other peer applies — wrongly removing us
+    // from their member set and silently breaking the whole chat. Just stop our
+    // own loops/subscription; a genuinely departed peer is harmless to leave in
+    // others' lists (you'd just encrypt to a key nobody reads).
+    return () => { clearInterval(reann); clearInterval(refresh); room.disconnect(); if (roomRef.current === room) roomRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channel, directUrl]);
 

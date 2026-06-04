@@ -97,8 +97,9 @@ export class ChatRoom {
     if (!m) return;
     switch (m.kind) {
       case 'join': {
-        const pub = fromHex(m.pub);
-        if (addressOf(pub) !== m.address) return; // address must bind the pubkey
+        let pub: Uint8Array;
+        try { pub = fromHex(m.pub); } catch { return; }   // bad hex → ignore (never throw out of the poll loop)
+        if (addressOf(pub) !== m.address) return;          // address must bind the pubkey
         this.members.set(m.address, { address: m.address, pub, ...(m.name ? { name: m.name } : {}) });
         return;
       }
