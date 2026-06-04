@@ -202,6 +202,7 @@ export class NetTable {
   /** Take a seat. `simulated` marks this peer as a bot to other players (it is a
    *  separate connected peer running in auto-play, NOT controlled from anyone's app). */
   joinSeat(simulated = false): void {
+    if (this.mySeat !== null) return;          // already seated — never claim a second seat
     const seat = this.lowestFree();
     if (seat < 0) return;
     this.send({ kind: 'seat', seat, who: this.me, name: this.name, bot: simulated });

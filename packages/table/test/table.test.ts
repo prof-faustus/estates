@@ -171,6 +171,19 @@ test('seat race: if two peers grab the same seat, exactly one wins and all agree
   assert.deepEqual(a.view().seats, b.view().seats);
 });
 
+test('a seated peer never claims a second seat (no bot seat-multiplying)', () => {
+  const relay = new InMemoryRelay();
+  const a = peer(relay, 'A'); a.connect();
+  a.createTable(4);
+  a.joinSeat(true);                 // claim our seat
+  assert.equal(a.mySeat, 0);
+  a.joinSeat(true); a.joinSeat(true); // repeated claims (as the throttled bot loop might)
+  // we still hold exactly ONE seat — the others stay free
+  const mine = a.view().seats.filter((s) => s.who === a.me);
+  assert.equal(mine.length, 1, 'exactly one seat held');
+  assert.equal(a.view().seats.length, 1, 'no extra seats were grabbed');
+});
+
 test('late joiner replays history and sees the same lobby', () => {
   const relay = new InMemoryRelay();
   const a = peer(relay, 'A'); a.connect(); a.createTable(3); a.joinSeat();

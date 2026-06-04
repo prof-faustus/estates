@@ -18,12 +18,13 @@ export function WalletPanel({ wif, network }: { wif: string; network: Network })
   const [confirmReal, setConfirmReal] = useState(false);
   const [status, setStatus] = useState('');
   const [balance, setBalance] = useState<number | null>(null);
-  // regtest spends use YOUR node's JSON-RPC (there is no WhatsOnChain for regtest).
-  // Pre-filled with the STANDARD local-node defaults so Send works out of the box;
-  // edit only if your node differs. (You hold the key; nobody asks you for money.)
+  // regtest spends use YOUR own BSV node's JSON-RPC (native SPV over your node —
+  // never a third-party API). Pre-filled to match the ESTATES regtest runbook's
+  // BSV node (bitcoinsv/bitcoin-sv, host port 18443, rpc e/e); edit if yours
+  // differs. (You hold the key; nobody asks you for money.)
   const [rpcUrl, setRpcUrl] = useState('http://127.0.0.1:18443');
-  const [rpcUser, setRpcUser] = useState('bitcoin');
-  const [rpcPass, setRpcPass] = useState('bitcoin');
+  const [rpcUser, setRpcUser] = useState('e');
+  const [rpcPass, setRpcPass] = useState('e');
   const isReg = network === 'regtest';
   const canSend = !isReg || rpcUrl.trim() !== '';
 

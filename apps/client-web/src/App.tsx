@@ -87,6 +87,16 @@ export function App() {
     }
   }
 
+  // Close THIS window (a bot's own window) — native Tauri window or browser tab.
+  async function closeSelf() {
+    try {
+      if (typeof (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== 'undefined') {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        await getCurrentWindow().close();
+      } else { window.close(); }
+    } catch { /* ignore */ }
+  }
+
   // If launched with ?autoplay=1&table=…, THIS window is a simulated player:
   // auto-enter, connect to the given table over the relay, and claim our own seat.
   useEffect(() => {
@@ -102,17 +112,36 @@ export function App() {
     t.connect();
     tableRef.current = t; tableAddrRef.current = addr;
     setStage('table');
-    // Claim our own seat once the table definition has propagated over the relay.
+    // Claim EXACTLY ONE seat. The claim is THROTTLED (≥1.5s between attempts):
+    // a relay round-trip reflects our seat (~100ms) long before the next attempt,
+    // so the bot never grabs several seats while its first claim is in flight (the
+    // "bots keep multiplying" bug). We only re-attempt if a claim was truly lost.
     const deadline = Date.now() + 20000;
+    let lastClaim = 0;
     const iv = setInterval(() => {
       const view = t.view();
-      if (view.mySeat !== null) { clearInterval(iv); return; }
-      if (view.maxSeats !== null && view.freeSeats.length > 0) t.joinSeat(true);
-      if (Date.now() > deadline) clearInterval(iv);
+      if (view.mySeat !== null) { clearInterval(iv); return; }   // got our seat → stop
+      if (Date.now() > deadline) { clearInterval(iv); void closeSelf(); return; } // gave up → close, don't linger
+      if (view.maxSeats !== null && view.freeSeats.length > 0 && Date.now() - lastClaim > 1500) {
+        lastClaim = Date.now();
+        t.joinSeat(true);
+      }
     }, 500);
     return () => clearInterval(iv);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // A bot window ENDS when its game ends: once GAME_OVER, close after a short beat
+  // so simulated players don't pile up across games ("bots not ending").
+  useEffect(() => {
+    if (!autoPlay) return;
+    if (v?.state?.phase === 'GAME_OVER') {
+      const id = setTimeout(() => { void closeSelf(); }, 4000);
+      return () => clearTimeout(id);
+    }
+    return undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoPlay, v?.state?.phase]);
   function returnToLobby() {
     tableRef.current?.leaveGame();   // leaving mid-game gives your money + assets to the leading player
     tableRef.current?.disconnect();  // STOP the relay loops — else they pile up game-after-game and hang the app
