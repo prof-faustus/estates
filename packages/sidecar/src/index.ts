@@ -23,6 +23,7 @@ import { initialState, apply, type GameState, type Action, type EngineConfig } f
 import { txForAction } from '@estates/txmap';
 import { type MapContext } from '@estates/chainmap';
 import { MoveChain } from '@estates/ledger';
+import { deriveChildPub, deriveChildPriv, pubOf, pkhOf, spendContext } from '@estates/keys';
 import type { Tx } from '@estates/tx';
 
 const te = (s: string) => new TextEncoder().encode(s);
@@ -37,6 +38,11 @@ function fromHexStrict(h: string): Uint8Array {
 }
 const eqBytes = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && a.every((x, i) => x === b[i]!);
 
+/**
+ * @deprecated NOT a spend key — a deterministic public hash with NO recoverable
+ * private key (red-team #1). Retained only so old transcripts decode. Live keys
+ * are ECDH-derived per spend (see GamePeer.chainMove → spendPkh).
+ */
 export function detPkh(tableId: Uint8Array, turnIndex: number, role: number): Uint8Array {
   return new Uint8Array(createHash('sha256').update(tableId).update(new Uint8Array([turnIndex & 0xff, (turnIndex >> 8) & 0xff, role & 0xff])).digest()).slice(0, 20);
 }
@@ -100,9 +106,9 @@ export class GamePeer {
     const r = apply(pre, action); if (!r.ok) return;
     const post = r.state;
     const sig = signData(this.movePayload(post.turnIndex, pre.current, action), this.id.signPriv);
-    this.chainMove(pre, post, action, pre.current);
+    const pkhs = this.chainMove(pre, post, action, pre.current);
     this.state = post;
-    this.link.send(enc({ t: 'move', action, sig: toHex(sig) }));
+    this.link.send(enc({ t: 'move', action, sig: toHex(sig), pkhs }));
     this.onUpdate?.();
   }
 
@@ -146,11 +152,11 @@ export class GamePeer {
     const ar = apply(pre, action); if (!ar.ok) { this.round = null; return; }
     const post = ar.state;
     const sig = signData(this.movePayload(post.turnIndex, pre.current, action), this.id.signPriv);
-    this.chainMove(pre, post, action, pre.current);
+    const pkhs = this.chainMove(pre, post, action, pre.current);
     this.prevBeacon = result.beacon;
     this.state = post;
     this.round = null;
-    this.link.send(enc({ t: 'move', action, sig: toHex(sig), beacon: transcript }));
+    this.link.send(enc({ t: 'move', action, sig: toHex(sig), beacon: transcript, pkhs }));
     this.onUpdate?.();
   }
 
@@ -191,13 +197,17 @@ export class GamePeer {
       const key = this.seatKeys.get(actor);
       let sig: Uint8Array; try { sig = fromHexStrict(o.sig); } catch { return; }
       if (!key || !verifyData(this.movePayload(post.turnIndex, actor, o.action), sig, key)) return; // unsigned/forged
+      // Validate EVERYTHING before mutating any state/ledger (no partial apply):
+      // (1) a ROLL's dice must be beacon-derived; (2) every published one-use
+      // spend-key pkh addressed to our seat must be a key we can derive (spend).
+      let newBeacon: Uint8Array | null = null;
       if (o.action.type === 'ROLL') {
-        const beacon = this.verifyRollBeacon(pre, o.action.dice, o.beacon as BeaconTranscript);
-        if (!beacon) return;                       // dice not beacon-derived → REJECT
-        this.prevBeacon = beacon;
-        this.round = null;
+        newBeacon = this.verifyRollBeacon(pre, o.action.dice, o.beacon as BeaconTranscript);
+        if (!newBeacon) return;                    // dice not beacon-derived → REJECT
       }
-      this.chainMove(pre, post, o.action, actor);
+      const published = (o.pkhs && typeof o.pkhs === 'object') ? o.pkhs as Record<number, string> : {};
+      if (this.chainMove(pre, post, o.action, actor, published) === null) return; // unspendable/forged pkh → REJECT
+      if (newBeacon) { this.prevBeacon = newBeacon; this.round = null; }
       this.state = post;
       this.onUpdate?.();
     } else if (o.t === 'chat' && o.env) {
@@ -207,9 +217,51 @@ export class GamePeer {
     }
   }
 
-  private chainMove(pre: GameState, post: GameState, action: Action, actor: number): void {
-    const move = txForAction(pre, post, action, post.turnIndex, actor, this.ctx, (role) => detPkh(this.ctx.gameId, post.turnIndex, role));
+  /** The compressed identity (ECDH/wallet) pubkey of a seat (2-party link). */
+  private seatIdPub(role: number): Uint8Array {
+    return role === this.seat ? this.id.pub : this.link.peerIdPub;
+  }
+
+  /**
+   * Map a move to its on-chain tx, deriving EVERY output's P2PKH from a fresh,
+   * one-use, ECDH-derived BRC-42 key bound to (game, network, purpose, seat, turn,
+   * output) — never a bare public hash (red-team #1/#2). The ACTOR derives each
+   * key (deriveChildPub against the recipient's identity pub) and PUBLISHES the
+   * resulting pkhs in the move; the recipient recovers the matching private key
+   * (deriveChildPriv) and can spend it. Both peers chain the SAME tx from the
+   * published pkhs, so the ledger stays deterministic.
+   *
+   * `published` present ⇒ we are MIRRORING a peer's move: use its pkhs, but VERIFY
+   * that every output addressed to our own seat is a key WE can derive (else the
+   * actor tried to pay us to an unspendable address → reject, return null).
+   */
+  private chainMove(pre: GameState, post: GameState, action: Action, actor: number, published?: Record<number, string>): Record<number, string> | null {
+    const gameId = toHex(this.ctx.gameId);
+    const network = post.network;
+    const out: Record<number, string> = {};
+    let bad = false;
+    const provider = (role: number): Uint8Array => {
+      const ctx = spendContext({ gameId, network, purpose: 'move', role, turnIndex: post.turnIndex, outputIndex: role });
+      let pkh: Uint8Array;
+      if (published) {
+        const h = published[role];
+        if (h === undefined) { bad = true; return new Uint8Array(20); }
+        try { pkh = fromHexStrict(h); } catch { bad = true; return new Uint8Array(20); }
+        if (pkh.length !== 20) { bad = true; return new Uint8Array(20); }
+        if (role === this.seat) { // an output to ME must be a key I can derive (and thus spend)
+          const mine = pkhOf(pubOf(deriveChildPriv(this.id.priv, this.link.peerIdPub, ctx)));
+          if (!eqBytes(mine, pkh)) { bad = true; return new Uint8Array(20); }
+        }
+      } else {
+        pkh = pkhOf(deriveChildPub(this.seatIdPub(role), this.id.priv, ctx)); // payer = actor (me)
+      }
+      out[role] = toHex(pkh);
+      return pkh;
+    };
+    const move = txForAction(pre, post, action, post.turnIndex, actor, this.ctx, provider);
+    if (bad) return null;                 // a published output is unspendable by us → reject the move
     this.chain.append(move);
+    return out;
   }
 
   chat(text: string): void { this.link.send(enc({ t: 'chat', env: encryptBroadcast([this.link.peerIdPub], te(text)) })); }

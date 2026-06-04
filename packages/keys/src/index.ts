@@ -21,6 +21,7 @@
  */
 import * as secp from '@noble/secp256k1';
 import { sha256 } from '@noble/hashes/sha256';
+import { ripemd160 } from '@noble/hashes/ripemd160';
 import { hmac } from '@noble/hashes/hmac';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils';
 
@@ -28,6 +29,28 @@ const N = secp.CURVE.n;
 const enc = new TextEncoder();
 
 export interface KeyPair { readonly priv: Uint8Array; readonly pub: Uint8Array }
+
+/** P2PKH hash160 of a compressed pubkey: ripemd160(sha256(pub)). The on-chain
+ *  address material for a derived one-use spend key. */
+export function pkhOf(pub: Uint8Array): Uint8Array { return ripemd160(sha256(pub)); }
+
+/**
+ * Canonical spend-key derivation context (the BRC-42 invoice). Binds a one-use
+ * key to EXACTLY one on-chain purpose so a key is never reused across outputs:
+ * game id, network, protocol version, purpose, role/seat, asset, turn, output.
+ * Both the payer (who derives the child PUB) and the recipient (who derives the
+ * matching child PRIV) build the identical context, so the recipient can always
+ * recover the private key for an output addressed to them.
+ */
+export function spendContext(p: {
+  gameId: string; network: string; version?: string; purpose: string;
+  role: number; turnIndex: number; outputIndex: number; asset?: string;
+}): string {
+  return [
+    'estates-spend-v1', p.version ?? '1', p.gameId, p.network, p.purpose,
+    `seat${p.role}`, p.asset ?? '-', `turn${p.turnIndex}`, `out${p.outputIndex}`,
+  ].join('/');
+}
 
 const bytesToBig = (b: Uint8Array): bigint => BigInt('0x' + bytesToHex(b));
 const bigToBytes32 = (x: bigint): Uint8Array => hexToBytes(x.toString(16).padStart(64, '0'));

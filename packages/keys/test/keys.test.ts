@@ -76,3 +76,30 @@ test('derived private keys are valid secp256k1 scalars', () => {
     assert.doesNotThrow(() => secp.getPublicKey(k, true), 'valid private key');
   }
 });
+
+// ---- on-chain spend keys: fresh, ECDH-derived, recoverable, context-bound -----
+test('pkhOf + spendContext: a payer-derived output pkh is recoverable by the recipient', async () => {
+  const { pkhOf, spendContext } = await import('../src/index.ts');
+  const payer = genMaster();       // the actor building the tx
+  const recip = genMaster();       // a seat being paid
+  const ctx = spendContext({ gameId: 'ab'.repeat(32), network: 'regtest', purpose: 'move', role: 1, turnIndex: 7, outputIndex: 1 });
+
+  // payer derives the recipient's one-use child PUB → output pkh
+  const childPub = deriveChildPub(recip.pub, payer.priv, ctx);
+  const outPkh = pkhOf(childPub);
+
+  // recipient recovers the matching PRIVATE key and its pkh — proves spendability
+  const childPriv = deriveChildPriv(recip.priv, payer.pub, ctx);
+  assert.equal(hex(pubOf(childPriv)), hex(childPub), 'recipient derives the same child key');
+  assert.equal(hex(pkhOf(pubOf(childPriv))), hex(outPkh), 'recipient can spend the exact output');
+  assert.equal(outPkh.length, 20, 'pkh is a 20-byte hash160');
+});
+
+test('spendContext binds each output: different purpose/role/turn/output ⇒ different key (no reuse)', async () => {
+  const { spendContext } = await import('../src/index.ts');
+  const m = genMaster();
+  const base = { gameId: 'cd'.repeat(32), network: 'regtest', purpose: 'move', role: 0, turnIndex: 3, outputIndex: 0 };
+  const k = (o: Partial<typeof base>) => hex(deriveSelf(m, spendContext({ ...base, ...o })).pub);
+  const keys = new Set([k({}), k({ role: 1 }), k({ turnIndex: 4 }), k({ outputIndex: 1 }), k({ purpose: 'reserve' }), k({ network: 'testnet' })]);
+  assert.equal(keys.size, 6, 'every distinct on-chain context yields a distinct one-use key');
+});
