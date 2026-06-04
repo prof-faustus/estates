@@ -36,6 +36,14 @@ export function genPeer(): Peer {
   return { priv, pub, address: addressOf(pub) };
 }
 
+/** Deterministic peer from an EXISTING secret key — so chat uses the PLAYER's own
+ *  wallet key (its Bitmessage address is derived from the same key that signs
+ *  moves), never a throwaway. */
+export function peerFrom(priv: Uint8Array): Peer {
+  const pub = secp.getPublicKey(priv, true);
+  return { priv, pub, address: addressOf(pub) };
+}
+
 interface WrappedKey { readonly address: string; readonly nonce: string; readonly ct: string; }
 export interface Envelope {
   readonly ephPub: string;                   // ephemeral compressed pubkey (hex)

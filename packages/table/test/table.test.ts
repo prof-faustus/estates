@@ -210,6 +210,18 @@ test('view() reflects each phase; a fresh peer is disconnected until a table exi
   assert.equal(p.view().canStart, false);
 });
 
+test('disconnect() stops the relay subscription (no leaked update loops after leaving a table)', () => {
+  const relay = new InMemoryRelay();
+  let updates = 0;
+  const p = new NetTable(relay, 'leaver', () => { updates++; }, {}); p.connect();
+  const host = peer(relay, 'host'); host.connect(); host.createTable(2);
+  assert.ok(updates > 0, 'received updates while connected');
+  p.disconnect();
+  const before = updates;
+  host.joinSeat();                  // more relay traffic after we disconnected
+  assert.equal(updates, before, 'no further updates fire after disconnect — the loop is gone');
+});
+
 // ---- houses & hotels (build), mortgage, cards, Bitmessage-style discovery ----
 test('buildable: full group only, even-build; building advances the level', () => {
   let s = own([6, 8, 9], 0);                 // full Sky group

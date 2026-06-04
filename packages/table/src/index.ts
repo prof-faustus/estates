@@ -177,11 +177,22 @@ export class NetTable {
     this.botTimer = opts?.scheduleBot ?? null;
   }
 
+  private unsub: (() => void) | null = null;
+
   connect(): void {
     // Drive state by replaying the relay's TOTAL-ORDER log (no optimistic apply,
     // so peers can never diverge). The transport pushes the ordered log live and
     // heals any gap, so every peer converges on one identical state.
-    if (this.relay.subscribeOrdered) this.relay.subscribeOrdered((log) => this.rebuild(log));
+    if (this.relay.subscribeOrdered) this.unsub = this.relay.subscribeOrdered((log) => this.rebuild(log));
+  }
+
+  /** Stop all relay activity for this table. MUST be called when leaving a table
+   *  (e.g. returning to the lobby): otherwise the background SSE + poll loops keep
+   *  running and firing onUpdate() forever, and they pile up game-after-game until
+   *  the app grinds to a halt. */
+  disconnect(): void {
+    this.unsub?.();
+    this.unsub = null;
   }
 
   createTable(maxSeats: number, network: NetworkMode = 'regtest'): void {

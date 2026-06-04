@@ -50,6 +50,7 @@ export function App() {
   }
 
   function createTable() {
+    tableRef.current?.disconnect();   // drop any prior table's relay loops before opening a new one
     const addr = newAddress();
     const myId = playerIdentity(wif, 'testnet');
     const t = new NetTable(makeRelay(addr), identity(), force, { autoPlay, ...(myId ? { identity: myId } : {}) });
@@ -60,6 +61,7 @@ export function App() {
     setStage('table');
   }
   function joinTable(ot: OpenTable) {
+    tableRef.current?.disconnect();   // drop any prior table's relay loops before joining another
     const myId = playerIdentity(wif, 'testnet');
     const t = new NetTable(makeRelay(ot.addr), identity(), force, { autoPlay, ...(myId ? { identity: myId } : {}) });
     t.connect();
@@ -113,7 +115,8 @@ export function App() {
   }, []);
   function returnToLobby() {
     tableRef.current?.leaveGame();   // leaving mid-game gives your money + assets to the leading player
-    tableRef.current = null; setBeBanker(false); setStage('lobby'); force();
+    tableRef.current?.disconnect();  // STOP the relay loops — else they pile up game-after-game and hang the app
+    tableRef.current = null; tableAddrRef.current = ''; setBeBanker(false); setStage('lobby'); force();
   }
 
   const t = tableRef.current;
@@ -211,7 +214,7 @@ export function App() {
           </section>
           <aside className="panel">
             <WalletPanel wif={wif} network={walletNet} />
-            <ChatPanel channel={`chat-${tableAddrRef.current}`} />
+            <ChatPanel channel={`chat-${tableAddrRef.current}`} wif={wif} network={walletNet} />
           </aside>
         </div>
       )}
@@ -283,7 +286,7 @@ export function App() {
 
             <WalletPanel wif={wif} network={walletNet} />
             <section className="log"><h3>Transcript</h3><ol>{v.state.log.slice(-10).map((line, i) => <li key={i}>{line}</li>)}</ol></section>
-            <ChatPanel channel={`chat-${tableAddrRef.current}`} />
+            <ChatPanel channel={`chat-${tableAddrRef.current}`} wif={wif} network={walletNet} />
           </aside>
         </div>
       )}

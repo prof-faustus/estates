@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  genPeer, addressOf, encryptBroadcast, decryptBroadcast, ChatRoom, InMemoryRelay, type ChatMessage,
+  genPeer, peerFrom, addressOf, encryptBroadcast, decryptBroadcast, ChatRoom, InMemoryRelay, type ChatMessage,
 } from '../src/index.ts';
 
 const td = (b: Uint8Array) => new TextDecoder().decode(b);
@@ -12,6 +12,17 @@ test('Bitmessage-style address is deterministic and binds the pubkey', () => {
   assert.equal(p.address, addressOf(p.pub));
   assert.equal(p.address.length, 40); // ripemd160 = 20 bytes hex
   assert.notEqual(p.address, genPeer().address);
+});
+
+test('peerFrom: chat identity derives deterministically from the player wallet key', () => {
+  const wallet = genPeer();                         // stand-in for a wallet secret key
+  const a = peerFrom(wallet.priv);
+  const b = peerFrom(wallet.priv);
+  assert.equal(a.address, b.address, 'same key → same Bitmessage address (not a throwaway)');
+  assert.equal(a.address, addressOf(wallet.pub), 'address binds the wallet pubkey');
+  // a message addressed to the wallet-derived peer opens with the wallet key
+  const env = encryptBroadcast([a.pub], te('hi'));
+  assert.equal(td(decryptBroadcast(env, peerFrom(wallet.priv))!), 'hi');
 });
 
 test('broadcast encryption: every recipient decrypts; a non-member cannot', () => {

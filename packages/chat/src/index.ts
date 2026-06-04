@@ -7,10 +7,10 @@
  */
 import { type Relay, InMemoryRelay, HttpRelay } from './relay.ts';
 import {
-  genPeer, addressOf, encryptBroadcast, decryptBroadcast, type Peer, type Envelope,
+  genPeer, peerFrom, addressOf, encryptBroadcast, decryptBroadcast, type Peer, type Envelope,
 } from './broadcast.ts';
 
-export { genPeer, addressOf, encryptBroadcast, decryptBroadcast, InMemoryRelay, HttpRelay };
+export { genPeer, peerFrom, addressOf, encryptBroadcast, decryptBroadcast, InMemoryRelay, HttpRelay };
 export type { Peer, Envelope, Relay };
 
 type NetMsg =
