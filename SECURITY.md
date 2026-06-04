@@ -55,3 +55,20 @@ wallet key that derives single-use address/payment keys); the Ed25519 protocol-s
 key is DERIVED from that same master (`channel.signingKeyFromMaster`), bound through the
 IP-to-IP handshake. The same master signs moves and addresses Bitmessage chat — no
 throwaway keys. CI green: 270 tests + web build.
+
+## Third audit (production real-value retest) — all 5 remaining items closed
+
+A retest accepted the deck/card layer (unbiased shuffle, live deck-order gate,
+card-key no-reuse verifier, ECDH key primitive, sidecar seat-output keying, shared
+beacon verifier) and flagged five remaining items. All are now fixed + tested:
+
+| # | Finding | Fix |
+|---|---|---|
+| 1 | Bank/reserve/NFT outputs used raw reusable pkhs | `chainmap.MapContext` gains `bankMode` (**covenant default**, quorum opt-in); `bankValueOutput` locks every reserve receipt under the covenant; `titleToNftOutput` custodies OWNED titles with a fresh ECDH key (`PkhProvider`) and BANK-held titles under the covenant. `txForAction` provider is `(role, purpose)` → no intra-tx key reuse. |
+| 2 | Genesis accepted raw scripts, no derivation proof | `@estates/ledger/manifest`: a per-output key manifest (stable identity, derived spend pub, pkh, purpose, game id, output index, derivation context, **certification signature**). `verifyGenesisManifest` rejects any output without fresh ECDH-derived/covenant custody, a valid cert sig, or that reuses a key. |
+| 3 | Published pkhs not covered by the move signature | `movePayload` now signs the move **+ output-key manifest + beacon transcript**; the receiver reconstructs from the received pkhs/beacon and rejects any mismatch. |
+| 4 | No full BSV script satisfaction | `@estates/scriptvm`: a Script interpreter with real BIP-143 sighash + ECDSA `OP_CHECKSIG` (DER), covering P2PKH/NFT/covenant; `verifyTx` checks every input is satisfied, no banned opcode, non-negative fee. |
+| 5 | Reveal-withholding could halt play | A reveal **deadline** surfaces a `onStall(seat)` to the HUMAN (wait, or FORFEIT the stalling seat) — never a 2-party auto-roll (which would hand the mover the dice). |
+
+**Bank reserve default = covenant** (trustless, self-enforcing script); **quorum**
+(M-of-N banker signatures) is opt-in via `bankMode: 'quorum'`. CI green: 294 tests + web build.
