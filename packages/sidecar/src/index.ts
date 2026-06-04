@@ -72,6 +72,13 @@ export class GamePeer {
   private prevBeacon: Uint8Array = ZERO_BEACON;
   private round: BeaconRound | null = null;
   private chatHandlers: ((text: string, from: string) => void)[] = [];
+  private stallHandlers: ((seat: number) => void)[] = [];
+  private revealTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Reveal deadline (ms). On expiry with a committed-but-not-revealed peer, we do
+   *  NOT auto-roll (in a 2-party game rolling on the mover's secret alone would let
+   *  the mover grind the dice) — we surface a STALL to the human, who chooses
+   *  (wait, or FORFEIT the stalling seat via the menu). Human decides every action. */
+  revealDeadlineMs = 15000;
   onUpdate?: () => void;
 
   constructor(link: PeerLink, id: Identity, seat: number, peerSeat: number, config: EngineConfig, ctx: MapContext, genesis: { tx: Tx; cursor: { txid: string; vout: number } }) {
@@ -87,8 +94,12 @@ export class GamePeer {
 
   myTurn(): boolean { return this.state.phase !== 'GAME_OVER' && this.state.current === this.seat; }
 
-  private movePayload(turnIndex: number, actor: number, action: Action): Uint8Array {
-    return enc({ k: 'estates-move-v1', g: toHex(this.ctx.gameId), turnIndex, actor, action });
+  /** The SIGNED payload binds the move AND its output-key manifest (pkhs) AND the
+   *  beacon transcript (red-team #3): tampering with which keys an output pays, or
+   *  with the dice transcript, breaks the signature. pkhs keys are numeric strings,
+   *  so JSON serialises in a canonical (numeric) order on both peers. */
+  private movePayload(turnIndex: number, actor: number, action: Action, extra?: { pkhs?: Record<number, string> | null; beacon?: BeaconTranscript | null }): Uint8Array {
+    return enc({ k: 'estates-move-v1', g: toHex(this.ctx.gameId), turnIndex, actor, action, pkhs: extra?.pkhs ?? null, beacon: extra?.beacon ?? null });
   }
 
   /** Take this peer's turn: a ROLL starts the beacon; everything else is a signed move. */
@@ -105,8 +116,8 @@ export class GamePeer {
     if (pre.current !== this.seat) return;
     const r = apply(pre, action); if (!r.ok) return;
     const post = r.state;
-    const sig = signData(this.movePayload(post.turnIndex, pre.current, action), this.id.signPriv);
-    const pkhs = this.chainMove(pre, post, action, pre.current);
+    const pkhs = this.chainMove(pre, post, action, pre.current);            // derive output keys FIRST
+    const sig = signData(this.movePayload(post.turnIndex, pre.current, action, { pkhs }), this.id.signPriv); // …then sign over them
     this.state = post;
     this.link.send(enc({ t: 'move', action, sig: toHex(sig), pkhs }));
     this.onUpdate?.();
@@ -132,7 +143,25 @@ export class GamePeer {
     if (!r || r.revealed || !r.myCommit || !r.peerCommit || !r.mySecret) return;
     r.revealed = true;
     this.link.send(enc({ t: 'br', turn: r.turn, s: toHex(r.mySecret) }));
+    // I've revealed; the peer must now reveal. Arm the reveal deadline — if it
+    // lapses with no peer reveal, surface a stall (no biased auto-roll).
+    this.armRevealDeadline(r.turn);
   }
+
+  private armRevealDeadline(turn: number): void {
+    if (this.revealTimer) clearTimeout(this.revealTimer);
+    this.revealTimer = setTimeout(() => {
+      this.revealTimer = null;
+      const r = this.round;
+      if (r && r.turn === turn && !r.peerSecret && this.state.current === this.seat && this.state.phase === 'AWAIT_ROLL') {
+        for (const h of this.stallHandlers) h(this.peerSeat); // the human chooses: wait, or FORFEIT the stalling seat
+      }
+    }, this.revealDeadlineMs);
+    (this.revealTimer as { unref?: () => void }).unref?.();
+  }
+  private clearRevealDeadline(): void { if (this.revealTimer) { clearTimeout(this.revealTimer); this.revealTimer = null; } }
+  /** Notified (seat) when a committed peer fails to reveal within the deadline. */
+  onStall(cb: (seat: number) => void): void { this.stallHandlers.push(cb); }
   private onReveal(turn: number, sHex: string): void {
     const r = this.round; if (!r || r.turn !== turn || !r.peerCommit) return;
     let sec: Uint8Array; try { sec = fromHexStrict(sHex); } catch { return; }
@@ -151,10 +180,11 @@ export class GamePeer {
     const pre = this.state;
     const ar = apply(pre, action); if (!ar.ok) { this.round = null; return; }
     const post = ar.state;
-    const sig = signData(this.movePayload(post.turnIndex, pre.current, action), this.id.signPriv);
     const pkhs = this.chainMove(pre, post, action, pre.current);
+    const sig = signData(this.movePayload(post.turnIndex, pre.current, action, { pkhs, beacon: transcript }), this.id.signPriv);
     this.prevBeacon = result.beacon;
     this.state = post;
+    this.clearRevealDeadline();
     this.round = null;
     this.link.send(enc({ t: 'move', action, sig: toHex(sig), beacon: transcript, pkhs }));
     this.onUpdate?.();
@@ -196,18 +226,21 @@ export class GamePeer {
       const post = r.state;
       const key = this.seatKeys.get(actor);
       let sig: Uint8Array; try { sig = fromHexStrict(o.sig); } catch { return; }
-      if (!key || !verifyData(this.movePayload(post.turnIndex, actor, o.action), sig, key)) return; // unsigned/forged
+      const published = (o.pkhs && typeof o.pkhs === 'object') ? o.pkhs as Record<number, string> : {};
+      const beaconT = (o.beacon ?? null) as BeaconTranscript | null;
+      // the signature MUST cover the output-key manifest + beacon transcript (#3),
+      // so a tampered pkhs/beacon set fails to verify.
+      if (!key || !verifyData(this.movePayload(post.turnIndex, actor, o.action, { pkhs: published, beacon: beaconT }), sig, key)) return; // unsigned/forged
       // Validate EVERYTHING before mutating any state/ledger (no partial apply):
       // (1) a ROLL's dice must be beacon-derived; (2) every published one-use
       // spend-key pkh addressed to our seat must be a key we can derive (spend).
       let newBeacon: Uint8Array | null = null;
       if (o.action.type === 'ROLL') {
-        newBeacon = this.verifyRollBeacon(pre, o.action.dice, o.beacon as BeaconTranscript);
+        newBeacon = this.verifyRollBeacon(pre, o.action.dice, beaconT as BeaconTranscript);
         if (!newBeacon) return;                    // dice not beacon-derived → REJECT
       }
-      const published = (o.pkhs && typeof o.pkhs === 'object') ? o.pkhs as Record<number, string> : {};
       if (this.chainMove(pre, post, o.action, actor, published) === null) return; // unspendable/forged pkh → REJECT
-      if (newBeacon) { this.prevBeacon = newBeacon; this.round = null; }
+      if (newBeacon) { this.prevBeacon = newBeacon; this.clearRevealDeadline(); this.round = null; }
       this.state = post;
       this.onUpdate?.();
     } else if (o.t === 'chat' && o.env) {

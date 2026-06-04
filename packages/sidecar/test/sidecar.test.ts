@@ -86,6 +86,25 @@ test('a badly-SIGNED move is rejected', async () => {
   } finally { aliceLink.close(); server.close(); }
 });
 
+test('the signed payload BINDS the output-key manifest — a tampered pkhs is rejected (#3)', async () => {
+  const { bob, aliceId, server, aliceLink } = await pair();
+  try {
+    const before = JSON.stringify(bob.state);
+    const action = { type: 'FORFEIT' };                 // a non-roll move legal for the active seat
+    const post = apply(initialState(config), action as any);
+    assert.ok(post.ok);
+    // Alice signs a payload that commits to pkhs {0: aa…} (matching movePayload's shape + order)
+    const signedPkhs = { 0: 'aa'.repeat(20) };
+    const payload = new TextEncoder().encode(JSON.stringify({ k: 'estates-move-v1', g: hex(ctx.gameId), turnIndex: post.state.turnIndex, actor: 0, action, pkhs: signedPkhs, beacon: null }));
+    const sig = signData(payload, aliceId.signPriv);
+    // …but the frame on the wire carries a DIFFERENT manifest {0: bb…} (output-key swap)
+    const frame = { t: 'move', action, sig: hex(sig), pkhs: { 0: 'bb'.repeat(20) } };
+    (aliceLink as any).send(new TextEncoder().encode(JSON.stringify(frame)));
+    await delay(250);
+    assert.equal(JSON.stringify(bob.state), before, 'a move whose pkhs differ from the signed manifest is rejected');
+  } finally { aliceLink.close(); server.close(); }
+});
+
 test('Bitmessage-style ENCRYPTED chat decrypts with the right address', async () => {
   const { alice, bob, server, aliceLink } = await pair();
   try {
