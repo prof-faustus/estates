@@ -1,0 +1,33 @@
+name: CI
+
+# Runs the full ESTATES gate on every push + PR, so the repository carries a
+# visible, verifiable status check: static bans → typecheck → all Node tests →
+# web-client build. Mirrors `pnpm ci` (tools/ci.ts).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.0.0
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Gate (bans → typecheck → tests → web build)
+        run: node --experimental-strip-types tools/ci.ts

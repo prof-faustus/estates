@@ -98,9 +98,13 @@ export class GamePeer {
    *  beacon transcript (red-team #3): tampering with which keys an output pays, or
    *  with the dice transcript, breaks the signature. pkhs keys are numeric strings,
    *  so JSON serialises in a canonical (numeric) order on both peers. */
-  private movePayload(turnIndex: number, actor: number, action: Action, extra?: { pkhs?: Record<string, string> | null; beacon?: BeaconTranscript | null }): Uint8Array {
-    return enc({ k: 'estates-move-v1', g: toHex(this.ctx.gameId), turnIndex, actor, action, pkhs: extra?.pkhs ?? null, beacon: extra?.beacon ?? null });
+  private movePayload(turnIndex: number, actor: number, action: Action, extra?: { pkhs?: Record<string, string> | null; beacon?: BeaconTranscript | null; prevCursor?: string | null }): Uint8Array {
+    return enc({ k: 'estates-move-v1', g: toHex(this.ctx.gameId), turnIndex, actor, action, prevCursor: extra?.prevCursor ?? null, pkhs: extra?.pkhs ?? null, beacon: extra?.beacon ?? null });
   }
+  /** The on-chain cursor (prior move's commitment outpoint) this move spends —
+   *  binds the signature to its exact chain position (anti-replay). Deterministic,
+   *  so both peers compute it identically; never sent on the wire. */
+  private prevCursor(): string { const c = this.chain.cursor; return `${c.txid}:${c.vout}`; }
 
   /** Take this peer's turn: a ROLL starts the beacon; everything else is a signed move. */
   takeTurn(): void {
@@ -116,8 +120,9 @@ export class GamePeer {
     if (pre.current !== this.seat) return;
     const r = apply(pre, action); if (!r.ok) return;
     const post = r.state;
+    const prevCursor = this.prevCursor();                                   // capture BEFORE chainMove advances it
     const pkhs = this.chainMove(pre, post, action, pre.current);            // derive output keys FIRST
-    const sig = signData(this.movePayload(post.turnIndex, pre.current, action, { pkhs }), this.id.signPriv); // …then sign over them
+    const sig = signData(this.movePayload(post.turnIndex, pre.current, action, { pkhs, prevCursor }), this.id.signPriv); // …then sign over them
     this.state = post;
     this.link.send(enc({ t: 'move', action, sig: toHex(sig), pkhs }));
     this.onUpdate?.();
@@ -180,8 +185,9 @@ export class GamePeer {
     const pre = this.state;
     const ar = apply(pre, action); if (!ar.ok) { this.round = null; return; }
     const post = ar.state;
+    const prevCursor = this.prevCursor();
     const pkhs = this.chainMove(pre, post, action, pre.current);
-    const sig = signData(this.movePayload(post.turnIndex, pre.current, action, { pkhs, beacon: transcript }), this.id.signPriv);
+    const sig = signData(this.movePayload(post.turnIndex, pre.current, action, { pkhs, beacon: transcript, prevCursor }), this.id.signPriv);
     this.prevBeacon = result.beacon;
     this.state = post;
     this.clearRevealDeadline();
@@ -228,9 +234,11 @@ export class GamePeer {
       let sig: Uint8Array; try { sig = fromHexStrict(o.sig); } catch { return; }
       const published = (o.pkhs && typeof o.pkhs === 'object') ? o.pkhs as Record<string, string> : {};
       const beaconT = (o.beacon ?? null) as BeaconTranscript | null;
-      // the signature MUST cover the output-key manifest + beacon transcript (#3),
-      // so a tampered pkhs/beacon set fails to verify.
-      if (!key || !verifyData(this.movePayload(post.turnIndex, actor, o.action, { pkhs: published, beacon: beaconT }), sig, key)) return; // unsigned/forged
+      const prevCursor = this.prevCursor(); // our chain is in lockstep → same predecessor outpoint the actor signed
+      // the signature MUST cover the output-key manifest + beacon transcript + the
+      // prior on-chain cursor (#3), so a tampered pkhs/beacon, or a move replayed at
+      // a different chain position, fails to verify.
+      if (!key || !verifyData(this.movePayload(post.turnIndex, actor, o.action, { pkhs: published, beacon: beaconT, prevCursor }), sig, key)) return; // unsigned/forged
       // Validate EVERYTHING before mutating any state/ledger (no partial apply):
       // (1) a ROLL's dice must be beacon-derived; (2) every published one-use
       // spend-key pkh addressed to our seat must be a key we can derive (spend).
