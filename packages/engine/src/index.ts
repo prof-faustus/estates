@@ -32,7 +32,28 @@ const ok = (state: GameState): ApplyResult => ({ ok: true, state });
 // construction
 // ---------------------------------------------------------------------------
 
+/** A draw order is valid iff it is an exact permutation of [0,n). */
+function isPermutation(order: readonly number[] | undefined, n: number): boolean {
+  if (!order || order.length !== n) return false;
+  const seen = new Array<boolean>(n).fill(false);
+  for (const v of order) {
+    if (!Number.isInteger(v) || v < 0 || v >= n || seen[v]) return false;
+    seen[v] = true;
+  }
+  return true;
+}
+
 export function initialState(cfg: EngineConfig): GameState {
+  // Live-fairness gate: a game claiming concealed-card fairness MUST ship a
+  // committed, jointly-generated order for EVERY deck — never fall back to the
+  // public identity order. (Audit: reject missing/biased deckOrder in live mode.)
+  if (cfg.requireFairDecks) {
+    for (const deck of Object.keys(P.decks)) {
+      if (!isPermutation(cfg.deckOrder?.[deck], P.decks[deck]!.length)) {
+        throw new Error(`live game requires a fair committed deckOrder for ${deck} (exact permutation of ${P.decks[deck]!.length})`);
+      }
+    }
+  }
   const seats: SeatState[] = [];
   for (let i = 0; i < cfg.seatCount; i++) {
     seats.push({

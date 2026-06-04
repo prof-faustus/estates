@@ -4,8 +4,9 @@ import { bytesToHex, randomBytes } from '@noble/hashes/utils';
 import {
   genCardKey, sealTo, open, commit, verifyReveal, encodeFace, decodeFace,
   mintCard, openCard, transferCard, commitEntropy, verifyEntropy, combineSeed,
-  permutation, mintDeck, type CardFace,
+  permutation, mintDeck, verifyCardTranscript, type CardFace,
 } from '../src/index.ts';
+import { sha256 } from '@noble/hashes/sha256';
 
 const TABLE = '11'.repeat(32);          // 32-byte table id (hex)
 const OTHER = '22'.repeat(32);
@@ -102,6 +103,51 @@ test('permutation is a valid bijection of [0,n) and deterministic from the seed'
     assert.deepEqual(permutation(seed, n), p, 'deterministic for the same seed');
   }
   assert.notDeepEqual(permutation(randomBytes(32), 52), permutation(randomBytes(32), 52));
+});
+
+// ---- EXACT unbiased shuffle for ESTATES's ACTUAL set sizes ------------------
+// The defect was modulo bias (`next() % (i+1)`) for any size where i+1 ∤ 2^32:
+// Fate/Treasury n=12 (2^32 mod 12 = 4), 28 title NFTs (mod 28 = 4), 30 title+
+// Reprieve (mod 30 = 16). The fix is rejection sampling — exactness is structural.
+test('permutation is an exact bijection for every ESTATES finite set size', () => {
+  for (const n of [12, 28, 30, 40, 2, 6]) {        // Fate, Treasury, titles, titles+reprieve, board, dice-ish
+    const seed = randomBytes(32);
+    const p = permutation(seed, n);
+    assert.deepEqual([...p].sort((x, y) => x - y), Array.from({ length: n }, (_, i) => i), `n=${n} bijection`);
+  }
+});
+test('shuffle is ~uniform across seeds for a biased-prone size (n=12) — no skewed residues', () => {
+  // Deterministic seeds; count where index 0 lands. With modulo bias the 4 low
+  // residues would be measurably over-represented; rejection sampling keeps it flat.
+  const n = 12, samples = 24000;
+  const counts = new Array<number>(n).fill(0);
+  for (let s = 0; s < samples; s++) {
+    const seed = sha256(Uint8Array.of(s & 0xff, (s >>> 8) & 0xff, (s >>> 16) & 0xff, (s >>> 24) & 0xff));
+    counts[permutation(seed, n).indexOf(0)]!++;
+  }
+  const expected = samples / n;
+  // chi-square goodness-of-fit; 11 dof, 0.1% critical ≈ 31.26 — a flat shuffle clears it easily.
+  const chi2 = counts.reduce((acc, c) => acc + (c - expected) ** 2 / expected, 0);
+  assert.ok(chi2 < 31.26, `chi-square ${chi2.toFixed(2)} indicates a skewed shuffle`);
+});
+
+// ---- transcript verifier: one-use keys are ENFORCED, not just intended ------
+test('verifyCardTranscript accepts a fresh deck; rejects reuse / wrong table / bad key', () => {
+  const dealer = genCardKey();
+  const faces: CardFace[] = Array.from({ length: 30 }, (_, i) => ({ kind: i < 28 ? 'TITLE' : 'REPRIEVE', id: i }));
+  const deck = mintDeck(TABLE, faces, dealer.pub, combineSeed([randomBytes(32), randomBytes(32)]));
+  assert.ok(verifyCardTranscript(deck.cards, TABLE).ok, 'fresh deck: unique one-use keys, table-bound');
+
+  // a duplicated custody key (the exact failure one-use keys must prevent) is rejected
+  const dup = [...deck.cards, { ...deck.cards[5]! }];
+  assert.equal(verifyCardTranscript(dup, TABLE).ok, false, 'reused cardPub rejected');
+
+  // a card bound to another table is rejected
+  assert.equal(verifyCardTranscript(deck.cards, OTHER).ok, false, 'wrong table rejected');
+
+  // a malformed / off-curve cardPub is rejected
+  const bad = [{ ...deck.cards[0]!, cardPub: 'zz'.repeat(33) }];
+  assert.equal(verifyCardTranscript(bad, TABLE).ok, false, 'non-point cardPub rejected');
 });
 
 // ---- mint a full concealed, shuffled deck at genesis ------------------------

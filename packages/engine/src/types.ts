@@ -98,4 +98,12 @@ export interface EngineConfig {
    * draw in declared order (identity) — used by conformance vectors.
    */
   readonly deckOrder?: Readonly<Record<string, readonly number[]>>;
+  /**
+   * Live-fairness gate. When true (a real game claiming card secrecy/fairness),
+   * `initialState` REJECTS a missing or non-permutation `deckOrder`: every named
+   * deck must carry a committed, jointly-generated order (an exact permutation of
+   * its length). Identity/declared order is only acceptable for the deterministic
+   * public test/conformance path, where this stays false.
+   */
+  readonly requireFairDecks?: boolean;
 }

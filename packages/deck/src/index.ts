@@ -153,7 +153,18 @@ export function combineSeed(reveals: readonly Uint8Array[]): Uint8Array {
   const sorted = reveals.map(bytesToHex).sort();
   return sha256(concatBytes(...sorted.map(hexToBytes)));
 }
-/** Deterministic Fisher–Yates permutation of [0,n) from a seed (sha256 counter PRNG). */
+/**
+ * Deterministic Fisher–Yates permutation of [0,n) from a seed (sha256 counter PRNG).
+ *
+ * EXACT uniform shuffle for ANY ESTATES finite set size — the Fate/Treasury decks
+ * (n=12), the 28 title-deed NFTs, the 30 title+Reprieve NFT set, and any other
+ * concealed card/state ordering. A plain `next() % (i+1)` would skew the result
+ * whenever `i+1` does not divide 2^32 (e.g. 2^32 mod 12 = 4, mod 28 = 4, mod 30 =
+ * 16 residues occur once more often), so each draw uses REJECTION SAMPLING — the
+ * same standard the dice beacon uses (reject bytes ≥ the largest multiple of the
+ * bound below 2^32). This makes the dealerless concealed shuffle unbiased for
+ * EVERY ESTATES set size, not just powers of two.
+ */
 export function permutation(seed: Uint8Array, n: number): number[] {
   const idx = Array.from({ length: n }, (_, i) => i);
   let pool = sha256(seed);
@@ -164,8 +175,13 @@ export function permutation(seed: Uint8Array, n: number): number[] {
     p += 4;
     return v;
   };
+  // Uniform draw in [0,bound): reject the top partial bucket so the modulo is exact.
+  const drawBelow = (bound: number): number => {
+    const limit = Math.floor(0x1_0000_0000 / bound) * bound;
+    for (;;) { const r = next(); if (r < limit) return r % bound; }
+  };
   for (let i = n - 1; i > 0; i--) {
-    const j = next() % (i + 1);
+    const j = drawBelow(i + 1);
     const t = idx[i]!; idx[i] = idx[j]!; idx[j] = t;
   }
   return idx;
@@ -185,4 +201,30 @@ export function mintDeck(tableId: string, faces: readonly CardFace[], dealerPub:
     secrets.push(secret);
   }
   return { tableId, order, cards, secrets };
+}
+
+// ---- transcript verifier: enforce one-use keys + table binding --------------
+export interface CardTranscriptResult { readonly ok: boolean; readonly reason: string }
+/**
+ * Verify a concealed-card transcript (a deck mint and/or a sequence of custody
+ * states from transfers). The one-use-key promise is only real if a verifier
+ * REJECTS reuse, so this enforces:
+ *   - every `cardPub` is a well-formed compressed secp256k1 point (33 bytes);
+ *   - NO `cardPub` is reused across the whole transcript (each card/custody state
+ *     carries its OWN fresh key — never a reused static address);
+ *   - every card is bound to the expected table id.
+ * A single repeated custody key (e.g. a transfer that fails to re-key, or a
+ * duplicated NFT) fails the check.
+ */
+export function verifyCardTranscript(cards: readonly ConcealedCard[], expectedTableId: string): CardTranscriptResult {
+  if (expectedTableId.length !== 64) return { ok: false, reason: 'expectedTableId must be 32 bytes (64 hex)' };
+  const seen = new Set<string>();
+  for (const c of cards) {
+    if (c.tableId !== expectedTableId) return { ok: false, reason: `card bound to a different table (${c.tableId.slice(0, 8)}…)` };
+    if (!/^[0-9a-f]{66}$/.test(c.cardPub)) return { ok: false, reason: `cardPub is not a 33-byte compressed point: ${c.cardPub.slice(0, 12)}…` };
+    try { secp.ProjectivePoint.fromHex(c.cardPub); } catch { return { ok: false, reason: `cardPub is not a valid curve point: ${c.cardPub.slice(0, 12)}…` }; }
+    if (seen.has(c.cardPub)) return { ok: false, reason: `reused one-use card key ${c.cardPub.slice(0, 12)}… (keys must never repeat)` };
+    seen.add(c.cardPub);
+  }
+  return { ok: true, reason: `verified ${cards.length} concealed cards: unique one-use keys, table-bound` };
 }

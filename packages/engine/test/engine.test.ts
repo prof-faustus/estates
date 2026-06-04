@@ -28,6 +28,22 @@ test('initial state: seats funded, all titles with the bank, AWAIT_ROLL', () => 
   assert.deepEqual(legalActions(s), ['ROLL', 'FORFEIT']);
 });
 
+test('live-fairness gate: requireFairDecks rejects missing/biased deckOrder, accepts a real permutation', () => {
+  const fair = Array.from({ length: 12 }, (_, i) => (i + 5) % 12);   // a non-identity permutation of [0,12)
+  // a real game claiming card fairness MUST carry a committed order for EVERY deck
+  assert.throws(() => initialState({ ...cfg, requireFairDecks: true }), /requires a fair committed deckOrder/);
+  assert.throws(() => initialState({ ...cfg, requireFairDecks: true, deckOrder: { Fate: fair } }), /Treasury/);
+  // not a permutation (duplicate / out of range / wrong length) is rejected
+  const dup = [0, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+  assert.throws(() => initialState({ ...cfg, requireFairDecks: true, deckOrder: { Fate: dup, Treasury: fair } }), /Fate/);
+  assert.throws(() => initialState({ ...cfg, requireFairDecks: true, deckOrder: { Fate: fair.slice(0, 11), Treasury: fair } }), /Fate/);
+  // a valid committed order for both decks is accepted and used
+  const s = initialState({ ...cfg, requireFairDecks: true, deckOrder: { Fate: fair, Treasury: fair } });
+  assert.deepEqual(s.deckOrder?.Fate, fair);
+  // the public/test path still allows identity order (no gate)
+  assert.equal(initialState(cfg).phase, 'AWAIT_ROLL');
+});
+
 test('buy flow: roll to a property, BUY transfers deed + sats', () => {
   let s = fresh();
   s = run(s, [{ type: 'ROLL', dice: [1, 2] }]); // 0 -> 3 Cinder Alley (Sienna, 60)
