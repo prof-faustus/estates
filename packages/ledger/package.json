@@ -12,7 +12,11 @@
     "@estates/tx": "workspace:*",
     "@estates/txmap": "workspace:*",
     "@estates/engine": "workspace:*",
-    "@estates/chainmap": "workspace:*"
+    "@estates/chainmap": "workspace:*",
+    "@estates/onchain": "workspace:*",
+    "@estates/bank": "workspace:*",
+    "@estates/keys": "workspace:*",
+    "@estates/channel": "workspace:*"
   },
   "scripts": {
     "test": "node --test --experimental-strip-types \"test/**/*.test.ts\""

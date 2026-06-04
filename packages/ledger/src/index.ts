@@ -13,6 +13,8 @@
 import { txid, type Tx } from '@estates/tx';
 import type { MoveTx } from '@estates/txmap';
 
+export * from './manifest.ts';   // genesis key manifest + verifier (red-team #2)
+
 /** {satoshis, script} (onchain) → {value, script} (tx wire). */
 function toRaw(o: { satoshis: number; script: Uint8Array }): { value: number; script: Uint8Array } {
   return { value: o.satoshis, script: o.script };

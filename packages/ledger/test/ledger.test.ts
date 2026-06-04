@@ -73,3 +73,39 @@ test('every move is a real tx that LINKS to the previous (chain of txids)', () =
   assert.equal(transcript.length, moves + 1, 'transcript = genesis + every move');
   assert.equal(new Set(transcript).size, transcript.length, 'all txids distinct');
 });
+
+// ---- #2: genesis key manifest — every output is a fresh derived/covenant key ----
+test('verifyGenesisManifest: accepts a fully-derived+certified genesis, rejects raw/reused/forged', async () => {
+  const { genMaster } = await import('@estates/keys');
+  const { covenantOutput, rulesHash } = await import('@estates/bank');
+  const { paymentOutput } = await import('@estates/onchain');
+  const { buildGenesis, certifyGenesisKey, covenantGenesisEntry, verifyGenesisManifest } = await import('../src/index.ts');
+
+  const gameId = 'a1'.repeat(32);
+  const A = genMaster(); const B = genMaster();
+  // genesis: out0 cursor (A), out1 seat-fund A, out2 seat-fund B, out3 covenant reserve
+  const e0 = certifyGenesisKey(A, gameId, 'regtest', 'cursor', 0);
+  const e1 = certifyGenesisKey(A, gameId, 'regtest', 'seat-fund', 1);
+  const e2 = certifyGenesisKey(B, gameId, 'regtest', 'seat-fund', 2);
+  const e3 = covenantGenesisEntry(3, 'reserve');
+  const g = buildGenesis({
+    fundingOutpoint: { txid: 'cd'.repeat(32), vout: 0 },
+    cursorScript: paymentOutput(1, fromHexLocal(e0.pkh!)).script,
+    seatFunds: [{ satoshis: 1500, script: paymentOutput(1500, fromHexLocal(e1.pkh!)).script }, { satoshis: 1500, script: paymentOutput(1500, fromHexLocal(e2.pkh!)).script }],
+    mints: [{ satoshis: 1_000_000, script: covenantOutput(1_000_000, rulesHash()).script }],
+  });
+  const manifest = [e0, e1, e2, e3];
+  assert.ok(verifyGenesisManifest(g.tx, manifest, gameId).ok, 'a fully-derived + covenant genesis verifies');
+
+  // a RAW output with no entry → rejected
+  assert.equal(verifyGenesisManifest(g.tx, [e0, e1, e2], gameId).ok, false, 'missing entry for an output is rejected');
+  // a TAMPERED pkh (cert no longer matches) → rejected
+  const forged = { ...e1, pkh: e2.pkh! };
+  assert.equal(verifyGenesisManifest(g.tx, [e0, forged, e2, e3], gameId).ok, false, 'pkh ≠ hash160(derivedSpendPub) rejected');
+  // REUSED key across two outputs → rejected
+  const reuse = certifyGenesisKey(A, gameId, 'regtest', 'cursor', 0); // same key as e0
+  const dupTx = buildGenesis({ fundingOutpoint: { txid: 'cd'.repeat(32), vout: 0 }, cursorScript: paymentOutput(1, fromHexLocal(e0.pkh!)).script, seatFunds: [{ satoshis: 1500, script: paymentOutput(1500, fromHexLocal(e0.pkh!)).script }] });
+  assert.equal(verifyGenesisManifest(dupTx.tx, [e0, { ...reuse, outputIndex: 1, purpose: 'seat-fund' }], gameId).ok, false, 'a one-use key reused across outputs is rejected');
+});
+
+function fromHexLocal(h: string): Uint8Array { const b = new Uint8Array(h.length / 2); for (let i = 0; i < b.length; i++) b[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16); return b; }
