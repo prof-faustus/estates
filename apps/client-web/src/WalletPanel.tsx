@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Wallet, type Network } from '@estates/wallet';
+import { DEFAULT_RELAY } from './game';
 
 /**
  * Your full wallet — shown at ALL times. It's a wallet as much as a game: a
@@ -26,13 +27,21 @@ export function WalletPanel({ wif, network }: { wif: string; network: Network })
   const isReg = network === 'regtest';
   const canSend = !isReg || rpcUrl.trim() !== '';
 
-  // Browser-safe regtest RPC (uses btoa, not Node's Buffer).
+  // regtest RPC goes through the local relay's loopback PROXY, never straight to
+  // bitcoind: a webview can't fetch the node directly (no CORS on bitcoind → the
+  // call dies as "Failed to fetch"). The relay (same loopback origin we already
+  // reach) forwards to YOUR node and returns the result.
   async function rpc(method: string, params: unknown[]): Promise<any> {
-    const r = await fetch(rpcUrl.trim(), {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: 'Basic ' + btoa(`${rpcUser}:${rpcPass}`) },
-      body: JSON.stringify({ jsonrpc: '1.0', id: 'estates', method, params }),
-    });
+    let r: Response;
+    try {
+      r = await fetch(`${DEFAULT_RELAY}/rpc`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: rpcUrl.trim(), user: rpcUser, pass: rpcPass, method, params }),
+      });
+    } catch {
+      throw new Error('relay not reachable — is the ESTATES relay running on ' + DEFAULT_RELAY + '?');
+    }
     const j = (await r.json()) as { result?: any; error?: { message: string } };
     if (j.error) throw new Error(`${method}: ${j.error.message}`);
     return j.result;

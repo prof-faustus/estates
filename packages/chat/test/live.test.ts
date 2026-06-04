@@ -112,3 +112,35 @@ test('relay enforces a capability token (401) and content-type (415)', async () 
     stop();
   } finally { await relay.close(); }
 });
+
+test('rpc proxy: forwards a loopback JSON-RPC call to the player node, rejects non-loopback (SSRF)', async () => {
+  // stand-in "node": a tiny JSON-RPC server that echoes the method.
+  const { createServer } = await import('node:http');
+  const node = createServer((req, res) => {
+    let b = ''; req.on('data', (d) => { b += d; }); req.on('end', () => {
+      const j = JSON.parse(b) as { method: string };
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ result: { echo: j.method }, error: null }));
+    });
+  });
+  await new Promise<void>((r) => node.listen(0, '127.0.0.1', r));
+  const nodePort = (node.address() as { port: number }).port;
+  const relay = await startRelayServer(0);
+  try {
+    // happy path: relay forwards to our loopback node and returns its JSON
+    const ok = await fetch(`${relay.url}/rpc`, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: `http://127.0.0.1:${nodePort}`, user: 'u', pass: 'p', method: 'getbalance', params: [] }) });
+    assert.equal(ok.status, 200);
+    const okJson = await ok.json() as { result: unknown };
+    assert.deepEqual(okJson.result, { echo: 'getbalance' });
+
+    // SSRF guard: a non-loopback target is refused (403), never fetched
+    const bad = await fetch(`${relay.url}/rpc`, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: 'http://169.254.169.254/latest/meta-data', method: 'x', params: [] }) });
+    assert.equal(bad.status, 403);
+
+    // a down node yields a clean 502 (not a thrown "Failed to fetch")
+    const down = await fetch(`${relay.url}/rpc`, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: 'http://127.0.0.1:1', method: 'x', params: [] }) });
+    assert.equal(down.status, 502);
+  } finally { await relay.close(); await new Promise<void>((r) => node.close(() => r())); }
+});

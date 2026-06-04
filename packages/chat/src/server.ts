@@ -59,6 +59,36 @@ export function startRelayServer(port = 0, opts?: { dropRate?: number; maxBody?:
     const reqHost = (req.headers.host ?? '').split(':')[0];
     if (reqHost && reqHost !== '127.0.0.1' && reqHost !== 'localhost') { res.writeHead(421, CORS).end(); return; }
 
+    // Loopback JSON-RPC PROXY to the player's OWN node (regtest balance/spend).
+    // A browser/webview cannot fetch bitcoind directly — bitcoind sends no CORS
+    // headers, so the call dies as "Failed to fetch". This Node-side proxy (same
+    // loopback origin the webview already reaches) forwards the call to the user's
+    // own node and returns the result. Target is restricted to LOOPBACK (no SSRF):
+    // it is strictly "the local interface to your own node", nothing else.
+    if (req.method === 'POST' && url === '/rpc') {
+      let body = ''; let over = false;
+      req.on('data', (d) => { if (over) return; body += d; if (body.length > MAX_BODY) { over = true; res.writeHead(413, CORS).end(); req.destroy(); } });
+      req.on('end', () => {
+        if (over) return;
+        let q: { url?: string; user?: string; pass?: string; method?: string; params?: unknown[] };
+        try { q = JSON.parse(body); } catch { res.writeHead(400, { 'content-type': 'application/json', ...CORS }).end('{"error":{"message":"bad json"}}'); return; }
+        let target: URL;
+        try { target = new URL(q.url ?? ''); } catch { res.writeHead(400, { 'content-type': 'application/json', ...CORS }).end('{"error":{"message":"bad rpc url"}}'); return; }
+        if (target.hostname !== '127.0.0.1' && target.hostname !== 'localhost') {
+          res.writeHead(403, { 'content-type': 'application/json', ...CORS }).end('{"error":{"message":"rpc proxy is loopback-only (your own node)"}}'); return;
+        }
+        const auth = 'Basic ' + btoa(`${q.user ?? ''}:${q.pass ?? ''}`);
+        fetch(target.toString(), {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: auth },
+          body: JSON.stringify({ jsonrpc: '1.0', id: 'estates', method: q.method, params: q.params ?? [] }),
+        })
+          .then(async (r) => { const text = await r.text(); res.writeHead(r.status, { 'content-type': 'application/json', ...CORS }).end(text); })
+          .catch((e) => { res.writeHead(502, { 'content-type': 'application/json', ...CORS }).end(JSON.stringify({ error: { message: `node unreachable: ${e instanceof Error ? e.message : String(e)}` } })); });
+      });
+      return;
+    }
+
     // Full ordered history as newline-separated hex. Clients poll this to HEAL
     // any SSE frame that was dropped in flight (live store-and-forward catch-up),
     // so a single lost packet can never permanently desync a turn-based game.
