@@ -110,11 +110,19 @@ export class Wallet {
   }
 }
 
+/** Isomorphic base64 (browser `btoa`; Node Buffer fallback) — NO bare `Buffer`,
+ *  which is undefined in the desktop webview. */
+function b64(s: string): string {
+  const g = globalThis as { btoa?: (x: string) => string; Buffer?: { from(d: string, e: string): { toString(enc: string): string } } };
+  if (typeof g.btoa === 'function') return g.btoa(s);
+  return g.Buffer!.from(s, 'utf8').toString('base64');
+}
+
 /** Broadcast to a regtest/local BSV node via JSON-RPC sendrawtransaction. */
 export async function rpcBroadcast(hex: string, rpcUrl: string, user: string, pass: string): Promise<{ txid: string }> {
   const res = await fetch(rpcUrl, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64') },
+    headers: { 'content-type': 'application/json', authorization: 'Basic ' + b64(`${user}:${pass}`) },
     body: JSON.stringify({ jsonrpc: '1.0', id: 'estates', method: 'sendrawtransaction', params: [hex] }),
   });
   const j = (await res.json()) as { result?: string; error?: { message: string } };

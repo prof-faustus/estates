@@ -23,8 +23,10 @@ export interface Member { readonly address: string; readonly pub: Uint8Array; re
 
 const enc = (m: NetMsg): Uint8Array => new TextEncoder().encode(JSON.stringify(m));
 const dec = (p: Uint8Array): NetMsg | null => { try { return JSON.parse(new TextDecoder().decode(p)) as NetMsg; } catch { return null; } };
-const fromHex = (h: string): Uint8Array => Uint8Array.from(Buffer.from(h, 'hex'));
-const toHex = (b: Uint8Array): string => Buffer.from(b).toString('hex');
+// ISOMORPHIC hex (NO node:Buffer — this module runs in the browser webview too;
+// `Buffer` is undefined there and was crashing every join/post / the chat panel).
+const toHex = (b: Uint8Array): string => { let s = ''; for (const x of b) s += x.toString(16).padStart(2, '0'); return s; };
+const fromHex = (h: string): Uint8Array => { if (h.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(h)) throw new Error('invalid hex'); const b = new Uint8Array(h.length / 2); for (let i = 0; i < b.length; i++) b[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16); return b; };
 
 /**
  * A chat room on a table channel. The relay is untrusted: it only fans out

@@ -51,6 +51,15 @@ const BRANDED = [
   'baltic avenue', 'mediterranean avenue', 'free parking', 'go to jail',
 ];
 
+// Browser-safety ban: these packages are bundled into the desktop webview
+// (@estates/client-web's dependency closure). `Buffer` is a Node global that is
+// UNDEFINED in the browser — a bare `Buffer.from(...)` builds fine but throws
+// `ReferenceError: Buffer is not defined` at runtime (it crashed the chat panel).
+// Use isomorphic hex/base64 instead. Matches actual usage `Buffer.` / `Buffer(`
+// (not the word in comments, and not a guarded `globalThis...Buffer!.` fallback).
+const BROWSER_BUNDLED = ['packages/chat/src/', 'packages/table/src/', 'packages/engine/src/', 'packages/params/src/', 'packages/turn/src/', 'packages/wallet/src/', 'packages/beacon/src/', 'packages/deck/src/', 'packages/channel/src/', 'apps/client-web/src/'];
+const BUFFER_USE = /\bBuffer\s*[.(]/;
+
 const CODE_EXT = new Set(['.ts', '.tsx', '.js', '.mjs', '.cjs']);
 const CONTENT_EXT = new Set(['.ts', '.tsx', '.js', '.mjs', '.cjs', '.json']);
 
@@ -88,6 +97,10 @@ function scan(full: string): void {
     if (isCode) {
       for (const b of OPCODE_BANS) {
         if (b.re.test(text)) hits.push({ file: rel, line: i + 1, ban: b.name, text: text.trim() });
+      }
+      const posix = rel.split(sep).join('/');
+      if (BUFFER_USE.test(text) && BROWSER_BUNDLED.some((p) => posix.startsWith(p))) {
+        hits.push({ file: rel, line: i + 1, ban: 'Buffer in browser-bundled code (use isomorphic hex/base64)', text: text.trim() });
       }
     }
     if (isContent) {

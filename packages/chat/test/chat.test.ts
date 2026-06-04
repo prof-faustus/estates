@@ -69,6 +69,28 @@ test('multiparty chat: three peers join and all receive each broadcast-encrypted
   }
 });
 
+test('browser-safety: chat join/post/receive works with NO global Buffer (isomorphic)', () => {
+  // The desktop webview has no `Buffer`; a bare Buffer.from in the codec threw
+  // `ReferenceError: Buffer is not defined` and crashed the chat panel on join.
+  // Reproduce the browser by removing Buffer for the duration of a full round-trip.
+  const g = globalThis as unknown as { Buffer?: unknown };
+  const saved = g.Buffer;
+  delete g.Buffer;
+  try {
+    const relay = new InMemoryRelay();
+    const A = new ChatRoom(relay, genPeer(), 'A');
+    const B = new ChatRoom(relay, genPeer(), 'B');
+    const gotB: string[] = [];
+    B.onMessage((m) => gotB.push(m.text));
+    A.connect(); B.connect();
+    assert.doesNotThrow(() => { A.join(); B.join(); }, 'join must not touch node:Buffer');
+    assert.doesNotThrow(() => A.post('no-buffer-here'), 'post must not touch node:Buffer');
+    assert.ok(gotB.includes('no-buffer-here'), 'message still decodes without Buffer');
+  } finally {
+    g.Buffer = saved;
+  }
+});
+
 test('2-party ECDH (postTo): only the chosen member (+ sender) can read; others cannot', () => {
   const relay = new InMemoryRelay();
   const A = new ChatRoom(relay, genPeer(), 'A');
