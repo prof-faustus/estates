@@ -98,7 +98,7 @@ export class GamePeer {
    *  beacon transcript (red-team #3): tampering with which keys an output pays, or
    *  with the dice transcript, breaks the signature. pkhs keys are numeric strings,
    *  so JSON serialises in a canonical (numeric) order on both peers. */
-  private movePayload(turnIndex: number, actor: number, action: Action, extra?: { pkhs?: Record<number, string> | null; beacon?: BeaconTranscript | null }): Uint8Array {
+  private movePayload(turnIndex: number, actor: number, action: Action, extra?: { pkhs?: Record<string, string> | null; beacon?: BeaconTranscript | null }): Uint8Array {
     return enc({ k: 'estates-move-v1', g: toHex(this.ctx.gameId), turnIndex, actor, action, pkhs: extra?.pkhs ?? null, beacon: extra?.beacon ?? null });
   }
 
@@ -226,7 +226,7 @@ export class GamePeer {
       const post = r.state;
       const key = this.seatKeys.get(actor);
       let sig: Uint8Array; try { sig = fromHexStrict(o.sig); } catch { return; }
-      const published = (o.pkhs && typeof o.pkhs === 'object') ? o.pkhs as Record<number, string> : {};
+      const published = (o.pkhs && typeof o.pkhs === 'object') ? o.pkhs as Record<string, string> : {};
       const beaconT = (o.beacon ?? null) as BeaconTranscript | null;
       // the signature MUST cover the output-key manifest + beacon transcript (#3),
       // so a tampered pkhs/beacon set fails to verify.
@@ -268,16 +268,19 @@ export class GamePeer {
    * that every output addressed to our own seat is a key WE can derive (else the
    * actor tried to pay us to an unspendable address → reject, return null).
    */
-  private chainMove(pre: GameState, post: GameState, action: Action, actor: number, published?: Record<number, string>): Record<number, string> | null {
+  private chainMove(pre: GameState, post: GameState, action: Action, actor: number, published?: Record<string, string>): Record<string, string> | null {
     const gameId = toHex(this.ctx.gameId);
     const network = post.network;
-    const out: Record<number, string> = {};
+    const out: Record<string, string> = {};
     let bad = false;
-    const provider = (role: number): Uint8Array => {
-      const ctx = spendContext({ gameId, network, purpose: 'move', role, turnIndex: post.turnIndex, outputIndex: role });
+    // key = `${seat}:${purpose}` so a seat that both moves AND receives in one tx
+    // gets DISTINCT one-use keys (the purpose flows into the BRC-42 spendContext).
+    const provider = (role: number, purpose: string): Uint8Array => {
+      const slot = `${role}:${purpose}`;
+      const ctx = spendContext({ gameId, network, purpose, role, turnIndex: post.turnIndex, outputIndex: role });
       let pkh: Uint8Array;
       if (published) {
-        const h = published[role];
+        const h = published[slot];
         if (h === undefined) { bad = true; return new Uint8Array(20); }
         try { pkh = fromHexStrict(h); } catch { bad = true; return new Uint8Array(20); }
         if (pkh.length !== 20) { bad = true; return new Uint8Array(20); }
@@ -288,7 +291,7 @@ export class GamePeer {
       } else {
         pkh = pkhOf(deriveChildPub(this.seatIdPub(role), this.id.priv, ctx)); // payer = actor (me)
       }
-      out[role] = toHex(pkh);
+      out[slot] = toHex(pkh);
       return pkh;
     };
     const move = txForAction(pre, post, action, post.turnIndex, actor, this.ctx, provider);

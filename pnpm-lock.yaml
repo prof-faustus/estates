@@ -134,6 +134,9 @@ importers:
 
   packages/chainmap:
     dependencies:
+      '@estates/bank':
+        specifier: workspace:*
+        version: link:../bank
       '@estates/engine':
         specifier: workspace:*
         version: link:../engine

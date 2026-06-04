@@ -11,19 +11,37 @@
 import { loadParams, buildCost, mortgageValue, unmortgageCost, type EstatesParams } from '@estates/params';
 import type { GameState } from '@estates/engine';
 import {
-  nftOutput, paymentOutput, encodeTitleState, decodeTitleState, gameTag,
+  nftOutput, nftOutputWith, paymentOutput, encodeTitleState, decodeTitleState, gameTag,
   type TitleState, type TxOutput, type Outpoint,
 } from '@estates/onchain';
+import { covenantOutput, covenantScriptItems, rulesHash, type BankMode } from '@estates/bank';
 
 const P: EstatesParams = loadParams();
 const GROUP_IDS = Object.keys(P.groups);
 const groupOrdinal = (g: string | undefined): number => (g ? Math.max(0, GROUP_IDS.indexOf(g)) : 0);
 
+/** A one-use spend-key provider: returns a FRESH pkh for (seat role, purpose).
+ *  Supplied by the live peer (ECDH/BRC-42 derivation); absent in pure tests. */
+export type PkhProvider = (role: number, purpose: string) => Uint8Array;
+
 export interface MapContext {
   readonly gameId: Uint8Array;             // 32-byte table id
   readonly genesis: Outpoint;              // provenance root
-  readonly seatPkhs: readonly Uint8Array[]; // pkh per seat
-  readonly bankPkh: Uint8Array;
+  readonly seatPkhs: readonly Uint8Array[]; // pkh per seat (fallback when no provider)
+  readonly bankPkh: Uint8Array;            // fallback bank pkh (quorum mode)
+  /** Bank custody form. DEFAULT 'covenant' (trustless, self-enforcing script);
+   *  'quorum' (M-of-N banker sigs to ctx.bankPkh) is opt-in. */
+  readonly bankMode?: BankMode;
+  readonly rulesHash?: Uint8Array;         // covenant rules-hash (defaults to params SoT)
+}
+
+const bankModeOf = (ctx: MapContext): BankMode => ctx.bankMode ?? 'covenant';
+const rhOf = (ctx: MapContext): Uint8Array => ctx.rulesHash ?? rulesHash();
+
+/** A value leg paid TO the bank reserve: covenant-locked by default (no reused
+ *  pkh), or P2PKH to the banker pkh under the opt-in quorum mode. */
+export function bankValueOutput(amount: number, ctx: MapContext): TxOutput {
+  return bankModeOf(ctx) === 'covenant' ? covenantOutput(amount, rhOf(ctx)) : paymentOutput(amount, ctx.bankPkh);
 }
 
 /** The on-chain NFT state for a board title, reflecting the engine's current view. */
@@ -36,11 +54,21 @@ export function titleToNftState(s: GameState, propertyId: number, ctx: MapContex
   };
 }
 
-/** The 1-sat NFT output for a title, owned by its engine owner (or bank if unowned). */
-export function titleToNftOutput(s: GameState, propertyId: number, ctx: MapContext): TxOutput {
+/**
+ * The 1-sat NFT output for a title. An OWNED title is custodied by a FRESH
+ * one-use key for the owning seat (ECDH-derived via `oneUsePkh`, never a reused
+ * seat pkh); an UNOWNED (bank-held) title is locked under the bank covenant by
+ * default (or the banker pkh under quorum). Pure tests with no provider fall
+ * back to ctx.seatPkhs.
+ */
+export function titleToNftOutput(s: GameState, propertyId: number, ctx: MapContext, oneUsePkh?: PkhProvider): TxOutput {
   const owner = s.titles[propertyId]!.owner;
-  const pkh = owner === null ? ctx.bankPkh : ctx.seatPkhs[owner]!;
-  return nftOutput(titleToNftState(s, propertyId, ctx), pkh);
+  const state = titleToNftState(s, propertyId, ctx);
+  if (owner === null) {
+    return bankModeOf(ctx) === 'covenant' ? nftOutputWith(state, covenantScriptItems(rhOf(ctx))) : nftOutput(state, ctx.bankPkh);
+  }
+  const pkh = oneUsePkh ? oneUsePkh(owner, 'nft') : ctx.seatPkhs[owner]!;
+  return nftOutput(state, pkh);
 }
 
 /**
@@ -81,22 +109,22 @@ export interface ActionTx {
  * Emit the on-chain tx legs for a value-bearing action, given the POST-action
  * engine state (so re-minted NFTs carry the new build level / mortgage flag).
  */
-export function emitForAction(post: GameState, propertyId: number, kind: 'buy' | 'build' | 'sell' | 'mortgage' | 'unmortgage', ctx: MapContext): ActionTx {
+export function emitForAction(post: GameState, propertyId: number, kind: 'buy' | 'build' | 'sell' | 'mortgage' | 'unmortgage', ctx: MapContext, oneUsePkh?: PkhProvider): ActionTx {
   const sp = P.board[propertyId]!;
   const owner = post.titles[propertyId]!.owner!;
-  const ownerPkh = ctx.seatPkhs[owner]!;
-  const nft = titleToNftOutput(post, propertyId, ctx);
+  const ownerPkh = oneUsePkh ? oneUsePkh(owner, 'refund') : ctx.seatPkhs[owner]!; // fresh key for refunds to the owner
+  const nft = titleToNftOutput(post, propertyId, ctx, oneUsePkh);
   switch (kind) {
     case 'buy':
-      // bank→buyer NFT + buyer→reserve price
-      return { outputs: [nft, paymentOutput(sp.base_price ?? 0, ctx.bankPkh)], note: `buy ${sp.name}` };
+      // bank→buyer NFT + buyer→reserve price (covenant-locked)
+      return { outputs: [nft, bankValueOutput(sp.base_price ?? 0, ctx)], note: `buy ${sp.name}` };
     case 'build':
-      return { outputs: [nft, paymentOutput(buildCost(sp.group!), ctx.bankPkh)], note: `build ${sp.name} -> level ${post.titles[propertyId]!.buildLevel}` };
+      return { outputs: [nft, bankValueOutput(buildCost(sp.group!), ctx)], note: `build ${sp.name} -> level ${post.titles[propertyId]!.buildLevel}` };
     case 'sell':
       return { outputs: [nft, paymentOutput(Math.round(buildCost(sp.group!) * P.rent_factors.sell_building_refund_factor), ownerPkh)], note: `sell building on ${sp.name}` };
     case 'mortgage':
       return { outputs: [nft, paymentOutput(mortgageValue(sp.base_price ?? 0), ownerPkh)], note: `mortgage ${sp.name}` };
     case 'unmortgage':
-      return { outputs: [nft, paymentOutput(unmortgageCost(sp.base_price ?? 0), ctx.bankPkh)], note: `unmortgage ${sp.name}` };
+      return { outputs: [nft, bankValueOutput(unmortgageCost(sp.base_price ?? 0), ctx)], note: `unmortgage ${sp.name}` };
   }
 }

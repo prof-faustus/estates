@@ -15,7 +15,7 @@
  */
 import { createHash } from 'node:crypto';
 import { loadParams } from '@estates/params';
-import { paymentOutput, push, op, OP, serializeScript, type TxOutput } from '@estates/onchain';
+import { paymentOutput, push, op, OP, serializeScript, type TxOutput, type ScriptItem } from '@estates/onchain';
 import type { Tx, KeyPair } from '@estates/trade';
 
 const COVENANT_TAG = new TextEncoder().encode('ESTATES-BANK-COVENANT-v1');
@@ -32,11 +32,14 @@ export interface Covenant { readonly reserve: number; readonly rulesHash: Uint8A
  * Spendable by anyone, but only into a tx whose outputs satisfy the covenant
  * (enforced by `verifyCovenantPayout` / OP_PUSH_TX in production).
  */
+/** The covenant predicate script items: `<rulesHash> <COVENANT_TAG> OP_2DROP OP_TRUE`.
+ *  Reused as the custody for both the reserve output and bank-held NFTs. */
+export function covenantScriptItems(rh: Uint8Array = rulesHash()): ScriptItem[] {
+  return [push(rh), push(COVENANT_TAG), op(OP.OP_2DROP), op(0x51 /* OP_TRUE */)];
+}
+
 export function covenantOutput(reserve: number, rh: Uint8Array = rulesHash()): TxOutput {
-  return {
-    satoshis: reserve,
-    script: serializeScript([push(rh), push(COVENANT_TAG), op(OP.OP_2DROP), op(0x51 /* OP_TRUE */)]),
-  };
+  return { satoshis: reserve, script: serializeScript(covenantScriptItems(rh)) };
 }
 
 const eq = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && a.every((x, i) => x === b[i]!);

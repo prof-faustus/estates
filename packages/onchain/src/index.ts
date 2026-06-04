@@ -108,6 +108,12 @@ export function nftOutput(state: TitleState, ownerPkh: Uint8Array): TxOutput {
   return { satoshis: NFT_SATS, script: serializeScript(nftLockingScript(state, ownerPkh)) };
 }
 
+/** A 1-sat NFT output under an ARBITRARY custody script: `<state> OP_DROP <custody>`.
+ *  Used to lock a bank-held NFT under the bank covenant instead of a reused pkh. */
+export function nftOutputWith(state: TitleState, custody: ScriptItem[]): TxOutput {
+  return { satoshis: NFT_SATS, script: serializeScript([push(encodeTitleState(state)), op(OP.OP_DROP), ...custody]) };
+}
+
 /** An ordinary native-sat payment output (money is sats, never a token). */
 export function paymentOutput(satoshis: number, ownerPkh: Uint8Array): TxOutput {
   if (!Number.isInteger(satoshis) || satoshis < 0) throw new Error('satoshis must be a non-negative integer');

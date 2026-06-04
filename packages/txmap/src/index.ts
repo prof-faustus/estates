@@ -15,7 +15,7 @@
  */
 import type { GameState, Action } from '@estates/engine';
 import { paymentOutput, push, op, OP, p2pkh, serializeScript, NFT_SATS, type TxOutput } from '@estates/onchain';
-import { titleToNftOutput, type MapContext } from '@estates/chainmap';
+import { titleToNftOutput, bankValueOutput, type MapContext } from '@estates/chainmap';
 
 const COMMIT_TAG = new TextEncoder().encode('ESTATES-MOVE-v1');
 const u32 = (n: number): Uint8Array => new Uint8Array([(n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff]);
@@ -104,27 +104,30 @@ export interface MoveTx {
   readonly note: string;
 }
 
-/** Map a single engine transition to its on-chain transaction. `oneUsePkh(role)`
- *  returns a FRESH one-use key hash for each payee (role = seat index, or -1 = bank). */
+/** Map a single engine transition to its on-chain transaction. `oneUsePkh(role,
+ *  purpose)` returns a FRESH one-use key hash for each payee — the `purpose`
+ *  ('commit' | 'pay' | 'nft') ensures a seat that both moves AND receives in the
+ *  same tx gets DISTINCT one-use keys (no intra-tx reuse). The bank reserve leg is
+ *  covenant-locked by default (never a reused pkh). */
 export function txForAction(
   pre: GameState, post: GameState, action: Action, turnIndex: number, actor: number,
-  ctx: MapContext, oneUsePkh: (role: number) => Uint8Array,
+  ctx: MapContext, oneUsePkh: (role: number, purpose: string) => Uint8Array,
 ): MoveTx {
-  const commit = commitOutput(encodeActionCommit(action, turnIndex, actor), oneUsePkh(actor));
+  const commit = commitOutput(encodeActionCommit(action, turnIndex, actor), oneUsePkh(actor, 'commit'));
 
   const seatDeltas = balanceDeltas(pre, post);
   const bankD = reserveDelta(pre, post);
   // value legs: an output for each party whose balance INCREASED (received sats)
   const value: TxOutput[] = [];
-  for (const { seat, delta } of seatDeltas) if (delta > 0) value.push(paymentOutput(delta, oneUsePkh(seat)));
-  if (bankD > 0) value.push(paymentOutput(bankD, ctx.bankPkh));
+  for (const { seat, delta } of seatDeltas) if (delta > 0) value.push(paymentOutput(delta, oneUsePkh(seat, 'pay')));
+  if (bankD > 0) value.push(bankValueOutput(bankD, ctx)); // covenant-locked reserve (no reused bankPkh)
 
   // conservation: total gained == total lost (the game never mints sats)
   const gained = seatDeltas.filter((d) => d.delta > 0).reduce((n, d) => n + d.delta, 0) + Math.max(0, bankD);
   const lost = seatDeltas.filter((d) => d.delta < 0).reduce((n, d) => n - d.delta, 0) + Math.max(0, -bankD);
   const conserved = gained === lost;
 
-  const nft: TxOutput[] = changedTitles(pre, post).map((id) => titleToNftOutput(post, id, ctx));
+  const nft: TxOutput[] = changedTitles(pre, post).map((id) => titleToNftOutput(post, id, ctx, oneUsePkh));
 
   return { commit, value, nft, conserved, note: `${action.type}@t${turnIndex} seat${actor}` };
 }
