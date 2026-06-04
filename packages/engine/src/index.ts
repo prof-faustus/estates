@@ -312,10 +312,14 @@ function resolveCard(s: GameState, deck: string, diceTotal: number): GameState {
   return applyCardEffect(st, card.effect, diceTotal);
 }
 
-/** Injected per-deck draw order from state; identity (declared order) if absent. */
+/** Injected per-deck draw order from state; identity (declared order) if absent.
+ *  An injected order is accepted ONLY if it is a STRICT permutation of [0,n) — a
+ *  malformed order (duplicate/missing/out-of-range index) must never duplicate or
+ *  drop a Fate/Treasury effect, so we reject it back to declared order rather than
+ *  run a corrupt deck. (Live games additionally gate on requireFairDecks at init.) */
 function drawOrder(s: GameState, deck: string, n: number): readonly number[] {
   const inj = s.deckOrder?.[deck];
-  if (inj && inj.length === n) return inj;
+  if (isPermutation(inj, n)) return inj!;
   return Array.from({ length: n }, (_v, i) => i);
 }
 

@@ -15,6 +15,11 @@ import { initiate, respond, complete, seal, openFrame, type Identity, type Sessi
 
 export type { Identity } from '@estates/channel';
 
+// Hard cap on a single wire frame (#12). Moves/chat are small JSON; a peer that
+// announces a length above this is hostile (memory-pressure attack), so we drop
+// the socket BEFORE growing the buffer to the claimed size.
+const MAX_FRAME = 1 << 20; // 1 MiB
+
 function writeMsg(sock: Socket, obj: unknown): void {
   const body = Buffer.from(JSON.stringify(obj), 'utf8');
   const len = Buffer.allocUnsafe(4); len.writeUInt32BE(body.length, 0);
@@ -29,6 +34,7 @@ function framedReader(sock: Socket, onMsg: (obj: any) => void): void {
     for (;;) {
       if (buf.length < 4) return;
       const len = buf.readUInt32BE(0);
+      if (len > MAX_FRAME) { sock.destroy(); return; }  // oversized frame → drop the peer
       if (buf.length < 4 + len) return;
       const body = buf.subarray(4, 4 + len);
       buf = buf.subarray(4 + len);
@@ -78,8 +84,13 @@ export function listen(port: number, identity: Identity, onPeer: (link: PeerLink
         buf = Buffer.concat([buf, chunk]);
         if (handshaken || buf.length < 4) return;
         const len = buf.readUInt32BE(0);
+        if (len > MAX_FRAME) { sock.destroy(); return; }            // oversized handshake → drop (#12)
         if (buf.length < 4 + len) return;
-        const msg = JSON.parse(buf.subarray(4, 4 + len).toString('utf8')) as { t: string; hello: Hello };
+        // a malformed handshake must NOT throw out of the socket handler (#13):
+        // destroy only the offending socket.
+        let msg: { t: string; hello: Hello };
+        try { msg = JSON.parse(buf.subarray(4, 4 + len).toString('utf8')) as { t: string; hello: Hello }; }
+        catch { sock.destroy(); return; }
         buf = buf.subarray(4 + len);
         const r = msg.t === 'hello' ? respond(identity, msg.hello) : null;
         if (!r) { sock.destroy(); return; }
@@ -109,8 +120,11 @@ export function connect(host: string, port: number, identity: Identity): Promise
         buf = Buffer.concat([buf, chunk]);
         if (buf.length < 4) return;
         const len = buf.readUInt32BE(0);
+        if (len > MAX_FRAME) { sock.destroy(); reject(new Error('oversized handshake frame')); return; } // (#12)
         if (buf.length < 4 + len) return;
-        const msg = JSON.parse(buf.subarray(4, 4 + len).toString('utf8')) as { t: string; ack: Ack };
+        let msg: { t: string; ack: Ack };
+        try { msg = JSON.parse(buf.subarray(4, 4 + len).toString('utf8')) as { t: string; ack: Ack }; }
+        catch { sock.destroy(); reject(new Error('malformed handshake')); return; }  // (#13)
         buf = buf.subarray(4 + len);
         const session = msg.t === 'ack' ? complete(pending, msg.ack) : null;
         if (!session) { sock.destroy(); reject(new Error('handshake failed')); return; }

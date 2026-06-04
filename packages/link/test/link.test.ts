@@ -77,3 +77,46 @@ test('a dialer that cannot authenticate is dropped', async () => {
     server.close();
   }
 });
+
+test('oversized frame announcement (#12) is dropped before the buffer grows', async () => {
+  const b = genIdentity();
+  const server = await listen(0, b, () => { /* never authenticates */ });
+  const port = (server.address() as AddressInfo).port;
+  try {
+    const net = await import('node:net');
+    const sock = net.connect(port, '127.0.0.1');
+    await new Promise((r) => sock.on('connect', r));
+    // announce a 4 GiB frame but send nothing — the server must drop us, not buffer.
+    const len = Buffer.allocUnsafe(4); len.writeUInt32BE(0xffffffff, 0);
+    sock.write(len);
+    const closed = await new Promise<boolean>((r) => { sock.on('close', () => r(true)); setTimeout(() => r(false), 1500); });
+    assert.ok(closed, 'server dropped the peer announcing an oversized frame');
+  } finally {
+    server.close();
+  }
+});
+
+test('malformed handshake JSON (#13) destroys only that socket, no throw/crash', async () => {
+  const b = genIdentity();
+  let crashed = false;
+  const prior = process.listeners('uncaughtException');
+  const onErr = (): void => { crashed = true; };
+  process.once('uncaughtException', onErr);
+  const server = await listen(0, b, () => { /* never */ });
+  const port = (server.address() as AddressInfo).port;
+  try {
+    const net = await import('node:net');
+    const sock = net.connect(port, '127.0.0.1');
+    await new Promise((r) => sock.on('connect', r));
+    const body = Buffer.from('{ this is : not json ]');
+    const len = Buffer.allocUnsafe(4); len.writeUInt32BE(body.length, 0);
+    sock.write(Buffer.concat([len, body]));
+    const closed = await new Promise<boolean>((r) => { sock.on('close', () => r(true)); setTimeout(() => r(false), 1500); });
+    assert.ok(closed, 'offending socket destroyed');
+    assert.equal(crashed, false, 'no uncaught exception escaped the handler');
+  } finally {
+    process.removeListener('uncaughtException', onErr);
+    if (prior.length === 0) { /* nothing to restore */ }
+    server.close();
+  }
+});

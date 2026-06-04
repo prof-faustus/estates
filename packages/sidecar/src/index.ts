@@ -18,7 +18,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import type { PeerLink } from '@estates/link';
 import { signData, verifyData, type Identity } from '@estates/channel';
 import { encryptBroadcast, decryptBroadcast, addressOf, type Peer, type Envelope } from '@estates/chat';
-import { commit as beaconCommit, verifyReveal, roll as beaconRoll, ZERO_BEACON, type PartyReveal } from '@estates/beacon';
+import { commit as beaconCommit, verifyReveal, roll as beaconRoll, verifyRollEntry, ZERO_BEACON, type PartyReveal } from '@estates/beacon';
 import { initialState, apply, type GameState, type Action, type EngineConfig } from '@estates/engine';
 import { txForAction } from '@estates/txmap';
 import { type MapContext } from '@estates/chainmap';
@@ -163,10 +163,18 @@ export class GamePeer {
     // commit-before-reveal binding: the commitments we stored must match the transcript
     if (this.round && this.round.peerCommit && !eqBytes(this.round.peerCommit, cm)) return null;
     if (this.round && this.round.myCommit && !eqBytes(this.round.myCommit, cp)) return null;
-    if (!verifyReveal(sm, cm) || !verifyReveal(sp, cp)) return null; // reveals must open their commitments
-    const result = beaconRoll([{ seat: b.seatM, secret: sm }, { seat: b.seatP, secret: sp }], pre.turnIndex, this.prevBeacon);
-    if (result.dice[0] !== dice[0] || result.dice[1] !== dice[1]) return null; // dice not beacon-derived → forged
-    return result.beacon;
+    // Core dice fairness uses the SAME shared verifier as @estates/table + audit
+    // (audit #9 — no divergent ad-hoc rules): one commit per live seat, no dups,
+    // each reveal opens its commitment, ≥1 honest reveal, dice match the beacon.
+    const res = verifyRollEntry({
+      commits: [{ seat: b.seatM, c: cm }, { seat: b.seatP, c: cp }],
+      reveals: [{ seat: b.seatM, secret: sm }, { seat: b.seatP, secret: sp }],
+      liveSeats: [this.seat, this.peerSeat],
+      turnIndex: pre.turnIndex,
+      prevBeacon: this.prevBeacon,
+      claimedDice: dice,
+    });
+    return res.ok ? res.beacon! : null;
   }
 
   private recv(m: Uint8Array): void {
