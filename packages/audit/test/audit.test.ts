@@ -130,3 +130,40 @@ test('a params-version mismatch is rejected', () => {
   assert.equal(r.ok, false);
   assert.match(r.reason, /params version/);
 });
+
+// ---- a transcript reconstructed "from chain alone" is UNTRUSTED: audit is total --
+test('audit is FAIL-CLOSED on hostile transcripts (bad genesis, bad hex, non-arrays) — never throws or OOMs', () => {
+  const good = record();
+  for (const bad of [
+    null, undefined, {}, 42,
+    { ...good, genesis: { network: 'regtest', seatCount: 1_000_000_000, bankReserve: 0 } }, // 1e9 seats: must NOT allocate
+    { ...good, genesis: { network: 'regtest', seatCount: 0, bankReserve: 0 } },
+    { ...good, genesis: { network: 'evil', seatCount: 3, bankReserve: 0 } },
+    { ...good, genesis: null },
+    { ...good, entries: 'notarray' },
+    { ...good, entries: [{ kind: 'roll', commits: 'x', reveals: [], dice: [1, 1] }] },
+    { ...good, entries: [{ kind: 'roll', commits: [{ seat: 0, c: 'zz' }], reveals: [], dice: [1, 1] }] }, // bad hex → fromHex throws
+    { ...good, entries: [{ kind: 'action', action: { type: '__proto__' } }] },
+    { ...good, entries: [{ kind: 'bogus' }] },
+  ]) {
+    let r: unknown = 'unset';
+    assert.doesNotThrow(() => { r = audit(bad as unknown as GameTranscript); });
+    assert.equal((r as { ok: boolean }).ok, false, `rejected: ${JSON.stringify(bad)?.slice(0, 40)}`);
+  }
+  // the genuine transcript still verifies (regression)
+  assert.ok(audit(good).ok);
+});
+
+test('audit is FUZZ-PROOF: 20k mutated transcripts never throw', () => {
+  const good = record();
+  let rng = 0x6c1e9a3f >>> 0; const rand = () => { rng = (rng * 1103515245 + 12345) >>> 0; return rng; };
+  for (let i = 0; i < 20_000; i++) {
+    const t: GameTranscript = { ...good };
+    const m = rand() % 4;
+    if (m === 0) (t as { genesis: unknown }).genesis = { network: 'regtest', seatCount: (rand() % 2_000_000_000), bankReserve: rand() };
+    else if (m === 1) (t as { entries: unknown }).entries = [{ kind: 'roll', commits: [{ seat: rand() % 99, c: (rand() % 2 ? 'zz' : 'ab') }], reveals: [], dice: [rand() % 12, rand() % 12] }];
+    else if (m === 2) (t as { entries: unknown }).entries = (rand() % 2 ? 'x' : null);
+    else (t as { finalHash: unknown }).finalHash = String(rand());
+    assert.doesNotThrow(() => { audit(t); });
+  }
+});

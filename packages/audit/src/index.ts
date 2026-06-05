@@ -84,34 +84,60 @@ export interface AuditResult {
   readonly reason: string;
 }
 
-/** Independently reconstruct + verify a transcript. */
+// A transcript reconstructed "from chain alone" is UNTRUSTED. audit() must be
+// TOTAL — never throw, never allocate on an attacker-chosen genesis. A 1e9-seat
+// genesis would make initialState allocate before any try/catch could help, and a
+// bad-hex commit/reveal would make fromHex throw out of the loop, so both are
+// guarded explicitly here.
+const AUDIT_MAX_SEATS = 8;
+function validGenesis(g: unknown): g is EngineConfig {
+  if (!g || typeof g !== 'object') return false;
+  const c = g as Record<string, unknown>;
+  return (c.network === 'regtest' || c.network === 'testnet' || c.network === 'mainnet')
+    && typeof c.seatCount === 'number' && Number.isInteger(c.seatCount) && c.seatCount >= 2 && c.seatCount <= AUDIT_MAX_SEATS
+    && typeof c.bankReserve === 'number' && Number.isInteger(c.bankReserve) && c.bankReserve >= 0 && c.bankReserve <= Number.MAX_SAFE_INTEGER;
+}
+
+/** Independently reconstruct + verify a transcript. Total: any malformed /
+ *  hostile transcript is a clean {ok:false}, never a throw or an OOM. */
 export function audit(t: GameTranscript): AuditResult {
-  if (t.params_version !== loadParams().params_version) {
-    return { ok: false, steps: 0, rollsVerified: 0, finalHash: '', reason: `params version mismatch: ${t.params_version}` };
-  }
+  const fail = (reason: string, steps = 0, rollsVerified = 0, finalHash = ''): AuditResult => ({ ok: false, steps, rollsVerified, finalHash, reason });
+  if (!t || typeof t !== 'object') return fail('transcript is not an object');
+  if (t.params_version !== loadParams().params_version) return fail(`params version mismatch: ${t.params_version}`);
+  if (!validGenesis(t.genesis)) return fail('genesis is malformed or out of range (seatCount/bankReserve/network)');
+  if (!Array.isArray(t.entries)) return fail('entries is not an array');
+
   let s = initialState(t.genesis);
   let prev = ZERO_BEACON;
   let rolls = 0;
 
-  for (let i = 0; i < t.entries.length; i++) {
-    const e = t.entries[i]!;
-    if (e.kind === 'roll') {
-      // THE shared roll verifier (same logic @estates/net uses — audit #4)
-      const v = verifyRollEntry({
-        commits: e.commits.map((c) => ({ seat: c.seat, c: fromHex(c.c) })),
-        reveals: e.reveals.map((rv) => ({ seat: rv.seat, secret: fromHex(rv.secret) })),
-        liveSeats: s.seats.filter((p) => !p.bankrupt).map((p) => p.id),
-        turnIndex: s.turnIndex, prevBeacon: prev, claimedDice: e.dice,
-      });
-      if (!v.ok) return { ok: false, steps: i, rollsVerified: rolls, finalHash: '', reason: `entry ${i}: ${v.reason}` };
-      const r = apply(s, { type: 'ROLL', dice: v.dice! });
-      if (!r.ok) return { ok: false, steps: i, rollsVerified: rolls, finalHash: '', reason: `entry ${i}: ROLL rejected (${r.code})` };
-      prev = v.beacon!; rolls++; s = r.state;
-    } else {
-      const r = apply(s, e.action);
-      if (!r.ok) return { ok: false, steps: i, rollsVerified: rolls, finalHash: '', reason: `entry ${i}: ${e.action.type} rejected (${r.code}) — illegal action` };
-      s = r.state;
+  try {
+    for (let i = 0; i < t.entries.length; i++) {
+      const e = t.entries[i]!;
+      if (e && e.kind === 'roll') {
+        if (!Array.isArray(e.commits) || !Array.isArray(e.reveals)) return fail(`entry ${i}: roll commits/reveals not arrays`, i, rolls);
+        // THE shared roll verifier (same logic @estates/net uses — audit #4).
+        // fromHex throws on bad hex; the surrounding try makes that a clean reject.
+        const v = verifyRollEntry({
+          commits: e.commits.map((c: { seat: number; c: string }) => ({ seat: c.seat, c: fromHex(c.c) })),
+          reveals: e.reveals.map((rv: { seat: number; secret: string }) => ({ seat: rv.seat, secret: fromHex(rv.secret) })),
+          liveSeats: s.seats.filter((p) => !p.bankrupt).map((p) => p.id),
+          turnIndex: s.turnIndex, prevBeacon: prev, claimedDice: e.dice,
+        });
+        if (!v.ok) return fail(`entry ${i}: ${v.reason}`, i, rolls);
+        const r = apply(s, { type: 'ROLL', dice: v.dice! });
+        if (!r.ok) return fail(`entry ${i}: ROLL rejected (${r.code})`, i, rolls);
+        prev = v.beacon!; rolls++; s = r.state;
+      } else if (e && e.kind === 'action') {
+        const r = apply(s, e.action);
+        if (!r.ok) return fail(`entry ${i}: ${e.action?.type} rejected (${r.code}) — illegal action`, i, rolls);
+        s = r.state;
+      } else {
+        return fail(`entry ${i}: unknown entry kind`, i, rolls);
+      }
     }
+  } catch (err) {
+    return fail(`entry processing failed: ${(err as Error).message}`, rolls, rolls);
   }
 
   const finalHash = hashState(s);
