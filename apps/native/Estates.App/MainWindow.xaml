@@ -46,6 +46,24 @@
                         <Button x:Name="PlayBtn" Content="Deal &amp; play" Margin="12,0,0,0" Click="Play_Click"/>
                     </StackPanel>
                     <TextBlock DockPanel.Dock="Top" x:Name="ResultLine" Text="" Foreground="{StaticResource Accent}" Margin="0,0,0,8" TextWrapping="Wrap"/>
+
+                    <!-- spectate a LIVE game over the relay: native multiplayer READ path -->
+                    <Border DockPanel.Dock="Top" Background="#232529" CornerRadius="6" Padding="10" Margin="0,0,0,10">
+                        <StackPanel>
+                            <TextBlock Text="Spectate a LIVE game (over the relay)" Foreground="{StaticResource Fg}" FontWeight="Bold" Margin="0,0,0,6"/>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="relay" Foreground="{StaticResource Fg}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <TextBox x:Name="RelayBox" Width="150" VerticalContentAlignment="Center" Text="http://127.0.0.1:8788"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                <TextBlock Text="game" Foreground="{StaticResource Fg}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <TextBox x:Name="ChannelBox" Width="150" VerticalContentAlignment="Center"/>
+                                <Button x:Name="SpectateBtn" Content="Spectate" Margin="8,0,0,0" Click="Spectate_Click"/>
+                            </StackPanel>
+                            <TextBlock x:Name="LiveLine" Text="enter the game channel and press Spectate (polls every 2s)" Foreground="#9aa0a6" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+
                     <TextBox x:Name="LogBox" IsReadOnly="True" Background="#171819" Foreground="#cfd2d6"
                              FontFamily="Consolas" FontSize="12" VerticalScrollBarVisibility="Auto"
                              TextWrapping="NoWrap" HorizontalScrollBarVisibility="Auto" BorderThickness="0" Padding="8"/>

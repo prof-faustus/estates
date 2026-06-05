@@ -19,6 +19,8 @@
     "redteam": "node --experimental-strip-types tools/redteam.mjs",
     "proof:render": "node tools/render-check.mjs",
     "proof:flow": "node tools/cdp-flow.mjs",
+    "proof:native": "node tools/native-proof.mjs",
+    "spectate:relay": "node --experimental-strip-types tools/live-spectate.ts",
     "web": "node tools/serve-web.mjs"
   },
   "devDependencies": {

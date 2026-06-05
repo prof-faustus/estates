@@ -304,4 +304,36 @@ if (await relay.ReachableAsync())
 }
 else Console.WriteLine("Estates.Conformance (relay): skipped (relay not running on 127.0.0.1:8788)");
 
-return (fail == 0 && kfail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && gfail == 0 && mfail == 0 && bfail == 0 && ffail == 0 && repfail == 0 && rfail == 0) ? 0 : 1;
+// ---- LIVE SPECTATE end-to-end: if tools/live-spectate.ts has published a REAL
+// game to a live HTTP relay (manifest on disk), the native client reads that
+// channel back over HTTP and replays it with GameReplay — and must reach the SAME
+// canonical state hash the web NetTable produced. This is the native spectate path
+// exercised over the real wire, not just a static vector. Skipped when absent.
+int lfail = 0;
+// the harness writes the manifest to the project dir at RUNTIME (after build), so
+// the runner points ESTATES_LIVE_SPECTATE at it; fall back to the output dir.
+string livePath = Environment.GetEnvironmentVariable("ESTATES_LIVE_SPECTATE")
+    ?? Path.Combine(AppContext.BaseDirectory, "live-spectate.json");
+if (File.Exists(livePath))
+{
+    using var ldoc = JsonDocument.Parse(File.ReadAllText(livePath));
+    var lm = ldoc.RootElement;
+    string lurl = lm.GetProperty("relayUrl").GetString()!;
+    string lch = lm.GetProperty("channel").GetString()!;
+    string lwant = lm.GetProperty("stateHash").GetString()!;
+    int lframes = lm.GetProperty("frames").GetInt32();
+    var lclient = new RelayClient(lurl);
+    if (await lclient.ReachableAsync())
+    {
+        var lhist = await lclient.HistoryAsync(lch);
+        var lhex = lhist.Select(f => Tx.ToHex(f)).ToList();
+        string? lgot = GameReplay.ReplayStateHash(lhex);
+        bool lok = lhist.Count == lframes && lgot == lwant;
+        Console.WriteLine($"Estates.Conformance (spectate): {(lok ? $"PASS — native read {lhist.Count} frames live over HTTP from '{lch}' and replayed to the SAME hash as the web ({lwant[..16]}…)" : $"FAIL — frames {lhist.Count}/{lframes}, want {lwant[..16]}… got {lgot?[..16] ?? "null"}…")}");
+        if (!lok) lfail = 1;
+    }
+    else Console.WriteLine($"Estates.Conformance (spectate): skipped (live relay {lurl} not reachable)");
+}
+else Console.WriteLine("Estates.Conformance (spectate): skipped (no live-spectate.json; run tools/live-spectate.ts alongside)");
+
+return (fail == 0 && kfail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && gfail == 0 && mfail == 0 && bfail == 0 && ffail == 0 && repfail == 0 && rfail == 0 && lfail == 0) ? 0 : 1;

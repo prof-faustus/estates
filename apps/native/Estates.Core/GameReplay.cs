@@ -13,11 +13,18 @@ namespace Estates.Core;
 
 public static class GameReplay
 {
-    /// <summary>Replay the ordered relay log (hex frames) and return the canonical
-    /// state hash, or null if the game never started. Every frame is authenticated
-    /// (Ed25519 over the canonical signedBytes) and bound to its seat key, exactly
-    /// like the web; raw ROLL actions are dropped (dice only from the beacon).</summary>
+    /// <summary>Replay the ordered relay log to the canonical state hash (or null).</summary>
     public static string? ReplayStateHash(IReadOnlyList<string> logHex)
+    {
+        var s = ReplayState(logHex);
+        return s == null ? null : Canonical.HashState(s);
+    }
+
+    /// <summary>Replay the ordered relay log (hex frames) into the live GameState, or
+    /// null if the game never started. Every frame is authenticated (Ed25519 over the
+    /// canonical signedBytes) and bound to its seat key, exactly like the web; raw
+    /// ROLL actions are dropped (dice only from the beacon).</summary>
+    public static GameState? ReplayState(IReadOnlyList<string> logHex)
     {
         int? maxSeats = null; string? host = null; bool started = false; GameState? state = null;
         var seats = new Dictionary<int, string>();          // seat -> who (= signer)
@@ -124,6 +131,6 @@ public static class GameReplay
                 }
             }
         }
-        return state == null ? null : Canonical.HashState(state);
+        return state;
     }
 }

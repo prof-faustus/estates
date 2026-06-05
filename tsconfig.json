@@ -5,6 +5,6 @@
     "types": ["node"]
   },
   "include": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts", "tools/**/*.ts"],
-  "comment": "tools/*-vectors.ts are build-time native-parity generators that import @noble's .ts source via relative node_modules paths (run manually with --experimental-strip-types); they are not shipped TS and are excluded from the strict typecheck.",
-  "exclude": ["tools/*-vectors.ts"]
+  "comment": "tools/*-vectors.ts and tools/live-spectate.ts are build-time native-parity harnesses that import @noble's .ts source via relative node_modules paths (run manually with --experimental-strip-types); they are not shipped TS and are excluded from the strict typecheck.",
+  "exclude": ["tools/*-vectors.ts", "tools/live-spectate.ts"]
 }
