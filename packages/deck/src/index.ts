@@ -34,31 +34,61 @@ const INFO = new TextEncoder().encode('estates-card-v1');
 const EMPTY = new Uint8Array(0);
 const kek = (shared: Uint8Array): Uint8Array => hkdf(sha256, shared, EMPTY, INFO, 32);
 
-/** Seal `plaintext` so only the holder of `recipientPub`'s private key can open it. */
-export function sealTo(recipientPub: Uint8Array, plaintext: Uint8Array): Envelope {
+/** True iff `pub` is a valid compressed secp256k1 point (33 bytes, on curve). */
+export function isValidPub(pub: Uint8Array): boolean {
+  try { secp.ProjectivePoint.fromHex(bytesToHex(pub)); return pub.length === 33; } catch { return false; }
+}
+
+/**
+ * Seal `plaintext` to the holder of `recipientPub`. Optional `aad` is bound by
+ * AES-GCM as ADDITIONAL AUTHENTICATED DATA — the open side must present the SAME
+ * aad or decryption fails, so the ciphertext is cryptographically tied to (e.g.)
+ * the table id + the card's public key, not merely accompanied by them.
+ * Validates the recipient key first (never feeds an off-curve point to ECDH).
+ */
+export function sealTo(recipientPub: Uint8Array, plaintext: Uint8Array, aad: Uint8Array = EMPTY): Envelope {
+  if (!isValidPub(recipientPub)) throw new Error('sealTo: recipient public key is not a valid compressed point');
   const eph = secp.utils.randomPrivateKey();
   const shared = secp.getSharedSecret(eph, recipientPub, true);
   const nonce = randomBytes(12);
   return {
     ephPub: bytesToHex(secp.getPublicKey(eph, true)),
     nonce: bytesToHex(nonce),
-    ct: bytesToHex(gcm(kek(shared), nonce).encrypt(plaintext)),
+    ct: bytesToHex(gcm(kek(shared), nonce, aad).encrypt(plaintext)),
   };
 }
-/** Open a sealed envelope with a private key. null on wrong key or tamper (AEAD). */
-export function open(priv: Uint8Array, env: Envelope): Uint8Array | null {
+/** Open a sealed envelope with a private key. null on wrong key, wrong aad, or
+ *  tamper (AEAD). The `aad` MUST match the one used to seal. */
+export function open(priv: Uint8Array, env: Envelope, aad: Uint8Array = EMPTY): Uint8Array | null {
   try {
+    if (!env || typeof env !== 'object') return null;
     const shared = secp.getSharedSecret(priv, hexToBytes(env.ephPub), true);
-    return gcm(kek(shared), hexToBytes(env.nonce)).decrypt(hexToBytes(env.ct));
+    return gcm(kek(shared), hexToBytes(env.nonce), aad).decrypt(hexToBytes(env.ct));
   } catch {
     return null;
   }
 }
 
 // ---- mental-poker concealment: binding commitment to a hidden face ----------
-/** Commitment H(face ‖ blind): binding (cannot find another face/blind) + hiding. */
+/** Commitment H(face ‖ blind): binding (cannot find another face/blind) + hiding.
+ *  Generic primitive (entropy etc.). Card commitments use the DOMAIN-SEPARATED
+ *  `cardCommit` below, which also binds the protocol tag + table/game id. */
 export function commit(face: Uint8Array, blind: Uint8Array): string {
   return bytesToHex(sha256(concatBytes(face, blind)));
+}
+
+// Domain-separated card-face commitment (audit: a commitment must be bound to the
+// protocol + game/table, never a bare H(face‖blind)). Bound to the STABLE tableId
+// (= gameId) and a version tag. cardPub is NOT in the commitment because a card's
+// key ROTATES on every transfer while its identity/commitment is preserved; the
+// rotating cardPub is bound instead in the per-custody AEAD aad (see cardAad).
+const CARD_COMMIT_TAG = new TextEncoder().encode('ESTATES_CARD_COMMIT_V1');
+function cardCommit(tableId: string, faceBytes: Uint8Array, blind: Uint8Array): string {
+  return bytesToHex(sha256(concatBytes(CARD_COMMIT_TAG, hexToBytes(tableId), faceBytes, blind)));
+}
+/** The AEAD aad binding a sealed face to its table + the holding card's key. */
+function cardAad(tableId: string, cardPub: string): Uint8Array {
+  return concatBytes(new TextEncoder().encode('ESTATES_CARD_AAD_V1|'), hexToBytes(tableId), hexToBytes(cardPub));
 }
 /** Open a concealment; true iff (face, blind) match the commitment. */
 export function verifyReveal(commitment: string, face: Uint8Array, blind: Uint8Array): boolean {
@@ -76,8 +106,23 @@ const BYTE_KIND: Record<number, CardKind> = { 1: 'TITLE', 2: 'REPRIEVE', 3: 'FAT
 
 export interface CardFace { readonly kind: CardKind; readonly id: number; readonly payload?: Uint8Array }
 
+const MAX_FACE_PAYLOAD = 1 << 16; // 64 KiB — far above any real card payload
+/**
+ * Reject an invalid face BEFORE encoding (audit: TypeScript types do not validate
+ * runtime values — a hostile `kind`/`id`/`payload` would otherwise encode as
+ * malformed bytes). Throws on anything that is not a well-formed face.
+ */
+export function validateFace(f: unknown): asserts f is CardFace {
+  if (!f || typeof f !== 'object') throw new Error('validateFace: not an object');
+  const o = f as Record<string, unknown>;
+  if (typeof o.kind !== 'string' || !(o.kind in KIND_BYTE)) throw new Error('validateFace: bad kind');
+  if (typeof o.id !== 'number' || !Number.isInteger(o.id) || o.id < 0 || o.id > 0xffffffff) throw new Error('validateFace: id must be a uint32');
+  if (o.payload !== undefined && (!(o.payload instanceof Uint8Array) || o.payload.length > MAX_FACE_PAYLOAD)) throw new Error('validateFace: bad payload');
+}
+
 /** Deterministic, length-prefixed face encoding (so commitments are canonical). */
 export function encodeFace(f: CardFace): Uint8Array {
+  validateFace(f);
   const payload = f.payload ?? EMPTY;
   const out = new Uint8Array(1 + 4 + 4 + payload.length);
   out[0] = KIND_BYTE[f.kind];
@@ -114,14 +159,16 @@ export interface CardSecret { readonly face: CardFace; readonly blind: Uint8Arra
 /** Mint one concealed card NFT for a table, sealed to `holderPub`, with its own key. */
 export function mintCard(tableId: string, face: CardFace, holderPub: Uint8Array): { card: ConcealedCard; secret: CardSecret } {
   if (!isTableIdHex(tableId)) throw new Error('tableId must be 32 bytes (64 hex)');
+  if (!isValidPub(holderPub)) throw new Error('mintCard: holder public key is not a valid compressed point');
   const blind = randomBytes(32);
   const key = genCardKey();
   const faceBytes = encodeFace(face);
+  const cardPub = bytesToHex(key.pub);
   const card: ConcealedCard = {
     tableId,
-    cardPub: bytesToHex(key.pub),
-    commitment: commit(faceBytes, blind),
-    sealed: sealTo(holderPub, faceBytes),
+    cardPub,
+    commitment: cardCommit(tableId, faceBytes, blind),          // domain-separated (tag + tableId)
+    sealed: sealTo(holderPub, faceBytes, cardAad(tableId, cardPub)), // AEAD bound to table + card key
   };
   return { card, secret: { face, blind, key } };
 }
@@ -129,24 +176,45 @@ export function mintCard(tableId: string, face: CardFace, holderPub: Uint8Array)
 /** The holder opens their card: returns the face iff the seal opens AND it matches
  *  the public commitment (no swap), AND it is bound to the expected table. */
 export function openCard(card: ConcealedCard, holderPriv: Uint8Array, blind: Uint8Array, expectedTableId: string): CardFace | null {
-  if (card.tableId !== expectedTableId) return null;           // table-bound
-  const faceBytes = open(holderPriv, card.sealed);
-  if (!faceBytes) return null;                                 // not the holder / tampered
-  if (!verifyReveal(card.commitment, faceBytes, blind)) return null; // commitment mismatch
+  if (!card || typeof card !== 'object') return null;
+  if (!isTableIdHex(expectedTableId) || card.tableId !== expectedTableId) return null;  // table-bound
+  if (typeof card.cardPub !== 'string') return null;
+  // AEAD aad must match the table + card key it was sealed under (open is total).
+  const faceBytes = open(holderPriv, card.sealed, cardAad(card.tableId, card.cardPub));
+  if (!faceBytes) return null;                                 // not the holder / wrong aad / tampered
+  if (card.commitment !== cardCommit(card.tableId, faceBytes, blind)) return null; // domain-separated commitment mismatch
   // A MALICIOUS minter may have committed+sealed a malformed face: the commitment
   // check passes (it matches the garbage), but decodeFace would throw. Stay total —
   // a card whose face does not decode is simply "not a valid card" → null.
   try { return decodeFace(faceBytes); } catch { return null; }
 }
 
-/** Transfer a card to a new holder: re-seal the face to them; identity + table +
- *  commitment are unchanged (same NFT, new wallet). Returns the new card + key. */
-export function transferCard(card: ConcealedCard, face: CardFace, newHolderPub: Uint8Array): { card: ConcealedCard; key: CardKey } {
+/** A transcript event proving a card key was RETIRED on transfer (audit: a
+ *  transfer must emit a retirement event for the old key, so a verifier can prove
+ *  the old key is one-use and never reused). */
+export interface TransferEvent {
+  readonly tableId: string;
+  readonly retired: string;   // the old cardPub (now retired, must never reappear)
+  readonly newCardPub: string;
+}
+
+/** Transfer a card to a new holder: re-seal the face to them with a FRESH one-use
+ *  key (the old key is retired). The identity + table + commitment are preserved
+ *  (the commitment is bound to the stable tableId, not the rotating key); the new
+ *  seal's AEAD aad binds the NEW card key. Returns the new card, its key, and a
+ *  retirement event for the old key. */
+export function transferCard(card: ConcealedCard, face: CardFace, newHolderPub: Uint8Array): { card: ConcealedCard; key: CardKey; event: TransferEvent } {
+  if (!isTableIdHex(card.tableId)) throw new Error('transferCard: card.tableId must be 32-byte hex');
+  if (!isValidPub(newHolderPub)) throw new Error('transferCard: new holder public key is not a valid compressed point');
   const key = genCardKey();
-  return {
-    card: { tableId: card.tableId, cardPub: bytesToHex(key.pub), commitment: card.commitment, sealed: sealTo(newHolderPub, encodeFace(face)) },
-    key,
+  const newCardPub = bytesToHex(key.pub);
+  const newCard: ConcealedCard = {
+    tableId: card.tableId,
+    cardPub: newCardPub,
+    commitment: card.commitment,
+    sealed: sealTo(newHolderPub, encodeFace(face), cardAad(card.tableId, newCardPub)),
   };
+  return { card: newCard, key, event: { tableId: card.tableId, retired: card.cardPub, newCardPub } };
 }
 
 // ---- dealerless mental-poker shuffle (no single party knows the order) -------
@@ -156,11 +224,47 @@ export function commitEntropy(secretBytes: Uint8Array): string { return bytesToH
 /** Verify a revealed entropy matches its prior commitment. */
 export function verifyEntropy(commitment: string, secretBytes: Uint8Array): boolean { return commitEntropy(secretBytes) === commitment; }
 /** Combine all revealed entropies (canonical order = sorted hex) into one seed.
- *  No single party can determine the result without controlling all others. */
+ *  No single party can determine the result without controlling all others.
+ *  Legacy/low-level: prefer `combineSeedBound` for live shuffles (it binds the
+ *  participant identities + game id + commitments so a missing/substituted party
+ *  is detected). */
 export function combineSeed(reveals: readonly Uint8Array[]): Uint8Array {
   const sorted = reveals.map(bytesToHex).sort();
   return sha256(concatBytes(...sorted.map(hexToBytes)));
 }
+
+/** A signed-shuffle participant: a seat, its key, its prior entropy commitment,
+ *  and the revealed secret that must open that commitment. */
+export interface SeedParty {
+  readonly seat: number;
+  readonly pub: string;          // hex
+  readonly commitment: string;   // hex = commitEntropy(reveal)
+  readonly reveal: Uint8Array;
+}
+/**
+ * BOUND seed combination (audit: combineSeed must bind the PARTICIPANT SET, not
+ * just sort reveal bytes — otherwise a missing/duplicate/substituted party is
+ * undetectable). Verifies every reveal opens its commitment, rejects duplicate
+ * seats/keys, and folds (gameId ‖ for each party in seat order: seat‖pub‖
+ * commitment‖reveal) into the seed. Returns null on any inconsistency (total).
+ */
+export function combineSeedBound(parties: readonly SeedParty[], gameId: string): Uint8Array | null {
+  if (!isTableIdHex(gameId) || !Array.isArray(parties) || parties.length === 0 || parties.length > 64) return null;
+  const seats = new Set<number>(); const pubs = new Set<string>();
+  const sorted = [...parties].sort((a, b) => a.seat - b.seat);
+  const parts: Uint8Array[] = [new TextEncoder().encode('ESTATES_SHUFFLE_SEED_V1|'), hexToBytes(gameId)];
+  for (const p of sorted) {
+    if (!Number.isInteger(p.seat) || p.seat < 0 || p.seat > 63) return null;
+    if (typeof p.pub !== 'string' || !/^[0-9a-f]+$/.test(p.pub) || p.pub.length % 2 !== 0) return null;
+    if (!(p.reveal instanceof Uint8Array)) return null;
+    if (typeof p.commitment !== 'string' || commitEntropy(p.reveal) !== p.commitment) return null; // reveal must open its commitment
+    if (seats.has(p.seat) || pubs.has(p.pub)) return null;                                          // no duplicate party
+    seats.add(p.seat); pubs.add(p.pub);
+    parts.push(u32be(p.seat), hexToBytes(p.pub), hexToBytes(p.commitment), p.reveal);
+  }
+  return sha256(concatBytes(...parts));
+}
+const u32be = (n: number): Uint8Array => new Uint8Array([(n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff]);
 /**
  * Deterministic Fisher–Yates permutation of [0,n) from a seed (sha256 counter PRNG).
  *
@@ -173,7 +277,12 @@ export function combineSeed(reveals: readonly Uint8Array[]): Uint8Array {
  * bound below 2^32). This makes the dealerless concealed shuffle unbiased for
  * EVERY ESTATES set size, not just powers of two.
  */
+export const MAX_DECK_SIZE = 1 << 16; // 65536 — far above any real ESTATES set
 export function permutation(seed: Uint8Array, n: number): number[] {
+  // Guard the size (audit): a non-integer / negative / huge n would otherwise
+  // allocate unboundedly or loop forever. ESTATES sets are ≤ a few dozen.
+  if (!Number.isSafeInteger(n) || n < 0 || n > MAX_DECK_SIZE) throw new Error(`permutation: n out of range (0..${MAX_DECK_SIZE})`);
+  if (!(seed instanceof Uint8Array)) throw new Error('permutation: seed must be Uint8Array');
   const idx = Array.from({ length: n }, (_, i) => i);
   let pool = sha256(seed);
   let p = 0;
