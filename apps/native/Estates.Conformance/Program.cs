@@ -77,4 +77,29 @@ if (File.Exists(klPath))
     if (kfail == 0) Console.WriteLine("PASS: native KeyLife agrees with the TS reference (TS-signed manifests verify in C#).");
 }
 
-return (fail == 0 && kfail == 0) ? 0 : 1;
+// ---- TX cross-validation: native serialize + txid must equal the TS reference ----
+int tpass = 0, tfail = 0;
+string txPath = Path.Combine(AppContext.BaseDirectory, "tx-vectors.json");
+if (File.Exists(txPath))
+{
+    using var tdoc = JsonDocument.Parse(File.ReadAllText(txPath));
+    foreach (var v in tdoc.RootElement.EnumerateArray())
+    {
+        string name = v.GetProperty("name").GetString()!;
+        var te = v.GetProperty("tx");
+        var inputs = te.GetProperty("inputs").EnumerateArray().Select(i =>
+            new TxInputN(i.GetProperty("prevTxid").GetString()!, i.GetProperty("prevVout").GetInt64(),
+                Tx.FromHex(i.GetProperty("scriptSig").GetString()!), i.GetProperty("sequence").GetInt64())).ToList();
+        var outputs = te.GetProperty("outputs").EnumerateArray().Select(o =>
+            new TxOutputN(o.GetProperty("value").GetInt64(), Tx.FromHex(o.GetProperty("script").GetString()!))).ToList();
+        var tx = new NativeTx(te.GetProperty("version").GetInt32(), inputs, outputs, te.GetProperty("lockTime").GetInt64());
+        string wantSer = v.GetProperty("serialized").GetString()!, wantTxid = v.GetProperty("txid").GetString()!;
+        string gotSer = Tx.ToHex(Tx.Serialize(tx)), gotTxid = Tx.Txid(tx);
+        if (gotSer == wantSer && gotTxid == wantTxid) tpass++;
+        else { Console.Error.WriteLine($"  [TX FAIL] {name}: serial/txid mismatch\n    serWant {wantSer}\n    serGot  {gotSer}\n    idWant {wantTxid} idGot {gotTxid}"); tfail++; }
+    }
+    Console.WriteLine($"Estates.Conformance (tx): {tpass} passed, {tfail} failed");
+    if (tfail == 0) Console.WriteLine("PASS: native Tx serialization + txid are byte-for-byte the TS reference.");
+}
+
+return (fail == 0 && kfail == 0 && tfail == 0) ? 0 : 1;
