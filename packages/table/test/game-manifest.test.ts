@@ -4,11 +4,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { InMemoryRelay } from '@estates/chat';
-import { genIdentity, gameIdentityFrom } from '@estates/channel';
+import { genIdentity, gameIdentityFrom, signData } from '@estates/channel';
 import { verifyManifest, verifyNoCrossGameReuse, buildManifest, hashHex } from '@estates/keylife';
 import { NetTable, type NetworkMode } from '../src/index.ts';
 
 const toHex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+const enc = (o: unknown) => new TextEncoder().encode(JSON.stringify(o));
 const GID_A = 'a1'.repeat(32);
 const GID_B = 'b2'.repeat(32);
 
@@ -73,4 +74,47 @@ test('the legacy game-independent key WOULD be caught as cross-game reuse (why p
     { purpose: 'seat', pub: toHex(sharedKey.signPub), keyType: 'ed25519', seat: 0 },
   ], a2.signPriv, toHex(a2.signPub));
   assert.equal(verifyNoCrossGameReuse([A, B]).ok, false, 'a reused key across games is rejected');
+});
+
+test('the host BROADCASTS the manifest at start; every peer verifies the SAME live manifest', () => {
+  const relay = new InMemoryRelay();
+  const masterA = new Uint8Array(32).fill(5); const masterB = new Uint8Array(32).fill(6);
+  const alice = new NetTable(relay, 'alice', () => {}, { identity: gameIdentityFrom(masterA, GID_A), gameId: GID_A });
+  const bob = new NetTable(relay, 'bob', () => {}, { identity: gameIdentityFrom(masterB, GID_A), gameId: GID_A });
+  alice.connect(); bob.connect();
+  alice.createTable(2, 'regtest' as NetworkMode);
+  alice.joinSeat(); bob.joinSeat();
+  alice.start(); // host broadcasts start + the signed manifest
+
+  // BOTH peers (not just the host) end up with the SAME verified live manifest
+  const ma = alice.verifiedManifest();
+  const mb = bob.verifiedManifest();
+  assert.ok(ma, 'host has the live manifest');
+  assert.ok(mb, 'the OTHER peer verified the broadcast manifest too');
+  assert.equal(ma!.gameId, GID_A);
+  assert.deepEqual(ma!.entries, mb!.entries, 'both peers verified the identical manifest');
+  assert.ok(verifyManifest(mb!).ok, 'the peer-verified manifest is valid');
+});
+
+test('a FORGED manifest whose seat keys differ from the committed seat map is NOT accepted', () => {
+  const relay = new InMemoryRelay();
+  const host = gameIdentityFrom(new Uint8Array(32).fill(5), GID_A);
+  const alice = new NetTable(relay, 'alice', () => {}, { identity: host, gameId: GID_A });
+  const bob = new NetTable(relay, 'bob', () => {}, { identity: gameIdentityFrom(new Uint8Array(32).fill(6), GID_A), gameId: GID_A });
+  alice.connect(); bob.connect();
+  alice.createTable(2, 'regtest' as NetworkMode);
+  alice.joinSeat(); bob.joinSeat();
+  // the host publishes a manifest binding STRANGER keys instead of the seated ones
+  const stranger = genIdentity(); const auth = genIdentity();
+  const forged = buildManifest(GID_A, 'estates-table-v1', hashHex(new TextEncoder().encode('estates-params:1')), [
+    { purpose: 'genesis', pub: toHex(auth.signPub), keyType: 'ed25519' },
+    { purpose: 'seat', pub: toHex(stranger.signPub), keyType: 'ed25519', seat: 0 },
+    { purpose: 'seat', pub: toHex(genIdentity().signPub), keyType: 'ed25519', seat: 1 },
+  ], auth.signPriv, toHex(auth.signPub));
+  const signPub = toHex(host.signPub);
+  const msg = { kind: 'manifest', m: forged };
+  const sig = toHex(signData(enc({ ...msg, signPub }), host.signPriv));
+  relay.publish(enc({ ...msg, id: 'forged-manifest', signPub, sig }));
+  // peers must NOT accept it — its seat keys don't match the committed seat map
+  assert.equal(bob.verifiedManifest(), null, 'a manifest not matching the seat map is rejected');
 });

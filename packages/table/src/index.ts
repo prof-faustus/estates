@@ -15,7 +15,7 @@ import { HttpRelay, InMemoryRelay, type Relay } from '@estates/chat';
 import { genIdentity, identityFrom, gameIdentityFrom, signData, verifyData, signingKeyFromMaster, type Identity } from '@estates/channel';
 import { sha256 } from '@noble/hashes/sha256';
 import { commit as beaconCommit, verifyRollEntry, ZERO_BEACON } from '@estates/beacon';
-import { buildManifest, hashHex, type GameKeyManifest, type KeyEntry } from '@estates/keylife';
+import { buildManifest, hashHex, verifyManifest, type GameKeyManifest, type KeyEntry } from '@estates/keylife';
 
 export const P = loadParams();
 export { identityFrom, gameIdentityFrom, type Identity };
@@ -137,6 +137,7 @@ type Msg =
   | { kind: 'table'; maxSeats: number; network: NetworkMode; host: string }
   | { kind: 'seat'; seat: number; who: string; name: string; bot: boolean }
   | { kind: 'start'; by: string; config: EngineConfig; seatMap: { seat: number; who: string }[] }
+  | { kind: 'manifest'; m: GameKeyManifest }                     // host's signed one-game key manifest
   | { kind: 'commit'; roll: number; seat: number; c: string }   // beacon commitment for roll #roll (audit #3)
   | { kind: 'reveal'; roll: number; seat: number; s: string }   // beacon reveal
   | { kind: 'action'; action: Action };
@@ -240,6 +241,11 @@ export function decodeSigned(payload: Uint8Array): { msg: Msg; id: string; signP
     case 'action':
       if (!isAction(o.action)) return null;
       return { msg: { kind: 'action', action: o.action }, ...meta };
+    case 'manifest':
+      // pass the manifest object through; verifyManifest (total, fail-closed) does
+      // the deep validation in rebuild. Here we only require it is an object.
+      if (!isObj(o.m)) return null;
+      return { msg: { kind: 'manifest', m: o.m as unknown as GameKeyManifest }, ...meta };
     default:
       return null;
   }
@@ -338,6 +344,13 @@ export class NetTable {
   // reveal is then checked against seatKeys (which only ever holds manifest keys),
   // the whole live game is manifest-scoped. Omitted = legacy seat-claim binding.
   private manifest: GameKeyManifest | null;
+  // The host's broadcast manifest, once VERIFIED from the relay (signed by host,
+  // valid, bound to this gameId, seat entries == the committed seat map).
+  private liveManifest: GameKeyManifest | null = null;
+
+  /** The verified one-game key manifest the host broadcast for this game, or null.
+   *  Every peer + auditor can use it to reject cross-game key reuse. */
+  verifiedManifest(): GameKeyManifest | null { return this.liveManifest; }
 
   // The 32-byte hex game id this table is bound to (the relay channel). Per-game
   // keys (channel.gameIdentityFrom(master, gameId)) and the key manifest bind to it.
@@ -416,11 +429,15 @@ export class NetTable {
     if (seat < 0) return;
     this.send({ kind: 'seat', seat, who: this.me, name: this.name, bot: simulated });
   }
-  /** HOST + HUMAN ONLY. Binds the final seat map into the signed start. */
+  /** HOST + HUMAN ONLY. Binds the final seat map into the signed start, then
+   *  BROADCASTS the signed one-game key manifest so every peer + auditor verifies
+   *  the seat keys are this game's keys only. */
   start(): void {
     if (!this.iAmHost() || this.started || this.maxSeats === null) return;
     const seatMap = [...this.seats.entries()].map(([seat, v]) => ({ seat, who: v.who })).sort((a, b) => a.seat - b.seat);
     this.send({ kind: 'start', by: this.me, config: { network: this.network, seatCount: this.maxSeats, bankReserve: P.scalars.salary * 200 }, seatMap });
+    const m = this.gameKeyManifest();
+    if (m) this.send({ kind: 'manifest', m });
   }
   submit(action: Action): void {
     if (action.type === 'ROLL') return; // raw dice are NOT accepted in multiplayer — rolls come from the beacon (audit #3)
@@ -476,6 +493,7 @@ export class NetTable {
     let host: string | null = null;             // the host = the signing key that opened the table
     let started = false;
     let state: GameState | null = null;
+    let liveManifest: GameKeyManifest | null = null; // host's broadcast one-game key manifest, once verified
     const seats = new Map<number, { who: string; name: string; bot: boolean }>();
     const seatKeys = new Map<number, string>();  // seat → controlling signing pub
     const commitsBySeq = new Map<number, Map<number, Uint8Array>>();
@@ -570,8 +588,20 @@ export class NetTable {
             if (seatKeys.get(owner) === signPub) { try { const r = apply(state, m.action); if (r.ok) { state = r.state; tryRoll(); } } catch { /* reject */ } }
           }
           break;
+        case 'manifest':
+          // The host broadcasts the signed one-game key manifest at start. Accept it
+          // ONLY if it is signed by the host, internally valid (verifyManifest), bound
+          // to THIS game id, and its seat entries EXACTLY match the committed seat map
+          // (so the host cannot certify keys other than those that claimed seats).
+          if (signPub === host && liveManifest === null && verifyManifest(m.m).ok && m.m.gameId === this.gameId) {
+            const want = [...seatKeys.entries()].map(([seat, who]) => `${seat}:${who}`).sort().join(',');
+            const got = m.m.entries.filter((e) => e.purpose === 'seat').map((e) => `${e.seat}:${e.pub}`).sort().join(',');
+            if (want === got && want.length > 0) liveManifest = m.m;
+          }
+          break;
       }
     }
+    this.liveManifest = liveManifest;
     this.commitsBySeq = commitsBySeq;
     this.revealsBySeq = revealsBySeq;
     this.nextRollSeq = rollsApplied;
