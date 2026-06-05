@@ -32,3 +32,6 @@ scratch/
 **/src-tauri/target/
 **/src-tauri/gen/
 **/target/
+
+# local test helper (not shipped)
+apps/client-web/_serve.mjs
