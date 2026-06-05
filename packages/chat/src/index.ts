@@ -7,10 +7,10 @@
  */
 import { type Relay, InMemoryRelay, HttpRelay } from './relay.ts';
 import {
-  genPeer, peerFrom, addressOf, encryptBroadcast, decryptBroadcast, type Peer, type Envelope,
+  genPeer, peerFrom, addressOf, encryptBroadcast, decryptBroadcast, isHex, isEnvelope, type Peer, type Envelope,
 } from './broadcast.ts';
 
-export { genPeer, peerFrom, addressOf, encryptBroadcast, decryptBroadcast, InMemoryRelay, HttpRelay };
+export { genPeer, peerFrom, addressOf, encryptBroadcast, decryptBroadcast, isHex, isEnvelope, InMemoryRelay, HttpRelay };
 export type { Peer, Envelope, Relay };
 
 type NetMsg =
@@ -21,12 +21,50 @@ type NetMsg =
 export interface ChatMessage { readonly from: string; readonly text: string; }
 export interface Member { readonly address: string; readonly pub: Uint8Array; readonly name?: string }
 
+const ADDR_BYTES = 20;       // ripemd160(sha256(pub)) — a Bitmessage-style address
+const PUB_BYTES = 33;        // compressed secp256k1 public key
+const MAX_NAME = 256;        // display-name ceiling (bounds memory; names are short)
+const MAX_MSG_BYTES = 1 << 20; // 1 MiB per wire frame (the relay also caps; defense in depth)
+
 const enc = (m: NetMsg): Uint8Array => new TextEncoder().encode(JSON.stringify(m));
-const dec = (p: Uint8Array): NetMsg | null => { try { return JSON.parse(new TextDecoder().decode(p)) as NetMsg; } catch { return null; } };
-// ISOMORPHIC hex (NO node:Buffer — this module runs in the browser webview too;
-// `Buffer` is undefined there and was crashing every join/post / the chat panel).
+
+/**
+ * Decode ONE inbound relay frame to a NetMsg, or null. FAIL-CLOSED and TOTAL: the
+ * bytes are attacker-controlled, so we never `as NetMsg`-cast a parsed blob — we
+ * prove `kind` and EVERY field (type, hex-ness, exact length, bounded name) before
+ * returning, and reject (null) on anything unexpected. Never throws.
+ *
+ * WHY: a peer that could smuggle an unvalidated field (a non-string `pub`, a
+ * malformed `env`, an oversized `name`) into the receive path could crash the loop,
+ * poison the member set, or DoS via allocation. Validation here is the security
+ * boundary between the untrusted relay and our state.
+ */
+function decodeNetMsg(payload: Uint8Array): NetMsg | null {
+  if (payload.length > MAX_MSG_BYTES) return null;                  // bound before parse
+  let raw: unknown;
+  try { raw = JSON.parse(new TextDecoder().decode(payload)); } catch { return null; }
+  if (typeof raw !== 'object' || raw === null) return null;
+  const m = raw as Record<string, unknown>;
+  switch (m.kind) {
+    case 'join': {
+      if (!isHex(m.address, ADDR_BYTES) || !isHex(m.pub, PUB_BYTES)) return null;
+      if (m.name !== undefined && (typeof m.name !== 'string' || m.name.length > MAX_NAME)) return null;
+      return m.name !== undefined
+        ? { kind: 'join', address: m.address, pub: m.pub, name: m.name }
+        : { kind: 'join', address: m.address, pub: m.pub };
+    }
+    case 'leave':
+      return isHex(m.address, ADDR_BYTES) ? { kind: 'leave', address: m.address } : null;
+    case 'chat':
+      return isHex(m.from, ADDR_BYTES) && isEnvelope(m.env) ? { kind: 'chat', from: m.from, env: m.env } : null;
+    default:
+      return null;                                                  // unknown kind → reject
+  }
+}
+
+// ISOMORPHIC hex (NO node:Buffer — this module runs in the browser webview too).
 const toHex = (b: Uint8Array): string => { let s = ''; for (const x of b) s += x.toString(16).padStart(2, '0'); return s; };
-const fromHex = (h: string): Uint8Array => { if (h.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(h)) throw new Error('invalid hex'); const b = new Uint8Array(h.length / 2); for (let i = 0; i < b.length; i++) b[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16); return b; };
+const fromHex = (h: string): Uint8Array => { const b = new Uint8Array(h.length / 2); for (let i = 0; i < b.length; i++) b[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16); return b; };
 
 /**
  * A chat room on a table channel. The relay is untrusted: it only fans out
@@ -92,23 +130,34 @@ export class ChatRoom {
 
   onMessage(cb: (m: ChatMessage) => void): void { this.handlers.push(cb); }
 
+  /**
+   * Handle ONE inbound relay frame. SECURITY BOUNDARY: `payload` is fully untrusted
+   * (the relay and peers are hostile). Everything is validated by decodeNetMsg
+   * first; this method must never throw (it runs inside the relay receive loop) and
+   * must never mutate state on malformed input.
+   *
+   * Invariants enforced here:
+   *  - a `join` is accepted ONLY if address == ripemd160(sha256(pub)) — a peer
+   *    cannot claim an address it does not hold the key for.
+   *  - a `chat` is delivered ONLY if its AEAD envelope decrypts for us (forged or
+   *    tampered ciphertext yields null and is dropped — no forged plaintext).
+   */
   private ingest(payload: Uint8Array): void {
-    const m = dec(payload);
-    if (!m) return;
+    const m = decodeNetMsg(payload);
+    if (!m) return;                                      // malformed/hostile → dropped, no mutation
     switch (m.kind) {
       case 'join': {
-        let pub: Uint8Array;
-        try { pub = fromHex(m.pub); } catch { return; }   // bad hex → ignore (never throw out of the poll loop)
-        if (addressOf(pub) !== m.address) return;          // address must bind the pubkey
-        this.members.set(m.address, { address: m.address, pub, ...(m.name ? { name: m.name } : {}) });
+        const pub = fromHex(m.pub);                       // m.pub is validated 33-byte hex by decodeNetMsg
+        if (addressOf(pub) !== m.address) return;         // address MUST bind the pubkey (no spoofed identity)
+        this.members.set(m.address, { address: m.address, pub, ...(m.name !== undefined ? { name: m.name } : {}) });
         return;
       }
       case 'leave':
         this.members.delete(m.address);
         return;
       case 'chat': {
-        const pt = decryptBroadcast(m.env, this.me);
-        if (pt === null) return; // not a recipient (revoked / before we joined)
+        const pt = decryptBroadcast(m.env, this.me);      // total: null if not for us / tampered
+        if (pt === null) return;
         const text = new TextDecoder().decode(pt);
         for (const h of this.handlers) h({ from: m.from, text });
         return;

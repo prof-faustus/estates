@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  genPeer, peerFrom, addressOf, encryptBroadcast, decryptBroadcast, ChatRoom, InMemoryRelay, type ChatMessage,
+  genPeer, peerFrom, addressOf, encryptBroadcast, decryptBroadcast, isHex, isEnvelope, ChatRoom, InMemoryRelay, type ChatMessage,
 } from '../src/index.ts';
 
 const td = (b: Uint8Array) => new TextDecoder().decode(b);
@@ -142,4 +142,89 @@ test('revoked member stops receiving a peer’s subsequent posts', () => {
   A.post('B removed'); // A excludes B from recipients
   assert.equal(bGot.includes('still in'), true);
   assert.equal(bGot.includes('B removed'), false);
+});
+
+// ---- WIRE DECODER: fail-closed + fuzz-proof (untrusted relay/peer bytes) -------
+// Security claim: a hostile relay or peer cannot crash the receive loop, poison the
+// member set, forge a chat, or DoS the client via a malformed/oversized frame.
+
+test('isHex validates type, even-length, exact-length, and bounds (no over-alloc)', () => {
+  assert.equal(isHex('ab', 1), true);
+  assert.equal(isHex('abcd', 2), true);
+  assert.equal(isHex('abc', 1), false, 'odd length');
+  assert.equal(isHex('zz', 1), false, 'non-hex');
+  assert.equal(isHex('abcd', 1), false, 'wrong exact length');
+  assert.equal(isHex(123 as unknown, 1), false, 'non-string');
+  assert.equal(isHex(undefined, 1), false);
+  assert.equal(isHex('00'.repeat(2_000_000), undefined, 1 << 20), false, 'over the byte ceiling');
+});
+
+test('isEnvelope rejects every malformed shape (no field is dereferenced unchecked)', () => {
+  const good = encryptBroadcast([genPeer().pub], new TextEncoder().encode('hi'));
+  assert.equal(isEnvelope(good), true, 'a real envelope validates');
+  for (const bad of [
+    null, undefined, 42, 'x', [], {},
+    { ephPub: 'zz', nonce: '00'.repeat(12), ct: 'aa', recipients: [] },        // bad ephPub
+    { ephPub: '00'.repeat(33), nonce: '0', ct: 'aa', recipients: [{ address: '00'.repeat(20), nonce: '00'.repeat(12), ct: 'aa' }] }, // bad nonce
+    { ...good, recipients: 'not-an-array' },                                    // recipients not array
+    { ...good, recipients: [null] },                                           // recipient not object
+    { ...good, recipients: [{ address: 'short', nonce: '00'.repeat(12), ct: 'aa' }] }, // bad recipient address
+    { ...good, recipients: [] },                                               // empty recipients
+  ]) {
+    assert.equal(isEnvelope(bad), false, `rejected: ${(JSON.stringify(bad) ?? String(bad)).slice(0, 40)}`);
+  }
+});
+
+test('decryptBroadcast is TOTAL: never throws on any malformed/hostile envelope', () => {
+  const me = genPeer();
+  for (const bad of [null, undefined, 42, 'x', {}, { recipients: 'x' }, { recipients: [null] }, { ephPub: 'zz' }, [], { recipients: [{}] }]) {
+    let out: unknown = 'unset';
+    assert.doesNotThrow(() => { out = decryptBroadcast(bad as never, me); }, `must not throw on ${JSON.stringify(bad)}`);
+    assert.equal(out, null, 'malformed envelope → null');
+  }
+});
+
+test('ingest is FAIL-CLOSED: hostile frames never throw, never mutate the member set', () => {
+  const relay = new InMemoryRelay();
+  const room = new ChatRoom(relay, genPeer());        // do NOT join → member set starts empty
+  room.connect();
+  const te = (s: string) => new TextEncoder().encode(s);
+  const hostile: Uint8Array[] = [
+    te('not json at all'),
+    te('null'), te('42'), te('"a string"'), te('[]'),
+    te(JSON.stringify({ kind: 'nope' })),
+    te(JSON.stringify({ kind: 'join' })),                                  // missing fields
+    te(JSON.stringify({ kind: 'join', address: 123, pub: 'x' })),          // wrong types
+    te(JSON.stringify({ kind: 'join', address: 'aa'.repeat(20), pub: 'zz' })), // bad pub hex
+    te(JSON.stringify({ kind: 'chat', from: 'aa'.repeat(20), env: {} })),  // malformed env (the old crash)
+    te(JSON.stringify({ kind: 'chat', from: 'aa'.repeat(20), env: { recipients: 'x' } })),
+    te(JSON.stringify({ kind: 'leave' })),
+  ];
+  for (const h of hostile) assert.doesNotThrow(() => relay.publish(h), 'no throw out of the receive loop');
+  assert.equal(room.members.size, 0, 'no hostile frame added a member');
+
+  // identity-spoof: a join whose address does NOT equal hash160(pub) is rejected
+  const other = genPeer();
+  const toHex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+  relay.publish(te(JSON.stringify({ kind: 'join', address: 'bb'.repeat(20), pub: toHex(other.pub) })));
+  assert.equal(room.members.has('bb'.repeat(20)), false, 'address must bind the pubkey — spoof rejected');
+  // a CORRECT join is accepted (control)
+  relay.publish(te(JSON.stringify({ kind: 'join', address: other.address, pub: toHex(other.pub) })));
+  assert.equal(room.members.get(other.address)?.address, other.address, 'a well-formed, address-bound join is accepted');
+});
+
+test('decoder is FUZZ-PROOF: 50k random byte/JSON frames never throw or hang', () => {
+  const relay = new InMemoryRelay();
+  const room = new ChatRoom(relay, genPeer());
+  room.connect();
+  let rng = 0xdeadbeef >>> 0; const rand = () => { rng = (rng * 1103515245 + 12345) >>> 0; return rng; };
+  const t0 = Date.now();
+  for (let i = 0; i < 50_000; i++) {
+    const len = rand() % 200;
+    const b = new Uint8Array(len);
+    for (let k = 0; k < len; k++) b[k] = rand() & 0xff;
+    assert.doesNotThrow(() => relay.publish(b));
+  }
+  assert.ok(Date.now() - t0 < 8000, 'bounded work — no hang');
+  assert.equal(room.members.size, 0, 'no random frame ever forged a member');
 });

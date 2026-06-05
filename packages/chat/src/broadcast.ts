@@ -52,6 +52,47 @@ export interface Envelope {
   readonly recipients: readonly WrappedKey[];
 }
 
+// ---- untrusted-input validators (fail-closed; total — never throw) ----------
+// WHY: an Envelope on the wire is attacker-controlled. Before ANY field is read we
+// prove its exact shape, so a malformed envelope is REJECTED, never dereferenced or
+// allowed to throw out of a receive loop. Sizes are bounded so a hostile peer cannot
+// force a huge allocation (DoS) via a giant ct or recipient list.
+const HEX_RE = /^[0-9a-f]*$/i;
+const MAX_CT_BYTES = 1 << 20;       // 1 MiB ciphertext ceiling (a chat line is tiny)
+const MAX_RECIPIENTS = 4096;        // far above any real table; bounds the loop/array
+
+/** True iff `x` is an even-length hex string of `exactBytes` (if given) and ≤ maxBytes. */
+export function isHex(x: unknown, exactBytes?: number, maxBytes = MAX_CT_BYTES): x is string {
+  if (typeof x !== 'string' || x.length % 2 !== 0) return false;
+  const bytes = x.length / 2;
+  if (bytes > maxBytes) return false;
+  if (exactBytes !== undefined && bytes !== exactBytes) return false;
+  return HEX_RE.test(x);
+}
+
+/**
+ * Structural validator for an Envelope from untrusted bytes. Checks EVERY field's
+ * presence, type, hex-ness, exact length where fixed (33-byte ephPub, 12-byte
+ * nonces, 20-byte recipient addresses), and bounds the recipient count + ct size.
+ * Returns a type guard so callers may safely read fields afterward.
+ */
+export function isEnvelope(x: unknown): x is Envelope {
+  if (typeof x !== 'object' || x === null) return false;
+  const e = x as Record<string, unknown>;
+  if (!isHex(e.ephPub, 33)) return false;          // compressed secp256k1 point
+  if (!isHex(e.nonce, 12)) return false;           // AES-GCM nonce
+  if (!isHex(e.ct, undefined, MAX_CT_BYTES)) return false;
+  if (!Array.isArray(e.recipients) || e.recipients.length === 0 || e.recipients.length > MAX_RECIPIENTS) return false;
+  for (const r of e.recipients) {
+    if (typeof r !== 'object' || r === null) return false;
+    const w = r as Record<string, unknown>;
+    if (!isHex(w.address, 20)) return false;        // ripemd160(sha256(pub)) = 20 bytes
+    if (!isHex(w.nonce, 12)) return false;
+    if (!isHex(w.ct, undefined, MAX_CT_BYTES)) return false;
+  }
+  return true;
+}
+
 function wrapKey(shared: Uint8Array): Uint8Array {
   return hkdf(sha256, shared, EMPTY, HKDF_INFO, 32);
 }
@@ -75,16 +116,26 @@ export function encryptBroadcast(recipients: readonly Uint8Array[], plaintext: U
   return { ephPub: bytesToHex(ephPub), nonce: bytesToHex(pnonce), ct: bytesToHex(ct), recipients: wrapped };
 }
 
-/** Decrypt an envelope with a peer's key. Returns null if not a recipient or on tamper. */
-export function decryptBroadcast(env: Envelope, me: Peer): Uint8Array | null {
-  const slot = env.recipients.find((r) => r.address === me.address);
-  if (!slot) return null; // not addressed to this peer (revoked / never a member)
+/**
+ * Decrypt an envelope with a peer's key. TOTAL and FAIL-CLOSED: returns null if the
+ * envelope is malformed, not addressed to this peer, or tampered — it NEVER throws,
+ * so it is safe to call directly on untrusted bytes inside a receive loop.
+ *
+ * WHY total: this runs on every inbound relay frame. A hostile peer that could make
+ * it throw (e.g. `recipients` not an array) would crash the receive loop / DoS the
+ * client; the @noble AEAD then guarantees a tampered ciphertext fails closed (null),
+ * never returns forged plaintext.
+ */
+export function decryptBroadcast(env: unknown, me: Peer): Uint8Array | null {
+  if (!isEnvelope(env)) return null;                 // reject malformed before any field read
   try {
+    const slot = env.recipients.find((r) => r.address === me.address);
+    if (!slot) return null;                           // not addressed to this peer
     const shared = secp.getSharedSecret(me.priv, hexToBytes(env.ephPub), true);
     const wk = wrapKey(shared);
-    const contentKey = gcm(wk, hexToBytes(slot.nonce)).decrypt(hexToBytes(slot.ct));
-    return gcm(contentKey, hexToBytes(env.nonce)).decrypt(hexToBytes(env.ct));
+    const contentKey = gcm(wk, hexToBytes(slot.nonce)).decrypt(hexToBytes(slot.ct)); // AEAD: throws on tamper
+    return gcm(contentKey, hexToBytes(env.nonce)).decrypt(hexToBytes(env.ct));        // AEAD: throws on tamper
   } catch {
-    return null; // tampered ciphertext / wrong key
+    return null;                                      // wrong key / tampered ciphertext → fail closed
   }
 }
