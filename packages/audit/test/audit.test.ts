@@ -167,3 +167,35 @@ test('audit is FUZZ-PROOF: 20k mutated transcripts never throw', () => {
     assert.doesNotThrow(() => { audit(t); });
   }
 });
+
+// ---- KEY-LIFECYCLE folded into a full game audit (audit verifies key lifecycle) --
+import { genIdentity } from '@estates/channel';
+import { buildManifest, hashHex, type KeyEntry } from '@estates/keylife';
+
+const hx = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+const PH = hashHex(new TextEncoder().encode('estates.v1'));
+function gameManifest(gameId: string, sharedSeat0?: string) {
+  const auth = genIdentity(); const s0 = genIdentity(); const s1 = genIdentity();
+  const entries: KeyEntry[] = [
+    { purpose: 'genesis', pub: hx(auth.signPub), keyType: 'ed25519' },
+    { purpose: 'seat', pub: sharedSeat0 ?? hx(s0.signPub), keyType: 'ed25519', seat: 0 },
+    { purpose: 'seat', pub: hx(s1.signPub), keyType: 'ed25519', seat: 1 },
+  ];
+  return buildManifest(gameId, 'estates-1', PH, entries, auth.signPriv, hx(auth.signPub));
+}
+
+test('a full game audit PASSES with fresh per-game key manifests supplied', () => {
+  const t = record();
+  const manifests = [gameManifest('a1'.repeat(32)), gameManifest('b2'.repeat(32))];
+  const r = audit(t, { manifests });
+  assert.ok(r.ok, r.reason);
+});
+
+test('the SAME game transcript FAILS the audit when its key manifests reuse a key across games', () => {
+  const t = record();
+  const shared = hx(genIdentity().signPub);
+  const manifests = [gameManifest('a1'.repeat(32), shared), gameManifest('b2'.repeat(32), shared)]; // reuse seat-0 key
+  const r = audit(t, { manifests });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /key lifecycle/i);
+});
