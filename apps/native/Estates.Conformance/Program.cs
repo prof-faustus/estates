@@ -221,4 +221,21 @@ if (File.Exists(tmPath))
     if (mfail == 0) Console.WriteLine("PASS: native re-derives the canonical signed-frame bytes + verifies web table messages.");
 }
 
-return (fail == 0 && kfail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && gfail == 0 && mfail == 0) ? 0 : 1;
+// ---- RELAY live round-trip (optional): if the relay is running, the native
+// client publishes a frame + reads it back from the ordered log. Skipped (not a
+// failure) when the relay is down, so the offline conformance run never depends on it.
+int rfail = 0;
+var relay = new RelayClient();
+if (await relay.ReachableAsync())
+{
+    string ch = "native-relay-test-" + Guid.NewGuid().ToString("N")[..8];
+    byte[] frame = System.Text.Encoding.UTF8.GetBytes("{\"native\":\"hello\",\"n\":42}");
+    await relay.PublishAsync(ch, frame);
+    var hist = await relay.HistoryAsync(ch);
+    bool ok = hist.Any(f => Tx.ToHex(f) == Tx.ToHex(frame));
+    Console.WriteLine($"Estates.Conformance (relay): live round-trip {(ok ? "PASS — native client published + read back its frame" : "FAIL")}");
+    if (!ok) rfail = 1;
+}
+else Console.WriteLine("Estates.Conformance (relay): skipped (relay not running on 127.0.0.1:8788)");
+
+return (fail == 0 && kfail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && gfail == 0 && mfail == 0 && rfail == 0) ? 0 : 1;
