@@ -30,9 +30,18 @@ ed.etc.sha512Sync = (...m: Uint8Array[]): Uint8Array => sha512(ed.etc.concatByte
 /** The Ed25519 protocol-signing key DERIVED from the player's master secret. The
  *  master (secp256k1) is the wallet key that makes single-use address/payment
  *  keys; the SAME master deterministically yields this Ed25519 key for signing
- *  protocol messages (the wallet does not expose raw ECDSA message signing). */
-export function signingKeyFromMaster(masterPriv: Uint8Array): { priv: Uint8Array; pub: Uint8Array } {
-  const seed = hkdf(sha256, masterPriv, new Uint8Array(0), new TextEncoder().encode('estates-ed25519-sign-v1'), 32);
+ *  protocol messages (the wallet does not expose raw ECDSA message signing).
+ *
+ *  ONE-GAME KEYS: pass a `gameId` (32-byte hex) to derive a key that is UNIQUE TO
+ *  THAT GAME — same master, fresh signing key per game, so a seat key from game A
+ *  is cryptographically distinct from the same player's seat key in game B (audit:
+ *  every key valid for at most one game). Omitting gameId yields the legacy
+ *  game-independent key (handshake/identity contexts that are not per-game). */
+export function signingKeyFromMaster(masterPriv: Uint8Array, gameId?: string): { priv: Uint8Array; pub: Uint8Array } {
+  const info = gameId === undefined
+    ? new TextEncoder().encode('estates-ed25519-sign-v1')
+    : new TextEncoder().encode(`estates-ed25519-sign-v1|game:${gameId}`);
+  const seed = hkdf(sha256, masterPriv, new Uint8Array(0), info, 32);
   return { priv: seed, pub: ed.getPublicKey(seed) };
 }
 
@@ -53,6 +62,21 @@ export function genIdentity(): Identity { return identityOf(secp.utils.randomPri
 export function identityFrom(priv: Uint8Array): Identity {
   if (priv.length !== 32) throw new Error('identity private key must be 32 bytes');
   return identityOf(priv);
+}
+
+/**
+ * A PER-GAME identity from the player's non-custodial master key. The secp256k1
+ * master (ECDH/handshake) is the player's own key, but the Ed25519 SIGNING key is
+ * derived FOR THIS GAME ONLY (gameId in the derivation), so the seat/gameplay key
+ * a player uses in one game is distinct from every other game's — satisfying both
+ * "use the player's own key" and "every key valid for at most one game". The
+ * resulting `signPub` is what the game's key manifest binds (see @estates/keylife).
+ */
+export function gameIdentityFrom(priv: Uint8Array, gameId: string): Identity {
+  if (priv.length !== 32) throw new Error('identity private key must be 32 bytes');
+  if (typeof gameId !== 'string' || gameId.length !== 64 || !/^[0-9a-fA-F]{64}$/.test(gameId)) throw new Error('gameId must be 32-byte hex');
+  const sk = signingKeyFromMaster(priv, gameId);
+  return { priv, pub: secp.getPublicKey(priv, true), signPriv: sk.priv, signPub: sk.pub };
 }
 
 export interface Hello { readonly idPub: string; readonly ephPub: string; readonly nonce: string; readonly signPub: string; readonly sig: string }
