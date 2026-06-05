@@ -168,3 +168,32 @@ test('mintDeck conceals a whole deck in shuffled order; each card opens to its o
   // the deck order is hidden: the public cards expose only opaque commitments + keys
   for (const c of deck.cards) assert.equal(c.commitment.length, 64, 'commitment is a bare 32-byte hash');
 });
+
+// ---- a concealed card can come from a MALICIOUS minter: openCard stays total ----
+test('openCard returns null (never throws) on a MALICIOUS minter who committed to a malformed face', () => {
+  const holder = genCardKey();
+  const blind = randomBytes(32);
+  const garbage = new Uint8Array([0xff, 0xff, 0xff]);             // not a decodable face
+  const card = {
+    tableId: TABLE,
+    cardPub: bytesToHex(genCardKey().pub),
+    commitment: commit(garbage, blind),                          // commitment matches the garbage
+    sealed: sealTo(holder.pub, garbage),                          // sealed to the holder
+  };
+  let out: unknown = 'unset';
+  assert.doesNotThrow(() => { out = openCard(card, holder.priv, blind, TABLE); });
+  assert.equal(out, null, 'a card whose face does not decode is rejected, not a crash');
+});
+
+test('decodeFace rejects short/malformed buffers; openCard is FUZZ-PROOF over random sealed faces', () => {
+  assert.throws(() => decodeFace(new Uint8Array(0)));
+  assert.throws(() => decodeFace(new Uint8Array([1, 0, 0, 0, 0, 0, 0, 0, 5]))); // claims 5-byte payload, has 0
+  const holder = genCardKey();
+  let rng = 0x51a2b3c4 >>> 0; const rand = () => { rng = (rng * 1103515245 + 12345) >>> 0; return rng; };
+  for (let i = 0; i < 20_000; i++) {
+    const n = rand() % 24; const g = new Uint8Array(n); for (let k = 0; k < n; k++) g[k] = rand() & 0xff;
+    const blind = randomBytes(32);
+    const card = { tableId: TABLE, cardPub: bytesToHex(genCardKey().pub), commitment: commit(g, blind), sealed: sealTo(holder.pub, g) };
+    assert.doesNotThrow(() => { openCard(card, holder.priv, blind, TABLE); });
+  }
+});

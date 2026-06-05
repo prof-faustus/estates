@@ -87,7 +87,12 @@ export function encodeFace(f: CardFace): Uint8Array {
   out.set(payload, 9);
   return out;
 }
+// Throws by contract on a malformed face (so commitments stay canonical). Callers
+// that handle untrusted faces (openCard, fed bytes a possibly-MALICIOUS minter
+// committed to) MUST catch — see openCard. The explicit length guard means the
+// header is never read past the buffer (no `undefined`-coercion arithmetic).
 export function decodeFace(b: Uint8Array): CardFace {
+  if (!(b instanceof Uint8Array) || b.length < 9) throw new Error('decodeFace: too short');
   const kind = BYTE_KIND[b[0]!];
   if (!kind) throw new Error('decodeFace: bad kind byte');
   const id = ((b[1]! << 24) | (b[2]! << 16) | (b[3]! << 8) | b[4]!) >>> 0;
@@ -128,7 +133,10 @@ export function openCard(card: ConcealedCard, holderPriv: Uint8Array, blind: Uin
   const faceBytes = open(holderPriv, card.sealed);
   if (!faceBytes) return null;                                 // not the holder / tampered
   if (!verifyReveal(card.commitment, faceBytes, blind)) return null; // commitment mismatch
-  return decodeFace(faceBytes);
+  // A MALICIOUS minter may have committed+sealed a malformed face: the commitment
+  // check passes (it matches the garbage), but decodeFace would throw. Stay total —
+  // a card whose face does not decode is simply "not a valid card" → null.
+  try { return decodeFace(faceBytes); } catch { return null; }
 }
 
 /** Transfer a card to a new holder: re-seal the face to them; identity + table +

@@ -47,21 +47,58 @@ const CODE_ACTION: Record<number, Action['type']> = Object.fromEntries(Object.en
 const rd32 = (b: Uint8Array, o: number): number => ((b[o]! << 24) | (b[o + 1]! << 16) | (b[o + 2]! << 8) | b[o + 3]!) >>> 0;
 
 export interface DecodedMove { readonly turnIndex: number; readonly actor: number; readonly action: Action }
+// An on-chain commitment blob is UNTRUSTED bytes (read back from the chain via a
+// possibly-hostile relay/node). decodeActionCommit throws by contract on ANY
+// malformed blob — its consumer (@estates/replay) wraps it and treats a throw as
+// "reject this move". STRICT: every read is length-checked, every field is range-
+// validated, and the blob must be EXACTLY the expected length (no trailing garbage
+// and no truncation that would otherwise read `undefined` into a field). So a
+// tagged-but-garbage blob can never yield a malformed Action — it is rejected.
+const TXM_PROP_MAX = 39;   // board spaces 0..39
+const TXM_SEAT_MAX = 7;    // seats 0..7
 /** Read an on-chain action commitment back into the move it records (auditable). */
 export function decodeActionCommit(blob: Uint8Array): DecodedMove {
+  if (!(blob instanceof Uint8Array)) throw new Error('not an ESTATES move commitment');
+  // Tag check first: it is safe on a short blob (an absent byte reads `undefined`,
+  // which never matches), and gives the canonical "not an ESTATES move" rejection.
   for (let i = 0; i < COMMIT_TAG.length; i++) if (blob[i] !== COMMIT_TAG[i]) throw new Error('not an ESTATES move commitment');
+  const head = COMMIT_TAG.length + 4 + 1 + 1; // tag ‖ turnIndex(4) ‖ actor(1) ‖ code(1)
+  if (blob.length < head) throw new Error('move commitment too short');
   let o = COMMIT_TAG.length;
   const turnIndex = rd32(blob, o); o += 4;
   const actor = blob[o++]!;
+  if (actor > TXM_SEAT_MAX) throw new Error('actor out of range');
   const type = CODE_ACTION[blob[o++]!];
   if (!type) throw new Error('unknown action code');
+  // bytes remaining for params, and the EXACT count each type requires.
+  const rem = blob.length - o;
   let action: Action;
   switch (type) {
-    case 'ROLL': action = { type, dice: [blob[o]!, blob[o + 1]!] as const }; break;
-    case 'PAY_TAX': action = { type, choice: blob[o] === 0 ? 'flat' : 'percent' }; break;
-    case 'BUILD': case 'SELL_BUILD': case 'MORTGAGE': case 'UNMORTGAGE': action = { type, propertyId: rd32(blob, o) }; break;
-    case 'LEAVE': action = { type, seat: rd32(blob, o) }; break;
-    default: action = { type } as Action; break;
+    case 'ROLL': {
+      if (rem !== 2) throw new Error('ROLL params malformed');
+      const d0 = blob[o]!, d1 = blob[o + 1]!;
+      if (d0 < 1 || d0 > 6 || d1 < 1 || d1 > 6) throw new Error('ROLL dice out of range');
+      action = { type, dice: [d0, d1] as const }; break;
+    }
+    case 'PAY_TAX': {
+      if (rem !== 1 || (blob[o]! !== 0 && blob[o]! !== 1)) throw new Error('PAY_TAX params malformed');
+      action = { type, choice: blob[o] === 0 ? 'flat' : 'percent' }; break;
+    }
+    case 'BUILD': case 'SELL_BUILD': case 'MORTGAGE': case 'UNMORTGAGE': {
+      if (rem !== 4) throw new Error('property params malformed');
+      const propertyId = rd32(blob, o);
+      if (propertyId > TXM_PROP_MAX) throw new Error('propertyId out of range');
+      action = { type, propertyId }; break;
+    }
+    case 'LEAVE': {
+      if (rem !== 4) throw new Error('LEAVE params malformed');
+      const seat = rd32(blob, o);
+      if (seat > TXM_SEAT_MAX) throw new Error('seat out of range');
+      action = { type, seat }; break;
+    }
+    default:
+      if (rem !== 0) throw new Error('no-param action carries trailing bytes');
+      action = { type } as Action; break;
   }
   return { turnIndex, actor, action };
 }

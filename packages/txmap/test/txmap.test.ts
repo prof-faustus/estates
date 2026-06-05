@@ -101,3 +101,43 @@ test('one-use keys: a payee key is never reused across moves', () => {
   for (let i = 0; i < 100; i++) fn(0);
   assert.equal(new Set(issued).size, issued.length, 'every issued key is unique');
 });
+
+// ---- on-chain commitment blobs are UNTRUSTED: decode is strict + fuzz-proof ----
+const TAG = new TextEncoder().encode('ESTATES-MOVE-v1');
+const withTag = (...tail: number[]) => new Uint8Array([...TAG, ...tail]);
+
+test('decodeActionCommit is STRICT: a tagged-but-garbage blob never yields a malformed Action', () => {
+  // round-trip still works for every action type (regression)
+  for (const a of [
+    { type: 'ROLL', dice: [3, 4] }, { type: 'BUY' }, { type: 'PAY_TAX', choice: 'percent' },
+    { type: 'BUILD', propertyId: 39 }, { type: 'LEAVE', seat: 7 }, { type: 'END_TURN' },
+  ] as Action[]) {
+    const d = decodeActionCommit(encodeActionCommit(a, 5, 1));
+    assert.deepEqual(d.action, a);
+  }
+  // hostile blobs (correct tag, malformed/out-of-range/truncated/trailing) must THROW
+  for (const bad of [
+    new Uint8Array([1, 2, 3]),                                   // no tag
+    withTag(0, 0, 0, 0),                                         // truncated header
+    withTag(0, 0, 0, 0, 0, 99),                                  // unknown action code
+    withTag(0, 0, 0, 0, 9, 1, 7, 7),                             // actor 9 > max
+    withTag(0, 0, 0, 0, 0, 1, 9, 9),                             // ROLL dice 9,9 out of range
+    withTag(0, 0, 0, 0, 0, 1, 3),                                // ROLL truncated (1 die)
+    withTag(0, 0, 0, 0, 0, 1, 3, 4, 0xff),                       // ROLL trailing garbage
+    withTag(0, 0, 0, 0, 0, 5, 0, 0, 0, 99),                      // BUILD propertyId 99 > 39
+    withTag(0, 0, 0, 0, 0, 2, 0xff),                             // BUY (no-param) with trailing byte
+    withTag(0, 0, 0, 0, 0, 4, 5),                                // PAY_TAX choice byte 5 invalid
+  ]) assert.throws(() => decodeActionCommit(bad), `expected throw for ${bad.join(',')}`);
+});
+
+test('decodeActionCommit is FUZZ-PROOF: 50k random (and tagged-random) blobs never hang; only throw or decode', () => {
+  let rng = 0x2bd1e995 >>> 0; const rand = () => { rng = (rng * 1103515245 + 12345) >>> 0; return rng; };
+  const t0 = Date.now();
+  for (let i = 0; i < 50_000; i++) {
+    const tagged = (rand() & 1) === 0;
+    const n = rand() % 40; const tail = new Uint8Array(n); for (let k = 0; k < n; k++) tail[k] = rand() & 0xff;
+    const blob = tagged ? new Uint8Array([...TAG, ...tail]) : tail;
+    try { const d = decodeActionCommit(blob); assert.ok(typeof d.action.type === 'string'); } catch { /* clean reject */ }
+  }
+  assert.ok(Date.now() - t0 < 6000, 'bounded work — no hang');
+});
