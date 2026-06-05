@@ -20,18 +20,25 @@ export interface Envelope {
   readonly header: BlockHeader; // the block the tx is in (PoW-checkable elsewhere)
 }
 
-/** Verify a tx is confirmed in `header`'s block, by SPV inclusion alone. */
+/** Verify a tx is confirmed in `header`'s block, by SPV inclusion alone. Total:
+ *  an envelope carrying a malformed tx/proof/header returns false, never throws
+ *  (serializeTx would otherwise throw on a non-conforming tx object). */
 export function verifyEnvelope(env: Envelope): boolean {
-  return verifyInclusion(txLeaf(env.tx), env.proof, env.header.merkleRoot);
+  try {
+    if (!env || typeof env !== 'object' || !env.tx || !env.proof || !env.header) return false;
+    return verifyInclusion(txLeaf(env.tx), env.proof, env.header.merkleRoot);
+  } catch { return false; }
 }
 
 export interface ExpectedPayment { readonly value: number | bigint; readonly script: Uint8Array }
 /** Verify the confirmed tx actually pays `expected` at some output (e.g. that a
- *  one-use key / 1-sat NFT was funded on chain) — inclusion AND content. */
+ *  one-use key / 1-sat NFT was funded on chain) — inclusion AND content. Total. */
 export function verifyPaymentToKey(env: Envelope, expected: ExpectedPayment): boolean {
-  if (!verifyEnvelope(env)) return false;
-  const want = BigInt(expected.value);
-  return env.tx.outputs.some((o) => BigInt(o.value) === want && bytesEqual(o.script, expected.script));
+  try {
+    if (!verifyEnvelope(env)) return false;
+    const want = BigInt(expected.value);
+    return env.tx.outputs.some((o) => BigInt(o.value) === want && bytesEqual(o.script, expected.script));
+  } catch { return false; }
 }
 
 export interface SpendCheck { readonly ok: boolean; readonly reason: string }
@@ -41,8 +48,12 @@ export interface SpendCheck { readonly ok: boolean; readonly reason: string }
 export function verifySpendChain(spend: Tx, inputEnvelopes: readonly Envelope[]): SpendCheck {
   const byId = new Map<string, Envelope>();
   for (const e of inputEnvelopes) {
-    if (!verifyEnvelope(e)) return { ok: false, reason: `an input envelope failed SPV (txid ${txid(e.tx).slice(0, 12)}…)` };
-    byId.set(txid(e.tx), e);
+    // verifyEnvelope is total; compute the txid (serializeTx) under guard too so a
+    // malformed input tx is a clean reject, never a throw.
+    let id: string;
+    try { if (!verifyEnvelope(e)) return { ok: false, reason: 'an input envelope failed SPV' }; id = txid(e.tx); }
+    catch { return { ok: false, reason: 'an input envelope tx is malformed' }; }
+    byId.set(id, e);
   }
   for (let i = 0; i < spend.inputs.length; i++) {
     const inp = spend.inputs[i]!;

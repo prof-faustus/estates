@@ -68,3 +68,23 @@ test('verifySpendChain: an unconfirmed move traces to SPV-confirmed outputs', ()
   const forged: Envelope = { ...env, header: { ...env.header, merkleRoot: new Uint8Array(32).fill(1) } };
   assert.equal(verifySpendChain(spend, [forged]).ok, false);
 });
+
+// ---- an Envelope can be hostile typed data: the verifiers are TOTAL ------------
+test('verifyEnvelope / verifyPaymentToKey / verifySpendChain are FAIL-CLOSED on malformed envelopes', () => {
+  for (const bad of [
+    null, undefined, {}, { tx: null, proof: null, header: null },
+    { tx: { version: 1 }, proof: { index: 0, branch: [] }, header: { merkleRoot: new Uint8Array(32) } }, // tx missing inputs/outputs → serializeTx throws
+    { tx: { version: 1, inputs: 'x', outputs: [] }, proof: { index: 0, branch: [] }, header: { merkleRoot: new Uint8Array(32) } },
+    { tx: { version: 1, inputs: [], outputs: [{ value: 'notabigint', script: new Uint8Array(1) }] }, proof: { index: 0, branch: [] }, header: { merkleRoot: new Uint8Array(32) } },
+  ]) {
+    let a: unknown = 'x', b: unknown = 'x';
+    assert.doesNotThrow(() => { a = verifyEnvelope(bad as unknown as Envelope); });
+    assert.doesNotThrow(() => { b = verifyPaymentToKey(bad as unknown as Envelope, { value: 1, script: new Uint8Array(1) }); });
+    assert.equal(a, false); assert.equal(b, false);
+  }
+  // verifySpendChain over a malformed input envelope is a clean {ok:false}, not a throw
+  let r: unknown = 'x';
+  const spend: Tx = { version: 1, inputs: [{ prevTxid: 'cd'.repeat(32), prevVout: 0, scriptSig: new Uint8Array(0), sequence: 0 }], outputs: [], lockTime: 0 };
+  assert.doesNotThrow(() => { r = verifySpendChain(spend, [{ tx: { version: 1 } } as unknown as Envelope]); });
+  assert.equal((r as { ok: boolean }).ok, false);
+});
