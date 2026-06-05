@@ -24,6 +24,14 @@ try to break it.
 | R2 | A successor that reuses Alice's retired key, pays the wrong owner, or changes identity is rejected | "a successor that reuses Alice's retired key, wrong owner, or changed identity is REJECTED" |
 | R3 | A spent card cannot be resurrected (spent outpoint stays dead) | "a SPENT card cannot be resurrected: a transcript with the retired key/outpoint is rejected" |
 
+## Custody chain (whole-game transcript)
+
+| # | Claim | Test |
+|---|---|---|
+| C1 | A whole chain (mint→Alice→Bob→Carol) is a sequence of true moves; the final live card is the last successor | "a whole custody chain (mint→Alice→Bob→Carol) is a sequence of true moves; final live card is Carol's" |
+| C2 | The chain rejects re-spending an already-spent outpoint (resurrection/double-spend) | "the custody chain REJECTS a re-spend of an already-spent outpoint (resurrection)" |
+| C3 | The chain rejects a transfer that does not spend the current live card | "the custody chain REJECTS a transfer that does not spend the current live card" |
+
 ## TEE (assumed OK per requirements)
 
 | # | Claim | Test |

@@ -11,7 +11,7 @@ import { genCardKey, mintCard, type CardFace } from '@estates/deck';
 import { txid } from '@estates/tx';
 import {
   mintCardNft, transferCardNft, verifyCardTransfer, isLiveCard, opKey,
-  verifyTeeDeletionQuote, cardNftOutput, type Outpoint, type CardNft,
+  verifyTeeDeletionQuote, cardNftOutput, verifyCardCustodyChain, type Outpoint, type CardNft,
 } from '../src/index.ts';
 
 const TABLE = 'a1'.repeat(32);
@@ -108,4 +108,36 @@ test('TEE deletion quote (assumed OK) binds the retired key + spent outpoint', (
   assert.equal(verifyTeeDeletionQuote({ ...quote, retiredCardPub: 'cc'.repeat(33) }, t.retiredCardPub, t.spent).ok, false);
   assert.equal(verifyTeeDeletionQuote(null, t.retiredCardPub, t.spent).ok, false);
   void bytesToHex;
+});
+
+test('a whole custody chain (mint→Alice→Bob→Carol) is a sequence of true moves; final live card is Carol’s', () => {
+  const { nft, concealed, secret } = aliceCard();
+  const bob = genCardKey(); const bobPkh = hash160(bob.pub);
+  const carol = genCardKey(); const carolPkh = hash160(carol.pub);
+  // mint already to Alice; transfer Alice→Bob
+  const t1 = transferCardNft(nft, concealed, secret.face, bob.pub, bobPkh);
+  // rebuild Bob's ConcealedCard from t1.newCard to transfer again (same face/identity)
+  const bobConcealed = { tableId: t1.newCard.tableId, cardPub: t1.newCard.cardPub, commitment: t1.newCard.commitment, sealed: t1.newCard.sealed };
+  const t2 = transferCardNft(t1.newCard, bobConcealed, secret.face, carol.pub, carolPkh);
+  const chain = verifyCardCustodyChain(nft, [t1, t2]);
+  assert.ok(chain.ok, chain.reason);
+  assert.equal(chain.live!.outpoint.txid, t2.newCard.outpoint.txid, 'final live card is Carol’s');
+});
+
+test('the custody chain REJECTS a re-spend of an already-spent outpoint (resurrection)', () => {
+  const { nft, concealed, secret } = aliceCard();
+  const bob = genCardKey(); const bobPkh = hash160(bob.pub);
+  const t1 = transferCardNft(nft, concealed, secret.face, bob.pub, bobPkh);
+  // a second transfer that ILLEGALLY spends the SAME (already-spent) Alice outpoint again
+  const t2bad = transferCardNft(nft, concealed, secret.face, genCardKey().pub, hash160(genCardKey().pub));
+  assert.equal(verifyCardCustodyChain(nft, [t1, t2bad]).ok, false, 'cannot spend Alice’s outpoint twice');
+});
+
+test('the custody chain REJECTS a transfer that does not spend the current live card', () => {
+  const { nft, concealed, secret } = aliceCard();
+  const bob = genCardKey(); const bobPkh = hash160(bob.pub);
+  const t1 = transferCardNft(nft, concealed, secret.face, bob.pub, bobPkh);
+  // forge t1 to spend some unrelated outpoint
+  const forged = { ...t1, spent: { txid: '00'.repeat(32), vout: 9 } };
+  assert.equal(verifyCardCustodyChain(nft, [forged]).ok, false);
 });

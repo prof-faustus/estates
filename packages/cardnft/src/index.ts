@@ -131,6 +131,39 @@ export function isLiveCard(card: CardNft, spentOutpoints: ReadonlySet<string>): 
 }
 export const opKey = (o: Outpoint): string => `${o.txid}:${o.vout}`;
 
+export interface CustodyCheck { readonly ok: boolean; readonly reason: string; readonly live?: CardNft }
+
+/**
+ * VERIFY a whole card's custody chain (mint → transfer → transfer …) is a sequence
+ * of TRUE MOVES with NO RESURRECTION. Each transfer must spend the CURRENT live
+ * outpoint (and only it), the same outpoint may never be spent twice, a retired
+ * card key may never reappear as a successor, and the concealed identity
+ * (tableId+commitment) is preserved throughout. Returns the final live card.
+ * This is the transcript-level guarantee that across a whole game a card is never
+ * copied, double-spent, or resurrected. Total: never throws.
+ */
+export function verifyCardCustodyChain(mint: CardNft, transfers: readonly CardTransfer[]): CustodyCheck {
+  try {
+    if (!mint || typeof mint !== 'object' || !Array.isArray(transfers)) return { ok: false, reason: 'malformed input' };
+    let live = mint;
+    const spent = new Set<string>();
+    const retired = new Set<string>();
+    for (let i = 0; i < transfers.length; i++) {
+      const t = transfers[i]!;
+      const key = opKey(t.spent);
+      if (key !== opKey(live.outpoint)) return { ok: false, reason: `transfer ${i} does not spend the CURRENT live card` };
+      if (spent.has(key)) return { ok: false, reason: `transfer ${i} re-spends an already-spent outpoint (resurrection/double-spend)` };
+      if (!t.tx?.inputs?.some((inp: { prevTxid: string; prevVout: number }) => inp.prevTxid === t.spent.txid && inp.prevVout === t.spent.vout)) return { ok: false, reason: `transfer ${i} tx does not actually spend ${key}` };
+      if (t.newCard.commitment !== live.commitment || t.newCard.tableId !== live.tableId) return { ok: false, reason: `transfer ${i} changes the concealed identity` };
+      if (t.newCard.cardPub === live.cardPub || retired.has(t.newCard.cardPub)) return { ok: false, reason: `transfer ${i} successor reuses a retired/old card key` };
+      spent.add(key);
+      retired.add(t.retiredCardPub);
+      live = t.newCard;
+    }
+    return { ok: true, reason: `custody chain of ${transfers.length} true move(s); no copy, double-spend, or resurrection`, live };
+  } catch (e) { return { ok: false, reason: `verify threw: ${(e as Error).message}` }; }
+}
+
 /**
  * TEE deletion quote (assumed OK per min requirements): attests the TEE deleted
  * Alice's plaintext face/key/blind on transfer. The chain spend already kills her
