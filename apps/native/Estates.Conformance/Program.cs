@@ -135,4 +135,34 @@ if (File.Exists(cnPath))
     if (cfail == 0) Console.WriteLine("PASS: native card NFT output + transfer tx are byte-for-byte the TS reference; true move accepted, copy rejected.");
 }
 
-return (fail == 0 && kfail == 0 && tfail == 0 && cfail == 0) ? 0 : 1;
+// ---- SCRIPTVM cross-validation: native BIP-143 sighash + ECDSA OP_CHECKSIG must
+// equal the TS reference (a TS-signed input verifies; a tampered one fails). ----
+int spass = 0, sfail = 0;
+string svPath = Path.Combine(AppContext.BaseDirectory, "scriptvm-vectors.json");
+if (File.Exists(svPath))
+{
+    using var sdoc = JsonDocument.Parse(File.ReadAllText(svPath));
+    var v = sdoc.RootElement;
+    var te = v.GetProperty("tx");
+    var inputs = te.GetProperty("inputs").EnumerateArray().Select(i =>
+        new TxInputN(i.GetProperty("prevTxid").GetString()!, i.GetProperty("prevVout").GetInt64(),
+            Tx.FromHex(i.GetProperty("scriptSig").GetString()!), i.GetProperty("sequence").GetInt64())).ToList();
+    var outputs = te.GetProperty("outputs").EnumerateArray().Select(o =>
+        new TxOutputN(o.GetProperty("value").GetInt64(), Tx.FromHex(o.GetProperty("script").GetString()!))).ToList();
+    var tx = new NativeTx(te.GetProperty("version").GetInt32(), inputs, outputs, te.GetProperty("lockTime").GetInt64());
+    int idx = v.GetProperty("inputIndex").GetInt32();
+    long hashType = v.GetProperty("hashType").GetInt64();
+    byte[] prevoutScript = Tx.FromHex(v.GetProperty("prevoutScript").GetString()!);
+    long prevoutValue = v.GetProperty("prevoutValue").GetInt64();
+    string pub = v.GetProperty("pub").GetString()!;
+
+    void Check(string what, bool ok) { if (ok) spass++; else { Console.Error.WriteLine($"  [SCRIPTVM FAIL] {what}"); sfail++; } }
+    Check("BIP-143 sighash matches", Tx.ToHex(Scriptvm.Sighash(tx, idx, prevoutScript, prevoutValue, hashType)) == v.GetProperty("expectedSighash").GetString());
+    Check("valid signature verifies (ECDSA OP_CHECKSIG)", Scriptvm.CheckSig(tx, idx, prevoutScript, prevoutValue, Tx.FromHex(v.GetProperty("validSig").GetString()!), pub));
+    Check("tampered signature is rejected", !Scriptvm.CheckSig(tx, idx, prevoutScript, prevoutValue, Tx.FromHex(v.GetProperty("tamperedSig").GetString()!), pub));
+
+    Console.WriteLine($"Estates.Conformance (scriptvm): {spass} passed, {sfail} failed");
+    if (sfail == 0) Console.WriteLine("PASS: native BIP-143 sighash + secp256k1 ECDSA verify match the TS reference.");
+}
+
+return (fail == 0 && kfail == 0 && tfail == 0 && cfail == 0 && sfail == 0) ? 0 : 1;

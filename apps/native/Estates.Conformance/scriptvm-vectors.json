@@ -1,0 +1,28 @@
+{
+  "tx": {
+    "version": 1,
+    "inputs": [
+      {
+        "prevTxid": "abababababababababababababababababababababababababababababababab",
+        "prevVout": 0,
+        "scriptSig": "",
+        "sequence": 4294967295
+      }
+    ],
+    "outputs": [
+      {
+        "value": 2000,
+        "script": "76a914d68c7734aa9ffb5fa58fce8442e1e0fde12373c488ac"
+      }
+    ],
+    "lockTime": 0
+  },
+  "inputIndex": 0,
+  "hashType": 65,
+  "prevoutScript": "76a9148ce48177c376387ef942d48c7e401976a780719588ac",
+  "prevoutValue": 2500,
+  "pub": "02f28dc4976c6efe9f89290e92e9dd01b290e0b7a1d701fe2aaee0c2f51212fc1d",
+  "expectedSighash": "49881ab08e632b34ff6ca2d7df1b16ffab8c47c06a3974dfa8dacdff50c29b59",
+  "validSig": "3045022100cb6c03025237d0477ecc0eccdc4378581f85169e41bf8b68b801ea0baa9db2990220121d220269105459250587b26ab4f84de9202b236d514bd2f65bc5753a5ad28d41",
+  "tamperedSig": "3045022100cb6c030252c8d0477ecc0eccdc4378581f85169e41bf8b68b801ea0baa9db2990220121d220269105459250587b26ab4f84de9202b236d514bd2f65bc5753a5ad28d41"
+}

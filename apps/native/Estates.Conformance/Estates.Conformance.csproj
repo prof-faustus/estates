@@ -19,6 +19,7 @@
     <None Include="keylife-vectors.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="tx-vectors.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="cardnft-vectors.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="scriptvm-vectors.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
