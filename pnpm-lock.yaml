@@ -65,12 +65,18 @@ importers:
       '@estates/beacon':
         specifier: workspace:*
         version: link:../beacon
+      '@estates/channel':
+        specifier: workspace:*
+        version: link:../channel
       '@estates/conformance':
         specifier: workspace:*
         version: link:../conformance
       '@estates/engine':
         specifier: workspace:*
         version: link:../engine
+      '@estates/keylife':
+        specifier: workspace:*
+        version: link:../keylife
       '@estates/params':
         specifier: workspace:*
         version: link:../params
@@ -212,6 +218,15 @@ importers:
       '@estates/params':
         specifier: workspace:*
         version: link:../params
+
+  packages/keylife:
+    dependencies:
+      '@estates/channel':
+        specifier: workspace:*
+        version: link:../channel
+      '@noble/hashes':
+        specifier: 1.5.0
+        version: 1.5.0
 
   packages/keys:
     dependencies:
@@ -406,6 +421,9 @@ importers:
       '@estates/engine':
         specifier: workspace:*
         version: link:../engine
+      '@estates/keylife':
+        specifier: workspace:*
+        version: link:../keylife
       '@estates/params':
         specifier: workspace:*
         version: link:../params

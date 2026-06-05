@@ -14,6 +14,7 @@ import { loadParams } from '@estates/params';
 import { HttpRelay, InMemoryRelay, type Relay } from '@estates/chat';
 import { genIdentity, identityFrom, signData, verifyData, type Identity } from '@estates/channel';
 import { commit as beaconCommit, verifyRollEntry, ZERO_BEACON } from '@estates/beacon';
+import type { GameKeyManifest } from '@estates/keylife';
 
 export const P = loadParams();
 export { identityFrom, type Identity };
@@ -29,10 +30,24 @@ const encJSON = (o: unknown): Uint8Array => new TextEncoder().encode(JSON.string
 const signedBytes = (m: Msg, signPub: string): Uint8Array => encJSON({ ...m, signPub });
 export type NetworkMode = EngineConfig['network'];
 
+/**
+ * UNBIASED single-machine dice (offline/solo only). Live multiplayer NEVER uses
+ * this — `submit({type:'ROLL'})` is a no-op and every live roll comes from the
+ * dealerless commit→reveal BEACON (@estates/beacon drawDie). A plain `byte % 6`
+ * is modulo-biased because 256 is not a multiple of 6, so this draws with
+ * REJECTION SAMPLING: discard bytes ≥ 252 (the largest multiple of 6 below 256)
+ * so each face 1..6 is exactly uniform — the same standard the beacon uses.
+ */
 export function rollDice(): [number, number] {
-  const b = new Uint8Array(2);
-  crypto.getRandomValues(b);
-  return [1 + (b[0]! % 6), 1 + (b[1]! % 6)];
+  const die = (): number => {
+    const b = new Uint8Array(1);
+    for (let i = 0; i < (1 << 20); i++) {
+      crypto.getRandomValues(b);
+      if (b[0]! < 252) return (b[0]! % 6) + 1;
+    }
+    /* c8 ignore next */ throw new Error('rollDice: exhausted RNG (statistically impossible)');
+  };
+  return [die(), die()];
 }
 /** Built-in transport — NO url is ever typed by a user (Bitmessage-style). */
 export const DEFAULT_RELAY = 'http://127.0.0.1:8788';
@@ -220,6 +235,30 @@ export function decodeSigned(payload: Uint8Array): { msg: Msg; id: string; signP
     default:
       return null;
   }
+}
+
+/**
+ * ONE-GAME-KEY ENFORCEMENT. Accept a signed gameplay frame ONLY if:
+ *   1. it decodes + validates (decodeSigned), AND
+ *   2. its Ed25519 signature is authentic over the canonical bytes, AND
+ *   3. its author key is a SEAT key bound by THIS game's signed key manifest
+ *      (a one-game key — see @estates/keylife), AND
+ *   4. for a `seat` claim, the seat number matches the seat its key is bound to.
+ * Total: returns null on anything unsigned, forged, or signed by a key that is
+ * not bound to this game (cross-game / stranger keys are rejected). This is the
+ * peer-side check that makes "every gameplay message is signed by a one-game key"
+ * an enforced invariant, not a convention.
+ */
+export function acceptForGame(payload: Uint8Array, manifest: GameKeyManifest): { msg: Msg; signPub: string } | null {
+  const d = decodeSigned(payload);
+  if (!d) return null;                                   // unsigned / malformed
+  let sig: Uint8Array, pub: Uint8Array;
+  try { sig = fromHex(d.sig); pub = fromHex(d.signPub); } catch { return null; }
+  if (!verifyData(signedBytes(d.msg, d.signPub), sig, pub)) return null; // forged / tampered
+  const seatEntry = manifest.entries.find((e) => e.purpose === 'seat' && e.pub === d.signPub);
+  if (!seatEntry) return null;                           // not a one-game seat key in this manifest
+  if (d.msg.kind === 'seat' && seatEntry.seat !== d.msg.seat) return null; // seat must match its bound key
+  return { msg: d.msg, signPub: d.signPub };
 }
 
 /** Decode + FULLY VALIDATE a signed lobby `announce` frame, or null. Total: never

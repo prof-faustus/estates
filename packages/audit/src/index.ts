@@ -15,6 +15,28 @@ import { initialState, apply, type GameState, type Action, type EngineConfig } f
 import { roll, commit, verifyRollEntry, ZERO_BEACON, type PartyReveal } from '@estates/beacon';
 import { hashState } from '@estates/conformance';
 import { loadParams } from '@estates/params';
+import { verifyManifest, verifyNoCrossGameReuse, type GameKeyManifest } from '@estates/keylife';
+
+export interface KeyLifecycleResult { readonly ok: boolean; readonly reason: string }
+
+/**
+ * KEY-LIFECYCLE AUDIT (audit finding: "every game key valid for at most one
+ * game"). Given the signed key manifests of a sequence of games, this rejects:
+ *   - any manifest that is malformed / unsigned / tampered (verifyManifest), and
+ *   - any key reused across two different games (verifyNoCrossGameReuse).
+ * A game's transcript is only auditable if its keys pass this lifecycle check, so
+ * a key that outlives its one game makes the whole audit FAIL. Total: never throws.
+ */
+export function auditKeyLifecycle(manifests: readonly GameKeyManifest[]): KeyLifecycleResult {
+  if (!Array.isArray(manifests) || manifests.length === 0) return { ok: false, reason: 'no key manifests provided' };
+  for (let i = 0; i < manifests.length; i++) {
+    const v = verifyManifest(manifests[i]);
+    if (!v.ok) return { ok: false, reason: `manifest ${i}: ${v.reason}` };
+  }
+  const reuse = verifyNoCrossGameReuse(manifests);
+  if (!reuse.ok) return { ok: false, reason: reuse.reason };
+  return { ok: true, reason: `key lifecycle verified across ${manifests.length} game(s): every key serves at most one game` };
+}
 
 export type Entry =
   | {

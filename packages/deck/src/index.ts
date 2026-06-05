@@ -113,7 +113,7 @@ export interface CardSecret { readonly face: CardFace; readonly blind: Uint8Arra
 
 /** Mint one concealed card NFT for a table, sealed to `holderPub`, with its own key. */
 export function mintCard(tableId: string, face: CardFace, holderPub: Uint8Array): { card: ConcealedCard; secret: CardSecret } {
-  if (tableId.length !== 64) throw new Error('tableId must be 32 bytes (64 hex)');
+  if (!isTableIdHex(tableId)) throw new Error('tableId must be 32 bytes (64 hex)');
   const blind = randomBytes(32);
   const key = genCardKey();
   const faceBytes = encodeFace(face);
@@ -224,15 +224,34 @@ export interface CardTranscriptResult { readonly ok: boolean; readonly reason: s
  * A single repeated custody key (e.g. a transfer that fails to re-key, or a
  * duplicated NFT) fails the check.
  */
-export function verifyCardTranscript(cards: readonly ConcealedCard[], expectedTableId: string): CardTranscriptResult {
-  if (expectedTableId.length !== 64) return { ok: false, reason: 'expectedTableId must be 32 bytes (64 hex)' };
+// A 32-byte table id must be valid lowercase hex, not merely 64 chars long
+// (length-only checks let "zz…" through — audit finding).
+export function isTableIdHex(x: unknown): x is string {
+  return typeof x === 'string' && x.length === 64 && /^[0-9a-f]{64}$/.test(x);
+}
+
+/**
+ * @param priorUsedKeys card keys already used by PREVIOUS games (or earlier in a
+ *   global history). A one-use card key must never appear here — that is the
+ *   CROSS-GAME reuse rejection (audit finding). Omit it to check only within-game
+ *   uniqueness.
+ */
+export function verifyCardTranscript(
+  cards: readonly ConcealedCard[],
+  expectedTableId: string,
+  priorUsedKeys?: Iterable<string>,
+): CardTranscriptResult {
+  if (!isTableIdHex(expectedTableId)) return { ok: false, reason: 'expectedTableId must be 32 bytes (64 hex)' };
+  const prior = priorUsedKeys ? new Set(priorUsedKeys) : null;
   const seen = new Set<string>();
   for (const c of cards) {
+    if (!isTableIdHex(c.tableId)) return { ok: false, reason: `card tableId is not 32-byte hex (${String(c.tableId).slice(0, 8)}…)` };
     if (c.tableId !== expectedTableId) return { ok: false, reason: `card bound to a different table (${c.tableId.slice(0, 8)}…)` };
     if (!/^[0-9a-f]{66}$/.test(c.cardPub)) return { ok: false, reason: `cardPub is not a 33-byte compressed point: ${c.cardPub.slice(0, 12)}…` };
     try { secp.ProjectivePoint.fromHex(c.cardPub); } catch { return { ok: false, reason: `cardPub is not a valid curve point: ${c.cardPub.slice(0, 12)}…` }; }
+    if (prior?.has(c.cardPub)) return { ok: false, reason: `card key ${c.cardPub.slice(0, 12)}… was used in a prior game (keys serve at most ONE game)` };
     if (seen.has(c.cardPub)) return { ok: false, reason: `reused one-use card key ${c.cardPub.slice(0, 12)}… (keys must never repeat)` };
     seen.add(c.cardPub);
   }
-  return { ok: true, reason: `verified ${cards.length} concealed cards: unique one-use keys, table-bound` };
+  return { ok: true, reason: `verified ${cards.length} concealed cards: unique one-use keys, table-bound${prior ? ', no cross-game reuse' : ''}` };
 }

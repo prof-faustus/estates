@@ -12,7 +12,9 @@
     "@estates/params": "workspace:*",
     "@estates/engine": "workspace:*",
     "@estates/beacon": "workspace:*",
-    "@estates/conformance": "workspace:*"
+    "@estates/conformance": "workspace:*",
+    "@estates/keylife": "workspace:*",
+    "@estates/channel": "workspace:*"
   },
   "scripts": {
     "test": "node --test --experimental-strip-types \"test/**/*.test.ts\""

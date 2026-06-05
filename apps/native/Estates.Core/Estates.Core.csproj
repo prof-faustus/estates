@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>12</LangVersion>
+    <!-- Mission-critical: treat every warning as an error. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AssemblyName>Estates.Core</AssemblyName>
+    <RootNamespace>Estates.Core</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The EXACT rules data (same file the TS reference loads): zero divergence. -->
+    <EmbeddedResource Include="estates.v1.json" />
+  </ItemGroup>
+
+</Project>

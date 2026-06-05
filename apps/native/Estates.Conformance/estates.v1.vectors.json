@@ -1,0 +1,3312 @@
+{
+  "params_version": "estates.v1",
+  "generated_by": "@estates/conformance generate (executes @estates/engine)",
+  "vectors": [
+    {
+      "id": "v01-buy",
+      "description": "buy an unowned property from the bank",
+      "state": {
+        "network": "regtest",
+        "seats": [
+          {
+            "id": 0,
+            "balance": 1500,
+            "position": 3,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          },
+          {
+            "id": 1,
+            "balance": 1500,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          }
+        ],
+        "titles": {
+          "1": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "3": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "5": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "6": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "8": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "9": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "11": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "12": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "13": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "14": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "15": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "16": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "18": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "19": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "21": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "23": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "24": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "25": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "26": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "27": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "28": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "29": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "31": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "32": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "34": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "35": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "37": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "39": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          }
+        },
+        "bankReserve": 1000000,
+        "housesRemaining": 32,
+        "estatesRemaining": 12,
+        "current": 0,
+        "phase": "AWAIT_BUY",
+        "turnIndex": 0,
+        "doublesPending": false,
+        "doublesCount": 0,
+        "deckCursor": {
+          "Fate": 0,
+          "Treasury": 0
+        },
+        "lastRoll": [
+          1,
+          2
+        ],
+        "pendingTitle": 3,
+        "winner": null,
+        "log": []
+      },
+      "action": {
+        "type": "BUY"
+      },
+      "expected": {
+        "ok": true,
+        "stateHash": "62a1bfdec1c40ec7dd48fc05b3638ee54b571f6bf6da10081ba42c29cc99357f"
+      }
+    },
+    {
+      "id": "v02-decline",
+      "description": "decline a purchase (returns to bank, Phase-1 default)",
+      "state": {
+        "network": "regtest",
+        "seats": [
+          {
+            "id": 0,
+            "balance": 1500,
+            "position": 3,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          },
+          {
+            "id": 1,
+            "balance": 1500,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          }
+        ],
+        "titles": {
+          "1": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "3": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "5": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "6": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "8": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "9": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "11": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "12": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "13": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "14": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "15": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "16": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "18": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "19": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "21": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "23": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "24": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "25": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "26": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "27": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "28": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "29": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "31": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "32": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "34": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "35": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "37": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "39": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          }
+        },
+        "bankReserve": 1000000,
+        "housesRemaining": 32,
+        "estatesRemaining": 12,
+        "current": 0,
+        "phase": "AWAIT_BUY",
+        "turnIndex": 0,
+        "doublesPending": false,
+        "doublesCount": 0,
+        "deckCursor": {
+          "Fate": 0,
+          "Treasury": 0
+        },
+        "lastRoll": [
+          1,
+          2
+        ],
+        "pendingTitle": 3,
+        "winner": null,
+        "log": []
+      },
+      "action": {
+        "type": "DECLINE"
+      },
+      "expected": {
+        "ok": true,
+        "stateHash": "546b457a0886699c5ebc03658377f2e120b136d612fbdf6fd5e7a2747561400c"
+      }
+    },
+    {
+      "id": "v03-buy-insufficient",
+      "description": "buying beyond balance is rejected",
+      "state": {
+        "network": "regtest",
+        "seats": [
+          {
+            "id": 0,
+            "balance": 50,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          },
+          {
+            "id": 1,
+            "balance": 1500,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          }
+        ],
+        "titles": {
+          "1": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "3": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "5": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "6": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "8": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "9": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "11": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "12": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "13": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "14": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "15": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "16": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "18": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "19": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "21": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "23": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "24": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "25": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "26": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "27": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "28": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "29": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "31": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "32": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "34": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "35": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "37": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "39": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          }
+        },
+        "bankReserve": 1000000,
+        "housesRemaining": 32,
+        "estatesRemaining": 12,
+        "current": 0,
+        "phase": "AWAIT_BUY",
+        "turnIndex": 0,
+        "doublesPending": false,
+        "doublesCount": 0,
+        "deckCursor": {
+          "Fate": 0,
+          "Treasury": 0
+        },
+        "lastRoll": null,
+        "pendingTitle": 39,
+        "winner": null,
+        "log": []
+      },
+      "action": {
+        "type": "BUY"
+      },
+      "expected": {
+        "ok": false,
+        "code": "INSUFFICIENT_FUNDS"
+      }
+    },
+    {
+      "id": "v04-rent",
+      "description": "landing on another seat’s property pays derived rent",
+      "state": {
+        "network": "regtest",
+        "seats": [
+          {
+            "id": 0,
+            "balance": 1440,
+            "position": 3,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          },
+          {
+            "id": 1,
+            "balance": 1500,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          }
+        ],
+        "titles": {
+          "1": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "3": {
+            "owner": 0,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "5": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "6": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "8": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "9": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "11": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "12": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "13": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "14": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "15": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "16": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "18": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "19": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "21": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "23": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "24": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "25": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "26": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "27": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "28": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "29": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "31": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "32": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "34": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "35": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "37": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "39": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          }
+        },
+        "bankReserve": 1000060,
+        "housesRemaining": 32,
+        "estatesRemaining": 12,
+        "current": 1,
+        "phase": "AWAIT_ROLL",
+        "turnIndex": 1,
+        "doublesPending": false,
+        "doublesCount": 0,
+        "deckCursor": {
+          "Fate": 0,
+          "Treasury": 0
+        },
+        "lastRoll": [
+          1,
+          2
+        ],
+        "pendingTitle": null,
+        "winner": null,
+        "log": [
+          "seat 0 buys Cinder Alley for 60"
+        ]
+      },
+      "action": {
+        "type": "ROLL",
+        "dice": [
+          1,
+          2
+        ]
+      },
+      "expected": {
+        "ok": true,
+        "stateHash": "4f7eb43fc37a9639b6597c9c4334c90f4a09820c668f449355c1156bd162e2e2"
+      }
+    },
+    {
+      "id": "v05-salary-card",
+      "description": "a card advancing past The Gate collects salary",
+      "state": {
+        "network": "regtest",
+        "seats": [
+          {
+            "id": 0,
+            "balance": 1500,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          },
+          {
+            "id": 1,
+            "balance": 1500,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          }
+        ],
+        "titles": {
+          "1": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "3": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "5": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "6": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "8": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "9": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "11": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "12": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "13": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "14": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "15": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "16": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "18": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "19": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "21": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "23": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "24": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "25": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "26": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "27": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "28": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "29": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "31": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "32": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "34": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "35": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "37": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "39": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          }
+        },
+        "bankReserve": 1000000,
+        "housesRemaining": 32,
+        "estatesRemaining": 12,
+        "current": 0,
+        "phase": "AWAIT_ROLL",
+        "turnIndex": 0,
+        "doublesPending": false,
+        "doublesCount": 0,
+        "deckCursor": {
+          "Fate": 0,
+          "Treasury": 0
+        },
+        "lastRoll": null,
+        "pendingTitle": null,
+        "winner": null,
+        "log": []
+      },
+      "action": {
+        "type": "ROLL",
+        "dice": [
+          3,
+          4
+        ]
+      },
+      "expected": {
+        "ok": true,
+        "stateHash": "d779ecf08e1a552d545d98ea512e1077f6ef28ade7fdccd1f41652e37d71f687"
+      }
+    },
+    {
+      "id": "v06-tax-flat",
+      "description": "income levy paid as the flat amount",
+      "state": {
+        "network": "regtest",
+        "seats": [
+          {
+            "id": 0,
+            "balance": 1500,
+            "position": 4,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          },
+          {
+            "id": 1,
+            "balance": 1500,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          }
+        ],
+        "titles": {
+          "1": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "3": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "5": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "6": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "8": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "9": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "11": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "12": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "13": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "14": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "15": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "16": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "18": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "19": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "21": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "23": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "24": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "25": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "26": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "27": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "28": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "29": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "31": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "32": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "34": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "35": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "37": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "39": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          }
+        },
+        "bankReserve": 1000000,
+        "housesRemaining": 32,
+        "estatesRemaining": 12,
+        "current": 0,
+        "phase": "AWAIT_TAX",
+        "turnIndex": 0,
+        "doublesPending": false,
+        "doublesCount": 0,
+        "deckCursor": {
+          "Fate": 0,
+          "Treasury": 0
+        },
+        "lastRoll": [
+          1,
+          3
+        ],
+        "pendingTitle": null,
+        "winner": null,
+        "log": []
+      },
+      "action": {
+        "type": "PAY_TAX",
+        "choice": "flat"
+      },
+      "expected": {
+        "ok": true,
+        "stateHash": "276b9450ca4e9f4cce22d5e856546f7b659993147e7c89f230ac1391cdbbe770"
+      }
+    },
+    {
+      "id": "v07-tax-percent",
+      "description": "income levy paid as a percent of worth",
+      "state": {
+        "network": "regtest",
+        "seats": [
+          {
+            "id": 0,
+            "balance": 1500,
+            "position": 4,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          },
+          {
+            "id": 1,
+            "balance": 1500,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          }
+        ],
+        "titles": {
+          "1": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "3": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "5": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "6": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "8": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "9": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "11": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "12": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "13": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "14": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "15": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "16": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "18": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "19": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "21": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "23": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "24": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "25": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "26": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "27": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "28": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "29": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "31": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "32": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "34": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "35": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "37": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "39": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          }
+        },
+        "bankReserve": 1000000,
+        "housesRemaining": 32,
+        "estatesRemaining": 12,
+        "current": 0,
+        "phase": "AWAIT_TAX",
+        "turnIndex": 0,
+        "doublesPending": false,
+        "doublesCount": 0,
+        "deckCursor": {
+          "Fate": 0,
+          "Treasury": 0
+        },
+        "lastRoll": [
+          1,
+          3
+        ],
+        "pendingTitle": null,
+        "winner": null,
+        "log": []
+      },
+      "action": {
+        "type": "PAY_TAX",
+        "choice": "percent"
+      },
+      "expected": {
+        "ok": true,
+        "stateHash": "021df29e1a7584a7586a0b45d4a16db5f9f8e9b480df1dc430273f6eb8f28da4"
+      }
+    },
+    {
+      "id": "v08-build-ok",
+      "description": "first house on a full group is legal and consumes supply",
+      "state": {
+        "network": "regtest",
+        "seats": [
+          {
+            "id": 0,
+            "balance": 1500,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          },
+          {
+            "id": 1,
+            "balance": 1500,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          }
+        ],
+        "titles": {
+          "1": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "3": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "5": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "6": {
+            "owner": 0,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "8": {
+            "owner": 0,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "9": {
+            "owner": 0,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "11": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "12": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "13": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "14": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "15": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "16": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "18": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "19": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "21": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "23": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "24": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "25": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "26": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "27": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "28": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "29": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "31": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "32": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "34": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "35": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "37": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "39": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          }
+        },
+        "bankReserve": 1000000,
+        "housesRemaining": 32,
+        "estatesRemaining": 12,
+        "current": 0,
+        "phase": "AWAIT_POST",
+        "turnIndex": 0,
+        "doublesPending": false,
+        "doublesCount": 0,
+        "deckCursor": {
+          "Fate": 0,
+          "Treasury": 0
+        },
+        "lastRoll": null,
+        "pendingTitle": null,
+        "winner": null,
+        "log": []
+      },
+      "action": {
+        "type": "BUILD",
+        "propertyId": 6
+      },
+      "expected": {
+        "ok": true,
+        "stateHash": "306509a88e9f2f9cfa245b52fe1021ffc8e1477b529b2d95b54b2026f007e27d"
+      }
+    },
+    {
+      "id": "v09-build-uneven",
+      "description": "a second house on the same property is uneven and rejected",
+      "state": {
+        "network": "regtest",
+        "seats": [
+          {
+            "id": 0,
+            "balance": 1450,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          },
+          {
+            "id": 1,
+            "balance": 1500,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          }
+        ],
+        "titles": {
+          "1": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "3": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "5": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "6": {
+            "owner": 0,
+            "buildLevel": 1,
+            "mortgaged": false
+          },
+          "8": {
+            "owner": 0,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "9": {
+            "owner": 0,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "11": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "12": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "13": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "14": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "15": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "16": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "18": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "19": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "21": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "23": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "24": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "25": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "26": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "27": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "28": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "29": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "31": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "32": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "34": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "35": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "37": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "39": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          }
+        },
+        "bankReserve": 1000050,
+        "housesRemaining": 31,
+        "estatesRemaining": 12,
+        "current": 0,
+        "phase": "AWAIT_POST",
+        "turnIndex": 0,
+        "doublesPending": false,
+        "doublesCount": 0,
+        "deckCursor": {
+          "Fate": 0,
+          "Treasury": 0
+        },
+        "lastRoll": null,
+        "pendingTitle": null,
+        "winner": null,
+        "log": [
+          "seat 0 builds Mill Bridge to level 1"
+        ]
+      },
+      "action": {
+        "type": "BUILD",
+        "propertyId": 6
+      },
+      "expected": {
+        "ok": false,
+        "code": "UNEVEN_BUILD"
+      }
+    },
+    {
+      "id": "v10-build-not-full-group",
+      "description": "building without the full group is rejected",
+      "state": {
+        "network": "regtest",
+        "seats": [
+          {
+            "id": 0,
+            "balance": 1500,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          },
+          {
+            "id": 1,
+            "balance": 1500,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          }
+        ],
+        "titles": {
+          "1": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "3": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "5": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "6": {
+            "owner": 0,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "8": {
+            "owner": 0,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "9": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "11": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "12": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "13": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "14": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "15": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "16": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "18": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "19": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "21": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "23": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "24": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "25": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "26": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "27": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "28": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "29": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "31": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "32": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "34": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "35": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "37": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "39": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          }
+        },
+        "bankReserve": 1000000,
+        "housesRemaining": 32,
+        "estatesRemaining": 12,
+        "current": 0,
+        "phase": "AWAIT_POST",
+        "turnIndex": 0,
+        "doublesPending": false,
+        "doublesCount": 0,
+        "deckCursor": {
+          "Fate": 0,
+          "Treasury": 0
+        },
+        "lastRoll": null,
+        "pendingTitle": null,
+        "winner": null,
+        "log": []
+      },
+      "action": {
+        "type": "BUILD",
+        "propertyId": 6
+      },
+      "expected": {
+        "ok": false,
+        "code": "NOT_FULL_GROUP"
+      }
+    },
+    {
+      "id": "v11-mortgage",
+      "description": "mortgaging pays out the mortgage value",
+      "state": {
+        "network": "regtest",
+        "seats": [
+          {
+            "id": 0,
+            "balance": 1500,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          },
+          {
+            "id": 1,
+            "balance": 1500,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          }
+        ],
+        "titles": {
+          "1": {
+            "owner": 0,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "3": {
+            "owner": 0,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "5": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "6": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "8": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "9": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "11": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "12": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "13": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "14": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "15": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "16": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "18": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "19": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "21": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "23": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "24": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "25": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "26": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "27": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "28": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "29": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "31": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "32": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "34": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "35": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "37": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "39": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          }
+        },
+        "bankReserve": 1000000,
+        "housesRemaining": 32,
+        "estatesRemaining": 12,
+        "current": 0,
+        "phase": "AWAIT_POST",
+        "turnIndex": 0,
+        "doublesPending": false,
+        "doublesCount": 0,
+        "deckCursor": {
+          "Fate": 0,
+          "Treasury": 0
+        },
+        "lastRoll": null,
+        "pendingTitle": null,
+        "winner": null,
+        "log": []
+      },
+      "action": {
+        "type": "MORTGAGE",
+        "propertyId": 1
+      },
+      "expected": {
+        "ok": true,
+        "stateHash": "4624d28a8b6d9e4670755e6d435f233b73933a49b196c9d919809cd9eda31b72"
+      }
+    },
+    {
+      "id": "v12-build-blocked-by-mortgage",
+      "description": "cannot build on a group with a mortgaged member",
+      "state": {
+        "network": "regtest",
+        "seats": [
+          {
+            "id": 0,
+            "balance": 1530,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          },
+          {
+            "id": 1,
+            "balance": 1500,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          }
+        ],
+        "titles": {
+          "1": {
+            "owner": 0,
+            "buildLevel": 0,
+            "mortgaged": true
+          },
+          "3": {
+            "owner": 0,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "5": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "6": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "8": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "9": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "11": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "12": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "13": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "14": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "15": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "16": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "18": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "19": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "21": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "23": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "24": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "25": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "26": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "27": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "28": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "29": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "31": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "32": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "34": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "35": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "37": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "39": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          }
+        },
+        "bankReserve": 999970,
+        "housesRemaining": 32,
+        "estatesRemaining": 12,
+        "current": 0,
+        "phase": "AWAIT_POST",
+        "turnIndex": 0,
+        "doublesPending": false,
+        "doublesCount": 0,
+        "deckCursor": {
+          "Fate": 0,
+          "Treasury": 0
+        },
+        "lastRoll": null,
+        "pendingTitle": null,
+        "winner": null,
+        "log": [
+          "seat 0 mortgages Tanyard Lane for 30"
+        ]
+      },
+      "action": {
+        "type": "BUILD",
+        "propertyId": 3
+      },
+      "expected": {
+        "ok": false,
+        "code": "HAS_BUILDINGS"
+      }
+    },
+    {
+      "id": "v13-raise-funds",
+      "description": "a charge beyond cash auto-mortgages instead of bankrupting",
+      "state": {
+        "network": "regtest",
+        "seats": [
+          {
+            "id": 0,
+            "balance": 50,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          },
+          {
+            "id": 1,
+            "balance": 1500,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          }
+        ],
+        "titles": {
+          "1": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "3": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "5": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "6": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "8": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "9": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "11": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "12": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "13": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "14": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "15": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "16": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "18": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "19": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "21": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "23": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "24": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "25": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "26": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "27": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "28": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "29": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "31": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "32": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "34": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "35": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "37": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "39": {
+            "owner": 0,
+            "buildLevel": 0,
+            "mortgaged": false
+          }
+        },
+        "bankReserve": 1000000,
+        "housesRemaining": 32,
+        "estatesRemaining": 12,
+        "current": 0,
+        "phase": "AWAIT_TAX",
+        "turnIndex": 0,
+        "doublesPending": false,
+        "doublesCount": 0,
+        "deckCursor": {
+          "Fate": 0,
+          "Treasury": 0
+        },
+        "lastRoll": null,
+        "pendingTitle": null,
+        "winner": null,
+        "log": []
+      },
+      "action": {
+        "type": "PAY_TAX",
+        "choice": "flat"
+      },
+      "expected": {
+        "ok": true,
+        "stateHash": "bb3db19dc14f18852eb6db8c88f302d35e7449f1381aaedf704caff690455dc5"
+      }
+    },
+    {
+      "id": "v14-bankruptcy",
+      "description": "insufficient even after liquidation removes the seat",
+      "state": {
+        "network": "regtest",
+        "seats": [
+          {
+            "id": 0,
+            "balance": 50,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          },
+          {
+            "id": 1,
+            "balance": 1500,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          }
+        ],
+        "titles": {
+          "1": {
+            "owner": 0,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "3": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "5": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "6": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "8": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "9": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "11": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "12": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "13": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "14": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "15": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "16": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "18": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "19": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "21": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "23": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "24": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "25": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "26": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "27": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "28": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "29": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "31": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "32": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "34": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "35": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "37": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "39": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          }
+        },
+        "bankReserve": 1000000,
+        "housesRemaining": 32,
+        "estatesRemaining": 12,
+        "current": 0,
+        "phase": "AWAIT_TAX",
+        "turnIndex": 0,
+        "doublesPending": false,
+        "doublesCount": 0,
+        "deckCursor": {
+          "Fate": 0,
+          "Treasury": 0
+        },
+        "lastRoll": null,
+        "pendingTitle": null,
+        "winner": null,
+        "log": []
+      },
+      "action": {
+        "type": "PAY_TAX",
+        "choice": "flat"
+      },
+      "expected": {
+        "ok": true,
+        "stateHash": "9386136db2b9f0df04a2a208996b68dac53356261f3812700d82f257cea24120"
+      }
+    },
+    {
+      "id": "v15-wrong-phase",
+      "description": "an action for the wrong phase is rejected",
+      "state": {
+        "network": "regtest",
+        "seats": [
+          {
+            "id": 0,
+            "balance": 1500,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          },
+          {
+            "id": 1,
+            "balance": 1500,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          }
+        ],
+        "titles": {
+          "1": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "3": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "5": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "6": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "8": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "9": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "11": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "12": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "13": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "14": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "15": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "16": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "18": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "19": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "21": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "23": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "24": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "25": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "26": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "27": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "28": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "29": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "31": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "32": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "34": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "35": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "37": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "39": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          }
+        },
+        "bankReserve": 1000000,
+        "housesRemaining": 32,
+        "estatesRemaining": 12,
+        "current": 0,
+        "phase": "AWAIT_ROLL",
+        "turnIndex": 0,
+        "doublesPending": false,
+        "doublesCount": 0,
+        "deckCursor": {
+          "Fate": 0,
+          "Treasury": 0
+        },
+        "lastRoll": null,
+        "pendingTitle": null,
+        "winner": null,
+        "log": []
+      },
+      "action": {
+        "type": "BUY"
+      },
+      "expected": {
+        "ok": false,
+        "code": "WRONG_PHASE"
+      }
+    },
+    {
+      "id": "v16-invalid-dice",
+      "description": "out-of-range dice are rejected",
+      "state": {
+        "network": "regtest",
+        "seats": [
+          {
+            "id": 0,
+            "balance": 1500,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          },
+          {
+            "id": 1,
+            "balance": 1500,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          }
+        ],
+        "titles": {
+          "1": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "3": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "5": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "6": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "8": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "9": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "11": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "12": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "13": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "14": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "15": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "16": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "18": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "19": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "21": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "23": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "24": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "25": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "26": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "27": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "28": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "29": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "31": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "32": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "34": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "35": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "37": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "39": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          }
+        },
+        "bankReserve": 1000000,
+        "housesRemaining": 32,
+        "estatesRemaining": 12,
+        "current": 0,
+        "phase": "AWAIT_ROLL",
+        "turnIndex": 0,
+        "doublesPending": false,
+        "doublesCount": 0,
+        "deckCursor": {
+          "Fate": 0,
+          "Treasury": 0
+        },
+        "lastRoll": null,
+        "pendingTitle": null,
+        "winner": null,
+        "log": []
+      },
+      "action": {
+        "type": "ROLL",
+        "dice": [
+          0,
+          7
+        ]
+      },
+      "expected": {
+        "ok": false,
+        "code": "INVALID_DICE"
+      }
+    },
+    {
+      "id": "v17-forfeit",
+      "description": "AWAIT_ROLL timeout default forfeits the turn (no move, next seat)",
+      "state": {
+        "network": "regtest",
+        "seats": [
+          {
+            "id": 0,
+            "balance": 1500,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          },
+          {
+            "id": 1,
+            "balance": 1500,
+            "position": 0,
+            "inHolding": false,
+            "holdingTurns": 0,
+            "reprieveCards": 0,
+            "bankrupt": false
+          }
+        ],
+        "titles": {
+          "1": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "3": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "5": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "6": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "8": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "9": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "11": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "12": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "13": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "14": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "15": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "16": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "18": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "19": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "21": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "23": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "24": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "25": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "26": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "27": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "28": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "29": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "31": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "32": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "34": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "35": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "37": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          },
+          "39": {
+            "owner": null,
+            "buildLevel": 0,
+            "mortgaged": false
+          }
+        },
+        "bankReserve": 1000000,
+        "housesRemaining": 32,
+        "estatesRemaining": 12,
+        "current": 0,
+        "phase": "AWAIT_ROLL",
+        "turnIndex": 0,
+        "doublesPending": false,
+        "doublesCount": 0,
+        "deckCursor": {
+          "Fate": 0,
+          "Treasury": 0
+        },
+        "lastRoll": null,
+        "pendingTitle": null,
+        "winner": null,
+        "log": []
+      },
+      "action": {
+        "type": "FORFEIT"
+      },
+      "expected": {
+        "ok": true,
+        "stateHash": "2a13fab5c48f352561c96e989d0f49385c04f590a117045c974428eddc088e45"
+      }
+    }
+  ]
+}
