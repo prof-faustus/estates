@@ -12,9 +12,9 @@
 import { initialState, apply, netWorth, type GameState, type Action, type EngineConfig } from '@estates/engine';
 import { loadParams } from '@estates/params';
 import { HttpRelay, InMemoryRelay, type Relay } from '@estates/chat';
-import { genIdentity, identityFrom, signData, verifyData, type Identity } from '@estates/channel';
+import { genIdentity, identityFrom, signData, verifyData, signingKeyFromMaster, type Identity } from '@estates/channel';
 import { commit as beaconCommit, verifyRollEntry, ZERO_BEACON } from '@estates/beacon';
-import type { GameKeyManifest } from '@estates/keylife';
+import { buildManifest, hashHex, type GameKeyManifest, type KeyEntry } from '@estates/keylife';
 
 export const P = loadParams();
 export { identityFrom, type Identity };
@@ -331,7 +331,11 @@ export class NetTable {
   // the whole live game is manifest-scoped. Omitted = legacy seat-claim binding.
   private manifest: GameKeyManifest | null;
 
-  constructor(relay: Relay, name: string, onUpdate: () => void, opts?: { autoPlay?: boolean; scheduleBot?: (cb: () => void) => void; identity?: Identity; manifest?: GameKeyManifest }) {
+  // The 32-byte hex game id this table is bound to (the relay channel). Per-game
+  // keys (channel.gameIdentityFrom(master, gameId)) and the key manifest bind to it.
+  private gameId: string;
+
+  constructor(relay: Relay, name: string, onUpdate: () => void, opts?: { autoPlay?: boolean; scheduleBot?: (cb: () => void) => void; identity?: Identity; manifest?: GameKeyManifest; gameId?: string }) {
     this.relay = relay;
     this.id = opts?.identity ?? genIdentity();      // the player's non-custodial key
     this.me = toHex(this.id.signPub);                // identity = the player's signing pubkey, not a random string
@@ -340,6 +344,31 @@ export class NetTable {
     this.autoPlay = opts?.autoPlay ?? false;
     this.botTimer = opts?.scheduleBot ?? null;
     this.manifest = opts?.manifest ?? null;
+    this.gameId = (typeof opts?.gameId === 'string' && /^[0-9a-fA-F]{64}$/.test(opts.gameId)) ? opts.gameId.toLowerCase() : '00'.repeat(32);
+  }
+
+  /**
+   * Build the signed ONE-GAME KEY MANIFEST for this live game (the host is the
+   * genesis authority): binds every seated player's signing key to this game's id,
+   * as `seat` entries. This is the auditable artifact that ties the running game
+   * to @estates/keylife, so cross-game key reuse can be rejected by the audit
+   * (verifyNoCrossGameReuse / auditKeyLifecycle). Returns null if not started, not
+   * the host, or no real game id. The published manifest lets every peer + auditor
+   * verify the seat keys are this game's keys only.
+   */
+  gameKeyManifest(): GameKeyManifest | null {
+    if (!this.started || !this.iAmHost() || this.gameId === '00'.repeat(32) || this.seats.size === 0) return null;
+    // The genesis-authority key is DISTINCT from the host's seat key (one key, one
+    // purpose): derived from the host's own master with a separate per-game context,
+    // so the host can be both authority and a player without reusing a key.
+    const gkey = signingKeyFromMaster(this.id.priv, `${this.gameId}:genesis`);
+    const authorityPub = toHex(gkey.pub);
+    const entries: KeyEntry[] = [{ purpose: 'genesis', pub: authorityPub, keyType: 'ed25519' }];
+    for (const [seat, v] of [...this.seats.entries()].sort((a, b) => a[0] - b[0])) {
+      entries.push({ purpose: 'seat', pub: v.who, keyType: 'ed25519', seat });
+    }
+    const paramsHash = hashHex(new TextEncoder().encode(`estates-params:${P.params_version}`));
+    return buildManifest(this.gameId, 'estates-table-v1', paramsHash, entries, gkey.priv, authorityPub);
   }
 
   /** The manifest-bound seat key for `seat`, or null if no manifest / not bound. */
