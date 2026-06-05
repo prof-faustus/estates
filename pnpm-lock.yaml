@@ -442,6 +442,9 @@ importers:
       '@estates/params':
         specifier: workspace:*
         version: link:../params
+      '@noble/hashes':
+        specifier: 1.5.0
+        version: 1.5.0
 
   packages/trade:
     dependencies:

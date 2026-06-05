@@ -6,14 +6,26 @@ import { ChatPanel } from './ChatPanel';
 import { WalletPanel } from './WalletPanel';
 import {
   P, SEAT_COLORS, GROUP_COLOR, NetTable, LobbyClient, makeRelay, newAddress, identityFrom,
+  gameIdentityFrom, gameIdFromChannel,
   rollDice, ownedBy, buildable, mortgageable, unmortgageable, lastCard,
   LOBBY_CHANNEL, DEFAULT_RELAY, type NetworkMode, type TableView, type OpenTable, type Identity,
 } from './game';
 
-/** The player's table identity DERIVED from their wallet master key — the same
- *  key signs moves + addresses chat (audit #1; "use the player keys"). */
+/** The player's LOBBY identity DERIVED from their wallet master key (lobby is not
+ *  a single game, so it uses the game-independent key). */
 function playerIdentity(wif: string, net: Network): Identity | undefined {
   try { return identityFrom(new Uint8Array(Wallet.fromWif(wif, net).key.toArray('be', 32))); } catch { return undefined; }
+}
+
+/** A PER-GAME table identity: the seat/gameplay signing key is derived from the
+ *  player's own master FOR THIS GAME ONLY (gameId = the table channel), so a key
+ *  used in one game is distinct from the same wallet's key in every other game
+ *  (one-game keys; audit). The wallet master (ECDH/chat) stays the player's own. */
+function gameIdentity(wif: string, net: Network, channel: string): Identity | undefined {
+  try {
+    const master = new Uint8Array(Wallet.fromWif(wif, net).key.toArray('be', 32));
+    return gameIdentityFrom(master, gameIdFromChannel(channel));
+  } catch { return undefined; }
 }
 
 const NETWORKS: NetworkMode[] = ['regtest', 'testnet', 'mainnet'];
@@ -52,8 +64,9 @@ export function App() {
   function createTable() {
     tableRef.current?.disconnect();   // drop any prior table's relay loops before opening a new one
     const addr = newAddress();
-    const myId = playerIdentity(wif, 'testnet');
-    const t = new NetTable(makeRelay(addr), identity(), force, { autoPlay, ...(myId ? { identity: myId } : {}) });
+    const gameId = gameIdFromChannel(addr);
+    const myId = gameIdentity(wif, 'testnet', addr);   // PER-GAME seat key
+    const t = new NetTable(makeRelay(addr), identity(), force, { autoPlay, gameId, ...(myId ? { identity: myId } : {}) });
     t.connect();
     t.createTable(seatCount, network);
     tableRef.current = t; tableAddrRef.current = addr;
@@ -62,8 +75,8 @@ export function App() {
   }
   function joinTable(ot: OpenTable) {
     tableRef.current?.disconnect();   // drop any prior table's relay loops before joining another
-    const myId = playerIdentity(wif, 'testnet');
-    const t = new NetTable(makeRelay(ot.addr), identity(), force, { autoPlay, ...(myId ? { identity: myId } : {}) });
+    const myId = gameIdentity(wif, 'testnet', ot.addr);   // PER-GAME seat key for THIS table
+    const t = new NetTable(makeRelay(ot.addr), identity(), force, { autoPlay, gameId: gameIdFromChannel(ot.addr), ...(myId ? { identity: myId } : {}) });
     t.connect();
     setNetwork(ot.network);
     tableRef.current = t; tableAddrRef.current = ot.addr;
@@ -95,8 +108,8 @@ export function App() {
     const net = (q.get('network') as NetworkMode) || 'regtest';
     const key = Wallet.random('testnet').key.toWif();
     setWif(key); setName(botName); setNetwork(net); setAutoPlay(true);
-    const botId = playerIdentity(key, 'testnet');
-    const t = new NetTable(makeRelay(addr), botName, force, { autoPlay: true, ...(botId ? { identity: botId } : {}) });
+    const botId = gameIdentity(key, 'testnet', addr);   // PER-GAME key for the bot's seat too
+    const t = new NetTable(makeRelay(addr), botName, force, { autoPlay: true, gameId: gameIdFromChannel(addr), ...(botId ? { identity: botId } : {}) });
     t.connect();
     tableRef.current = t; tableAddrRef.current = addr;
     setStage('table');

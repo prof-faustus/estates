@@ -4,7 +4,7 @@
  */
 import type { GameState } from '@estates/engine';
 export {
-  P, NetTable, makeRelay, rollDice, botAction, identityFrom,
+  P, NetTable, makeRelay, rollDice, botAction, identityFrom, gameIdentityFrom, gameIdFromChannel,
   LobbyClient, newAddress, buildable, mortgageable, unmortgageable, lastCard,
   DEFAULT_RELAY, LOBBY_CHANNEL,
 } from '@estates/table';

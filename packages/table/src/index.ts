@@ -12,12 +12,20 @@
 import { initialState, apply, netWorth, type GameState, type Action, type EngineConfig } from '@estates/engine';
 import { loadParams } from '@estates/params';
 import { HttpRelay, InMemoryRelay, type Relay } from '@estates/chat';
-import { genIdentity, identityFrom, signData, verifyData, signingKeyFromMaster, type Identity } from '@estates/channel';
+import { genIdentity, identityFrom, gameIdentityFrom, signData, verifyData, signingKeyFromMaster, type Identity } from '@estates/channel';
+import { sha256 } from '@noble/hashes/sha256';
 import { commit as beaconCommit, verifyRollEntry, ZERO_BEACON } from '@estates/beacon';
 import { buildManifest, hashHex, type GameKeyManifest, type KeyEntry } from '@estates/keylife';
 
 export const P = loadParams();
-export { identityFrom, type Identity };
+export { identityFrom, gameIdentityFrom, type Identity };
+
+/** Deterministic 32-byte hex GAME ID for a table channel — every peer derives the
+ *  same id from the same channel, and per-game seat keys + the key manifest bind
+ *  to it (so a player's key in this game is distinct from every other game). */
+export function gameIdFromChannel(channel: string): string {
+  return Array.from(sha256(new TextEncoder().encode(`estates-game:${channel}`)), (x) => x.toString(16).padStart(2, '0')).join('');
+}
 
 const toHex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
 function fromHex(h: string): Uint8Array {
