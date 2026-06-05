@@ -15,7 +15,10 @@
     "test": "node --test --experimental-strip-types \"packages/**/test/**/*.test.ts\"",
     "lint:bans": "node --experimental-strip-types tools/lint-bans.ts",
     "ci": "pnpm install --frozen-lockfile && node --experimental-strip-types tools/ci.ts",
-    "reproduce": "pnpm install --frozen-lockfile && node --experimental-strip-types tools/ci.ts && pnpm --filter @estates/conformance generate"
+    "reproduce": "pnpm install --frozen-lockfile && node --experimental-strip-types tools/ci.ts && pnpm --filter @estates/conformance generate",
+    "redteam": "node --experimental-strip-types tools/redteam.mjs",
+    "proof:render": "node tools/render-check.mjs",
+    "proof:flow": "node tools/cdp-flow.mjs"
   },
   "devDependencies": {
     "@types/node": "22.19.19",

@@ -35,3 +35,6 @@ scratch/
 
 # local test helper (not shipped)
 apps/client-web/_serve.mjs
+
+# red-team / render-proof output (regenerable: node tools/redteam.mjs etc.)
+tools/render-out/
