@@ -1,0 +1,101 @@
+{
+  "rolls": [
+    {
+      "turnIndex": 0,
+      "prevBeacon": "0000000000000000000000000000000000000000000000000000000000000000",
+      "commits": [
+        {
+          "seat": 0,
+          "c": "d2f64133ce550d2974d5857573ec814b392c657b72c97bf48a88dc83f552ca09"
+        },
+        {
+          "seat": 1,
+          "c": "551e21a753935d531591e5848c17be3b99a480ed68ff75b078fde6b73d1e8825"
+        }
+      ],
+      "reveals": [
+        {
+          "seat": 0,
+          "secret": "000525262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142"
+        },
+        {
+          "seat": 1,
+          "secret": "01054445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f6061"
+        }
+      ],
+      "liveSeats": [
+        0,
+        1
+      ],
+      "expectOk": true,
+      "expectedDice": [
+        6,
+        5
+      ],
+      "expectedBeacon": "d2deb3ec1dfa148a0bf72e112603e7a8b97c2173b53610ffb989151103647144"
+    },
+    {
+      "turnIndex": 1,
+      "prevBeacon": "d2deb3ec1dfa148a0bf72e112603e7a8b97c2173b53610ffb989151103647144",
+      "commits": [
+        {
+          "seat": 0,
+          "c": "85b0aee1bb6dd970b9d553567dd2103117b95ed27912704c235c8ae77c83beff"
+        },
+        {
+          "seat": 1,
+          "c": "3a6ac9a6b130507669d24d95fb0d606fe2ff7d74a0d48b2936b02debdff67e86"
+        }
+      ],
+      "reveals": [
+        {
+          "seat": 0,
+          "secret": "00094142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e"
+        },
+        {
+          "seat": 1,
+          "secret": "0109606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d"
+        }
+      ],
+      "liveSeats": [
+        0,
+        1
+      ],
+      "expectOk": true,
+      "expectedDice": [
+        5,
+        6
+      ],
+      "expectedBeacon": "232c05b04bb3c6c2192d750eb92503473611e7854f436f20adfaedd3c6e5618b"
+    }
+  ],
+  "bad": {
+    "commits": [
+      {
+        "seat": 0,
+        "c": "d2f64133ce550d2974d5857573ec814b392c657b72c97bf48a88dc83f552ca09"
+      },
+      {
+        "seat": 1,
+        "c": "551e21a753935d531591e5848c17be3b99a480ed68ff75b078fde6b73d1e8825"
+      }
+    ],
+    "reveals": [
+      {
+        "seat": 0,
+        "secret": "0063b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4"
+      },
+      {
+        "seat": 1,
+        "secret": "01054445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f6061"
+      }
+    ],
+    "liveSeats": [
+      0,
+      1
+    ],
+    "turnIndex": 0,
+    "prevBeacon": "0000000000000000000000000000000000000000000000000000000000000000",
+    "expectOk": false
+  }
+}

@@ -221,6 +221,35 @@ if (File.Exists(tmPath))
     if (mfail == 0) Console.WriteLine("PASS: native re-derives the canonical signed-frame bytes + verifies web table messages.");
 }
 
+// ---- BEACON cross-validation: native dice beacon (commit/reveal -> dice + chained
+// beacon) must equal the TS reference; a non-opening reveal is rejected. ----
+int bpass = 0, bfail = 0;
+string bcPath = Path.Combine(AppContext.BaseDirectory, "beacon-vectors.json");
+if (File.Exists(bcPath))
+{
+    using var bdoc = JsonDocument.Parse(File.ReadAllText(bcPath));
+    var br = bdoc.RootElement;
+    List<Commitment> ParseC(JsonElement a) => a.EnumerateArray().Select(c => new Commitment(c.GetProperty("seat").GetInt32(), Tx.FromHex(c.GetProperty("c").GetString()!))).ToList();
+    List<Reveal> ParseR(JsonElement a) => a.EnumerateArray().Select(r => new Reveal(r.GetProperty("seat").GetInt32(), Tx.FromHex(r.GetProperty("secret").GetString()!))).ToList();
+    void Ckb(string what, bool ok) { if (ok) bpass++; else { Console.Error.WriteLine($"  [BEACON FAIL] {what}"); bfail++; } }
+    foreach (var v in br.GetProperty("rolls").EnumerateArray())
+    {
+        var res = Beacon.VerifyRollEntry(ParseC(v.GetProperty("commits")), ParseR(v.GetProperty("reveals")),
+            v.GetProperty("liveSeats").EnumerateArray().Select(x => x.GetInt32()).ToList(),
+            v.GetProperty("turnIndex").GetInt64(), Tx.FromHex(v.GetProperty("prevBeacon").GetString()!));
+        var wantDice = v.GetProperty("expectedDice").EnumerateArray().Select(x => x.GetInt32()).ToArray();
+        Ckb($"roll t{v.GetProperty("turnIndex").GetInt64()}",
+            res.Ok && res.Dice![0] == wantDice[0] && res.Dice![1] == wantDice[1] && Tx.ToHex(res.Beacon!) == v.GetProperty("expectedBeacon").GetString());
+    }
+    var bad = br.GetProperty("bad");
+    var rbad = Beacon.VerifyRollEntry(ParseC(bad.GetProperty("commits")), ParseR(bad.GetProperty("reveals")),
+        bad.GetProperty("liveSeats").EnumerateArray().Select(x => x.GetInt32()).ToList(),
+        bad.GetProperty("turnIndex").GetInt64(), Tx.FromHex(bad.GetProperty("prevBeacon").GetString()!));
+    Ckb("non-opening reveal rejected", !rbad.Ok);
+    Console.WriteLine($"Estates.Conformance (beacon): {bpass} passed, {bfail} failed");
+    if (bfail == 0) Console.WriteLine("PASS: native dice beacon (dice + chained beacon + reveal checks) matches the TS reference.");
+}
+
 // ---- RELAY live round-trip (optional): if the relay is running, the native
 // client publishes a frame + reads it back from the ordered log. Skipped (not a
 // failure) when the relay is down, so the offline conformance run never depends on it.
@@ -238,4 +267,4 @@ if (await relay.ReachableAsync())
 }
 else Console.WriteLine("Estates.Conformance (relay): skipped (relay not running on 127.0.0.1:8788)");
 
-return (fail == 0 && kfail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && gfail == 0 && mfail == 0 && rfail == 0) ? 0 : 1;
+return (fail == 0 && kfail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && gfail == 0 && mfail == 0 && bfail == 0 && rfail == 0) ? 0 : 1;
