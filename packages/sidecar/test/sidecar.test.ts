@@ -9,7 +9,7 @@ import { commitOutput, encodeActionCommit } from '@estates/txmap';
 import { buildGenesis } from '@estates/ledger';
 import { initialState, apply, type EngineConfig } from '@estates/engine';
 import { commit as beaconCommit, roll as beaconRoll, ZERO_BEACON } from '@estates/beacon';
-import { GamePeer } from '../src/index.ts';
+import { GamePeer, decodeFrame, isAction } from '../src/index.ts';
 
 const pkh = (i: number) => new Uint8Array(createHash('sha256').update(new Uint8Array([i & 0xff, 0x5a])).digest()).slice(0, 20);
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
@@ -147,4 +147,65 @@ test('moves are signed by the PLAYER key, and chat is addressed by it', async ()
     await waitFor(() => JSON.stringify(bob!.state) !== before);
     assert.notEqual(JSON.stringify(bob!.state), before, 'Bob applied Alice’s player-key-signed move');
   } finally { aliceLink.close(); server.close(); }
+});
+
+// ---- FRAME DECODER: fail-closed + fuzz-proof (one hostile socket peer) ---------
+// Security claim: a hostile peer cannot crash recv, drive the engine with an
+// arbitrary action, or DoS via a malformed/oversized frame. A signature proves
+// authorship, NOT well-formedness — decodeFrame proves the latter, before anything.
+const frame = (o: unknown): Uint8Array => new TextEncoder().encode(JSON.stringify(o));
+const H32 = 'aa'.repeat(32);   // 32-byte hex (commitment/secret)
+const HSIG = 'cc'.repeat(64);  // 64-byte hex (Ed25519 sig)
+
+test('decodeFrame accepts well-formed bc/br/move/chat and rejects hostile shapes', () => {
+  // valid
+  assert.ok(decodeFrame(frame({ t: 'bc', turn: 0, c: H32 })));
+  assert.ok(decodeFrame(frame({ t: 'br', turn: 3, s: H32 })));
+  assert.ok(decodeFrame(frame({ t: 'move', action: { type: 'END_TURN' }, sig: HSIG })));
+  const mv = decodeFrame(frame({ t: 'move', action: { type: 'ROLL', dice: [2, 5] }, sig: HSIG, beacon: { cm: H32, cp: H32, sm: H32, sp: H32, seatM: 1, seatP: 0 }, pkhs: { '0:commit': 'bb'.repeat(20) } }));
+  assert.ok(mv && mv.t === 'move' && mv.beacon && Object.keys(mv.pkhs).length === 1);
+  // hostile — every one must be rejected (null)
+  for (const bad of [
+    new Uint8Array([0xff, 0xfe]), frame('not-an-object'), frame(null), frame([]), frame(42),
+    frame({ t: 'nope' }),
+    frame({ t: 'bc', turn: -1, c: H32 }), frame({ t: 'bc', turn: 1e12, c: H32 }), frame({ t: 'bc', turn: 0, c: 'zz' }),
+    frame({ t: 'move', action: { type: 'EVIL' }, sig: HSIG }),            // arbitrary action → the old apply() crash
+    frame({ t: 'move', action: { type: 'ROLL', dice: [9, 9] }, sig: HSIG }), // out-of-range dice
+    frame({ t: 'move', action: { type: 'BUY' }, sig: 'short' }),          // bad sig length
+    frame({ t: 'move', action: { type: 'BUY' }, sig: HSIG, beacon: { cm: 'x' } }), // malformed beacon present
+    frame({ t: 'move', action: { type: 'BUY' }, sig: HSIG, pkhs: { k: 'nothex' } }), // bad pkh
+    frame({ t: 'move', action: { type: 'BUY' }, sig: HSIG, pkhs: Object.fromEntries(Array.from({ length: 999 }, (_, i) => [String(i), 'bb'.repeat(20)])) }), // oversized manifest
+    frame({ t: 'chat', env: {} }), frame({ t: 'chat', env: { recipients: 'x' } }),
+  ]) assert.equal(decodeFrame(bad), null, `rejected: ${(JSON.stringify(bad) ?? '').slice(0, 0)}hostile`);
+});
+
+test('a HOSTILE move frame never crashes a live peer / never advances state', async () => {
+  const { bob, aliceLink, server } = await pair();
+  try {
+    const before = JSON.stringify(bob.state);
+    const hostile = [
+      new Uint8Array([1, 2, 3]), frame('x'), frame({ t: 'move', action: { type: '__proto__' }, sig: HSIG }),
+      frame({ t: 'move', action: { type: 'ROLL', dice: ['a', 'b'] }, sig: HSIG }),
+      frame({ t: 'bc', turn: 1e15, c: 'zz' }), frame({ t: 'chat', env: { recipients: [null] } }),
+    ];
+    for (const h of hostile) (aliceLink as any).send(h);
+    await delay(200);
+    assert.equal(JSON.stringify(bob.state), before, 'no hostile frame advanced or corrupted state');
+  } finally { aliceLink.close(); server.close(); }
+});
+
+test('decodeFrame is FUZZ-PROOF: 100k random frames never throw or hang', () => {
+  let rng = 0x1234abcd >>> 0; const rand = () => { rng = (rng * 1103515245 + 12345) >>> 0; return rng; };
+  const t0 = Date.now();
+  for (let i = 0; i < 100_000; i++) {
+    const len = rand() % 256;
+    const b = new Uint8Array(len);
+    for (let k = 0; k < len; k++) b[k] = rand() & 0xff;
+    let out: unknown = 'unset';
+    assert.doesNotThrow(() => { out = decodeFrame(b); });
+    assert.ok(out === null || typeof out === 'object');
+  }
+  assert.ok(Date.now() - t0 < 8000, 'bounded work — no hang');
+  // sanity: the action validator rejects a classic prototype-pollution attempt
+  assert.equal(isAction({ type: '__proto__' }), false);
 });
