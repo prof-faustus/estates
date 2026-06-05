@@ -87,18 +87,18 @@ export class LobbyClient {
   constructor(relay: Relay, onUpdate: () => void, identity?: Identity) { this.relay = relay; this.onUpdate = onUpdate; this.id = identity ?? genIdentity(); }
   connect(): void {
     this.relay.subscribe((p) => {
-      try {
-        const o = JSON.parse(new TextDecoder().decode(p)) as { kind: string; signPub: string; sig: string } & OpenTable;
-        if (o.kind !== 'announce') return;
-        const t: OpenTable = { addr: o.addr, name: o.name, maxSeats: o.maxSeats, network: o.network, host: o.host, ts: o.ts };
-        // SIGNED announcements only (audit #6): the host field MUST be the signer's
-        // key, and the signature must verify — no fake hosts / tables / labels.
-        let signer: Uint8Array, signature: Uint8Array;
-        try { signer = fromHex(o.signPub); signature = fromHex(o.sig); } catch { return; }
-        if (signer.length !== 32 || t.host !== o.signPub) return;
-        if (!verifyData(encJSON(t), signature, signer)) return;
-        this.tables.set(t.addr, t); this.onUpdate();
-      } catch { /* opaque */ }
+      // SECURITY BOUNDARY: `p` is untrusted. decodeAnnounce validates every field
+      // fail-closed (total — never throws) before the signature is checked.
+      const a = decodeAnnounce(p);
+      if (!a) return;
+      const { table: t, signPub, sig } = a;
+      // SIGNED announcements only (audit #6): the host field MUST be the signer's
+      // key, and the signature must verify — no fake hosts / tables / labels.
+      if (t.host !== signPub) return;
+      let signer: Uint8Array, signature: Uint8Array;
+      try { signer = fromHex(signPub); signature = fromHex(sig); } catch { return; }
+      if (signer.length !== 32 || !verifyData(encJSON(t), signature, signer)) return;
+      this.tables.set(t.addr, t); this.onUpdate();
     });
   }
   /** Announce an open table, SIGNED by the host key (host := the signing pubkey). */
@@ -120,6 +120,124 @@ type Msg =
 /** A published, SIGNED message: the player's Ed25519 signing pub + signature over
  *  the canonical message bind the author to the protocol (audit #1/#2). */
 type Signed = Msg & { id: string; signPub: string; sig: string };
+
+// ===========================================================================
+// UNTRUSTED-MESSAGE VALIDATORS (fail-closed, total — never throw)
+//
+// WHY THIS EXISTS:
+//   Every relay frame is attacker-controlled. A valid SIGNATURE proves only WHO
+//   authored a blob — it does NOT prove the blob is well-formed. A peer can sign a
+//   `start` whose `config.seatCount` is 1e9 (→ giant allocation in initialState), a
+//   `seat` whose `seat` is non-integer (→ poisoned Map key), or an `action` that is
+//   an arbitrary object (→ undefined behaviour in apply). So we validate EVERY field
+//   — type, integer range, exact hex length, bounded collections — BEFORE the
+//   signature is checked and BEFORE any value reaches the engine. decodeSigned
+//   returns null on anything unexpected and never throws.
+// ===========================================================================
+const NETWORKS = new Set<string>(['regtest', 'testnet', 'mainnet']);
+const MAX_SEATS = 8;             // the game supports 2..6 seats; hard cap bounds every seat loop/array
+const MAX_NAME = 256;            // display-name ceiling (bounds memory)
+const MAX_ROLL_SEQ = 1_000_000;  // far more rolls than any real game; bounds the per-roll maps
+const PROP_MAX = 39;             // board spaces 0..39
+const ED_PUB_HEX = 64;           // Ed25519 public key = 32 bytes
+const ED_SIG_HEX = 128;          // Ed25519 signature = 64 bytes
+const SHA256_HEX = 64;           // beacon commitment / secret = 32 bytes
+const MAX_MSG_BYTES = 1 << 20;   // 1 MiB per frame (the relay also caps; defense in depth)
+const HEX_RE = /^[0-9a-f]*$/i;
+
+const isObj = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
+const isInt = (x: unknown, lo: number, hi: number): x is number => typeof x === 'number' && Number.isInteger(x) && x >= lo && x <= hi;
+const isStr = (x: unknown, max = 4096): x is string => typeof x === 'string' && x.length <= max;
+const isHexLen = (x: unknown, hexLen: number): x is string => typeof x === 'string' && x.length === hexLen && HEX_RE.test(x);
+
+/** A game Action from untrusted bytes — exact type + per-type field validation. */
+export function isAction(x: unknown): x is Action {
+  if (!isObj(x)) return false;
+  switch (x.type) {
+    case 'BUY': case 'DECLINE': case 'FORFEIT': case 'END_TURN': return true;
+    case 'PAY_TAX': return x.choice === 'flat' || x.choice === 'percent';
+    case 'BUILD': case 'SELL_BUILD': case 'MORTGAGE': case 'UNMORTGAGE': return isInt(x.propertyId, 0, PROP_MAX);
+    case 'LEAVE': return isInt(x.seat, 0, MAX_SEATS - 1);
+    case 'ROLL': return Array.isArray(x.dice) && x.dice.length === 2 && isInt(x.dice[0], 1, 6) && isInt(x.dice[1], 1, 6);
+    default: return false;
+  }
+}
+
+/** An EngineConfig from untrusted bytes. seatCount/bankReserve are bounded so a
+ *  hostile `start` cannot DoS initialState; deckOrder structure is bounded (the
+ *  engine separately re-validates it as a strict permutation). */
+export function isEngineConfig(x: unknown): x is EngineConfig {
+  if (!isObj(x)) return false;
+  if (!NETWORKS.has(x.network as string)) return false;
+  if (!isInt(x.seatCount, 2, MAX_SEATS)) return false;
+  if (!isInt(x.bankReserve, 0, Number.MAX_SAFE_INTEGER)) return false;
+  if (x.deckOrder !== undefined) {
+    if (!isObj(x.deckOrder)) return false;
+    for (const k of Object.keys(x.deckOrder)) {
+      const arr = (x.deckOrder as Record<string, unknown>)[k];
+      if (!Array.isArray(arr) || arr.length > 1000 || !arr.every((n) => isInt(n, 0, 1000))) return false;
+    }
+  }
+  if (x.requireFairDecks !== undefined && typeof x.requireFairDecks !== 'boolean') return false;
+  return true;
+}
+
+/**
+ * Decode + FULLY VALIDATE one signed relay frame, or null. Total: never throws.
+ * Reconstructs the Msg with fields in the canonical order the sender used, so the
+ * subsequent signature check over signedBytes(msg, signPub) is exact.
+ */
+export function decodeSigned(payload: Uint8Array): { msg: Msg; id: string; signPub: string; sig: string } | null {
+  if (payload.length > MAX_MSG_BYTES) return null;
+  let raw: unknown;
+  try { raw = JSON.parse(new TextDecoder().decode(payload)); } catch { return null; }
+  if (!isObj(raw)) return null;
+  const o = raw;
+  if (!isStr(o.id, 128) || !isHexLen(o.signPub, ED_PUB_HEX) || !isHexLen(o.sig, ED_SIG_HEX)) return null;
+  const meta = { id: o.id, signPub: o.signPub, sig: o.sig };
+  switch (o.kind) {
+    case 'table':
+      if (!isInt(o.maxSeats, 2, MAX_SEATS) || !NETWORKS.has(o.network as string) || !isStr(o.host)) return null;
+      return { msg: { kind: 'table', maxSeats: o.maxSeats, network: o.network as NetworkMode, host: o.host }, ...meta };
+    case 'seat':
+      if (!isInt(o.seat, 0, MAX_SEATS - 1) || !isStr(o.who) || !isStr(o.name, MAX_NAME) || typeof o.bot !== 'boolean') return null;
+      return { msg: { kind: 'seat', seat: o.seat, who: o.who, name: o.name, bot: o.bot }, ...meta };
+    case 'start': {
+      if (!isStr(o.by) || !isEngineConfig(o.config) || !Array.isArray(o.seatMap) || o.seatMap.length > MAX_SEATS) return null;
+      const seatMap: { seat: number; who: string }[] = [];
+      for (const e of o.seatMap) { if (!isObj(e) || !isInt(e.seat, 0, MAX_SEATS - 1) || !isStr(e.who)) return null; seatMap.push({ seat: e.seat, who: e.who }); }
+      return { msg: { kind: 'start', by: o.by, config: o.config, seatMap }, ...meta };
+    }
+    case 'commit':
+      if (!isInt(o.roll, 0, MAX_ROLL_SEQ) || !isInt(o.seat, 0, MAX_SEATS - 1) || !isHexLen(o.c, SHA256_HEX)) return null;
+      return { msg: { kind: 'commit', roll: o.roll, seat: o.seat, c: o.c }, ...meta };
+    case 'reveal':
+      if (!isInt(o.roll, 0, MAX_ROLL_SEQ) || !isInt(o.seat, 0, MAX_SEATS - 1) || !isHexLen(o.s, SHA256_HEX)) return null;
+      return { msg: { kind: 'reveal', roll: o.roll, seat: o.seat, s: o.s }, ...meta };
+    case 'action':
+      if (!isAction(o.action)) return null;
+      return { msg: { kind: 'action', action: o.action }, ...meta };
+    default:
+      return null;
+  }
+}
+
+/** Decode + FULLY VALIDATE a signed lobby `announce` frame, or null. Total: never
+ *  throws. Same boundary as decodeSigned — a valid signature does not excuse a
+ *  malformed/oversized announcement (e.g. a 1e9 maxSeats or a giant name). */
+export function decodeAnnounce(payload: Uint8Array): { table: OpenTable; signPub: string; sig: string } | null {
+  if (payload.length > MAX_MSG_BYTES) return null;
+  let raw: unknown;
+  try { raw = JSON.parse(new TextDecoder().decode(payload)); } catch { return null; }
+  if (!isObj(raw) || raw.kind !== 'announce') return null;
+  if (!isStr(raw.addr, 128) || !isStr(raw.name, MAX_NAME) || !isInt(raw.maxSeats, 2, MAX_SEATS)
+    || !NETWORKS.has(raw.network as string) || !isHexLen(raw.host, ED_PUB_HEX)
+    || !isInt(raw.ts, 0, Number.MAX_SAFE_INTEGER) || !isHexLen(raw.signPub, ED_PUB_HEX) || !isHexLen(raw.sig, ED_SIG_HEX)) return null;
+  return {
+    table: { addr: raw.addr, name: raw.name, maxSeats: raw.maxSeats, network: raw.network as NetworkMode, host: raw.host, ts: raw.ts },
+    signPub: raw.signPub, sig: raw.sig,
+  };
+}
 
 export interface SeatInfo { seat: number; who: string; name: string; bot: boolean }
 export interface TableView {
@@ -293,69 +411,66 @@ export class NetTable {
       }
     };
     for (const p of payloads) {
-      const raw = new TextDecoder().decode(p);
-      let o: Signed;
-      try { o = JSON.parse(raw) as Signed; } catch { continue; }
-      const { id, signPub, sig, ...m } = o;
+      // SECURITY BOUNDARY: `p` is fully untrusted (hostile relay/peer). decodeSigned
+      // validates EVERY field fail-closed before anything else; a malformed frame is
+      // dropped here and never touches signatures or game state.
+      const dec = decodeSigned(p);
+      if (!dec) continue;
+      const { msg: m, signPub, sig } = dec;
+      const raw = new TextDecoder().decode(p);   // cache key (only reached for shape-valid frames)
       // AUTHENTICATE: every message must be signed by its author's key (audit #1).
       // Relay ordering is NOT authentication; an unsigned/forged message is dropped.
-      // Each unique payload is verified ONCE (cached) so repeated rebuilds stay O(n).
+      // A VALID SIGNATURE proves authorship, NOT well-formedness — decodeSigned proved
+      // the latter. Each unique payload is verified ONCE (cached) so rebuilds stay O(n).
       if (!this.verified.has(raw)) {
         let signer: Uint8Array, signature: Uint8Array;
         try { signer = fromHex(signPub); signature = fromHex(sig); } catch { continue; }
-        if (signer.length !== 32 || !verifyData(signedBytes(m as Msg, signPub), signature, signer)) continue;
+        if (signer.length !== 32 || !verifyData(signedBytes(m, signPub), signature, signer)) continue;
         this.verified.add(raw);
       }
-      switch ((m as Msg).kind) {
+      switch (m.kind) {
         case 'table':
-          if (maxSeats === null) { const t = m as Extract<Msg, { kind: 'table' }>; maxSeats = t.maxSeats; network = t.network; host = signPub; }
+          if (maxSeats === null) { maxSeats = m.maxSeats; network = m.network; host = signPub; }
           break;
-        case 'seat': {
-          const sm = m as Extract<Msg, { kind: 'seat' }>;
+        case 'seat':
           // a seat is claimed by the key that SIGNED the claim (no spoofing, audit #2);
           // one key controls at most one seat.
-          if (!started && !seats.has(sm.seat) && sm.who === signPub && ![...seatKeys.values()].includes(signPub)) {
-            seats.set(sm.seat, { who: signPub, name: sm.name, bot: sm.bot });
-            seatKeys.set(sm.seat, signPub);
+          if (!started && !seats.has(m.seat) && m.who === signPub && ![...seatKeys.values()].includes(signPub)) {
+            seats.set(m.seat, { who: signPub, name: m.name, bot: m.bot });
+            seatKeys.set(m.seat, signPub);
           }
           break;
-        }
-        case 'start': {
-          const st = m as Extract<Msg, { kind: 'start' }>;
+        case 'start':
           // host-signed AND the bound seat map must match the claimed seats (audit #2)
           if (!started && signPub === host) {
             const cur = JSON.stringify([...seats.entries()].map(([seat, v]) => ({ seat, who: v.who })).sort((a, b) => a.seat - b.seat));
-            const claimed = JSON.stringify([...st.seatMap].sort((a, b) => a.seat - b.seat));
-            if (cur === claimed) { started = true; state = initialState(st.config); tryRoll(); }
+            const claimed = JSON.stringify([...m.seatMap].sort((a, b) => a.seat - b.seat));
+            // initialState can throw on a (validly-signed) config that requires fair
+            // decks without a valid permutation — keep rebuild TOTAL: fail closed.
+            if (cur === claimed) { try { state = initialState(m.config); started = true; tryRoll(); } catch { state = null; started = false; } }
           }
           break;
-        }
-        case 'commit': {
-          const cmsg = m as Extract<Msg, { kind: 'commit' }>;
-          if (seatKeys.get(cmsg.seat) === signPub) {                // signed by that seat's key
-            let map = commitsBySeq.get(cmsg.roll); if (!map) { map = new Map(); commitsBySeq.set(cmsg.roll, map); }
-            if (!map.has(cmsg.seat)) { try { map.set(cmsg.seat, fromHex(cmsg.c)); } catch { /* bad hex */ } }
+        case 'commit':
+          if (seatKeys.get(m.seat) === signPub) {                   // signed by that seat's key
+            let map = commitsBySeq.get(m.roll); if (!map) { map = new Map(); commitsBySeq.set(m.roll, map); }
+            if (!map.has(m.seat)) map.set(m.seat, fromHex(m.c));     // m.c validated 32-byte hex → fromHex cannot throw
           }
           break;
-        }
-        case 'reveal': {
-          const rmsg = m as Extract<Msg, { kind: 'reveal' }>;
-          if (seatKeys.get(rmsg.seat) === signPub) {
-            let map = revealsBySeq.get(rmsg.roll); if (!map) { map = new Map(); revealsBySeq.set(rmsg.roll, map); }
-            if (!map.has(rmsg.seat)) { try { map.set(rmsg.seat, fromHex(rmsg.s)); } catch { /* bad hex */ } }
+        case 'reveal':
+          if (seatKeys.get(m.seat) === signPub) {
+            let map = revealsBySeq.get(m.roll); if (!map) { map = new Map(); revealsBySeq.set(m.roll, map); }
+            if (!map.has(m.seat)) map.set(m.seat, fromHex(m.s));
           }
           tryRoll();
           break;
-        }
-        case 'action': {
-          const am = m as Extract<Msg, { kind: 'action' }>;
+        case 'action':
           if (started && state) {
             // LEAVE is signed by the leaving seat; every other action by the ACTIVE seat.
-            const owner = am.action.type === 'LEAVE' ? am.action.seat : state.current;
-            if (seatKeys.get(owner) === signPub) { const r = apply(state, am.action); if (r.ok) { state = r.state; tryRoll(); } }
+            const owner = m.action.type === 'LEAVE' ? m.action.seat : state.current;
+            // apply is pure + total (returns {ok:false}); the try is defense-in-depth.
+            if (seatKeys.get(owner) === signPub) { try { const r = apply(state, m.action); if (r.ok) { state = r.state; tryRoll(); } } catch { /* reject */ } }
           }
           break;
-        }
       }
     }
     this.commitsBySeq = commitsBySeq;

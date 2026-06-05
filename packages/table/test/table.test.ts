@@ -4,6 +4,7 @@ import { InMemoryRelay } from '@estates/chat';
 import { initialState, type GameState } from '@estates/engine';
 import {
   NetTable, P, LobbyClient, buildable, mortgageable, unmortgageable, lastCard, newAddress,
+  decodeSigned, isAction, isEngineConfig,
   type NetworkMode,
 } from '../src/index.ts';
 
@@ -336,4 +337,82 @@ test('lobby announcements are signed; forged/unsigned announces are rejected', (
     host: 'ab'.repeat(32), ts: 2, signPub: 'cd'.repeat(32), sig: 'ef'.repeat(64),
   })));
   assert.equal(viewer.list().length, 1, 'forged announce dropped');
+});
+
+// ---- WIRE DECODER (rebuild boundary): fail-closed + fuzz-proof ----------------
+// Security claim: a validly-SIGNED-but-MALFORMED message, or any hostile bytes,
+// cannot reach the engine, poison state, allocate unbounded, or crash the receive
+// loop. A signature proves authorship, NOT well-formedness — decodeSigned proves
+// the latter, fail-closed, before anything else.
+const teJSON = (o: unknown): Uint8Array => new TextEncoder().encode(JSON.stringify(o));
+const HEXPUB = 'aa'.repeat(32);   // 64-hex (Ed25519 pub shape)
+const HEXSIG = 'bb'.repeat(64);   // 128-hex (Ed25519 sig shape)
+const meta = { id: 'x', signPub: HEXPUB, sig: HEXSIG };
+
+test('isAction validates every action type + per-type fields; rejects hostile shapes', () => {
+  for (const ok of [{ type: 'BUY' }, { type: 'END_TURN' }, { type: 'PAY_TAX', choice: 'flat' }, { type: 'BUILD', propertyId: 5 }, { type: 'LEAVE', seat: 1 }, { type: 'ROLL', dice: [3, 4] }]) {
+    assert.equal(isAction(ok), true, `valid: ${JSON.stringify(ok)}`);
+  }
+  for (const bad of [null, 42, 'BUY', {}, { type: 'EVIL' }, { type: 'PAY_TAX', choice: 'x' }, { type: 'BUILD', propertyId: 40 }, { type: 'BUILD', propertyId: 1.5 }, { type: 'LEAVE', seat: 999 }, { type: 'ROLL', dice: [7, 0] }, { type: 'ROLL', dice: [1] }, { type: 'ROLL' }]) {
+    assert.equal(isAction(bad), false, `rejected: ${(JSON.stringify(bad) ?? String(bad)).slice(0, 40)}`);
+  }
+});
+
+test('isEngineConfig bounds seatCount/bankReserve and rejects hostile configs (no DoS)', () => {
+  assert.equal(isEngineConfig({ network: 'regtest', seatCount: 2, bankReserve: 1000 }), true);
+  for (const bad of [null, {}, { network: 'evil', seatCount: 2, bankReserve: 0 }, { network: 'regtest', seatCount: 1e9, bankReserve: 0 }, { network: 'regtest', seatCount: 1, bankReserve: 0 }, { network: 'regtest', seatCount: 2.5, bankReserve: 0 }, { network: 'regtest', seatCount: 2, bankReserve: -1 }, { network: 'regtest', seatCount: 2, bankReserve: 0, deckOrder: { Fate: new Array(99999).fill(0) } }]) {
+    assert.equal(isEngineConfig(bad), false, `rejected: ${(JSON.stringify(bad) ?? String(bad)).slice(0, 40)}`);
+  }
+});
+
+test('decodeSigned: a validly-shaped envelope with a HOSTILE config/action/seat is rejected', () => {
+  // these all carry well-formed meta (id/signPub/sig) — only the payload is hostile
+  assert.equal(decodeSigned(teJSON({ kind: 'start', by: 'h', config: { network: 'regtest', seatCount: 1e9, bankReserve: 0 }, seatMap: [], ...meta })), null, 'seatCount 1e9 → null (no initialState DoS)');
+  assert.equal(decodeSigned(teJSON({ kind: 'action', action: { type: 'EVIL' }, ...meta })), null, 'unknown action → null');
+  assert.equal(decodeSigned(teJSON({ kind: 'seat', seat: 1e9, who: 'w', name: 'n', bot: false, ...meta })), null, 'out-of-range seat → null');
+  assert.equal(decodeSigned(teJSON({ kind: 'commit', roll: 0, seat: 0, c: 'zz', ...meta })), null, 'bad commitment hex → null');
+  assert.equal(decodeSigned(teJSON({ kind: 'table', maxSeats: 99, network: 'regtest', host: 'h', ...meta })), null, 'maxSeats over cap → null');
+  // a well-formed action decodes
+  const okv = decodeSigned(teJSON({ kind: 'action', action: { type: 'BUY' }, ...meta }));
+  assert.ok(okv && okv.msg.kind === 'action', 'a well-formed action decodes');
+});
+
+test('decodeSigned: bad meta (non-hex/short signPub or sig, missing fields) is rejected', () => {
+  for (const bad of [
+    teJSON({ kind: 'action', action: { type: 'BUY' } }),                                  // missing meta
+    teJSON({ kind: 'action', action: { type: 'BUY' }, id: 'x', signPub: 'zz', sig: HEXSIG }), // bad signPub
+    teJSON({ kind: 'action', action: { type: 'BUY' }, id: 'x', signPub: HEXPUB, sig: 'short' }), // bad sig
+    new TextEncoder().encode('not json'), new TextEncoder().encode('null'), new TextEncoder().encode('[]'),
+  ]) assert.equal(decodeSigned(bad), null);
+});
+
+test('rebuild is FAIL-CLOSED: hostile frames never throw, never forge table/seat/state', () => {
+  const relay = new InMemoryRelay();
+  const t = peer(relay, 'victim'); t.connect();
+  const hostile = [
+    'not json', 'null', '42', '"s"', '[]',
+    JSON.stringify({ kind: 'nope', ...meta }),
+    JSON.stringify({ kind: 'table', maxSeats: 1e9, network: 'regtest', host: 'h', ...meta }),  // unsigned + over-cap
+    JSON.stringify({ kind: 'start', by: 'h', config: { network: 'regtest', seatCount: 1e9, bankReserve: 0 }, seatMap: [], ...meta }),
+    JSON.stringify({ kind: 'action', action: { type: 'EVIL' }, ...meta }),
+    JSON.stringify({ kind: 'seat', seat: -1, who: 'w', name: 'n', bot: false, ...meta }),
+  ].map((s) => new TextEncoder().encode(s));
+  for (const h of hostile) assert.doesNotThrow(() => relay.publish(h), 'no throw out of the receive loop');
+  // nothing hostile created a table (a `table` frame needs a VALID signature, absent here)
+  assert.equal(t.view().phase, 'disconnected', 'no forged table from hostile/unsigned frames');
+  assert.equal(t.view().maxSeats, null);
+});
+
+test('rebuild decoder is FUZZ-PROOF: 100k random frames never throw decodeSigned', () => {
+  let rng = 0x9e3779b9 >>> 0; const rand = () => { rng = (rng * 1103515245 + 12345) >>> 0; return rng; };
+  const t0 = Date.now();
+  for (let i = 0; i < 100_000; i++) {
+    const len = rand() % 256;
+    const b = new Uint8Array(len);
+    for (let k = 0; k < len; k++) b[k] = rand() & 0xff;
+    let out: unknown = 'unset';
+    assert.doesNotThrow(() => { out = decodeSigned(b); });
+    assert.ok(out === null || (typeof out === 'object'), 'returns null or a validated message');
+  }
+  assert.ok(Date.now() - t0 < 8000, 'bounded work — no hang');
 });
