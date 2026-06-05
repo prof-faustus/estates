@@ -1,0 +1,14 @@
+{
+  "tableId": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+  "commitment": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "aliceCardPub": "021111111111111111111111111111111111111111111111111111111111111111",
+  "newCardPub": "032222222222222222222222222222222222222222222222222222222222222222",
+  "bobPkh": "cccccccccccccccccccccccccccccccccccccccc",
+  "aliceOutpoint": {
+    "txid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "vout": 7
+  },
+  "expectedScript": "4c74455354415445535f434152445f4e46545f5631a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0322222222222222222222222222222222222222222222222222222222222222227576a914cccccccccccccccccccccccccccccccccccccccc88ac",
+  "expectedSerialized": "0100000001aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0700000000ffffffff010100000000000000904c74455354415445535f434152445f4e46545f5631a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0322222222222222222222222222222222222222222222222222222222222222227576a914cccccccccccccccccccccccccccccccccccccccc88ac00000000",
+  "expectedTxid": "b68ab24bf8adc092d24789ce7c63b9bfcff4810b469fb53b0e3a09e49568d0f1"
+}

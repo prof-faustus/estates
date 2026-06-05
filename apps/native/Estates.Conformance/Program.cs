@@ -102,4 +102,37 @@ if (File.Exists(txPath))
     if (tfail == 0) Console.WriteLine("PASS: native Tx serialization + txid are byte-for-byte the TS reference.");
 }
 
-return (fail == 0 && kfail == 0 && tfail == 0) ? 0 : 1;
+// ---- CARDNFT cross-validation: native card NFT output script + transfer tx must
+// equal the TS reference, and native verify accepts the true move / rejects a copy. -
+int cpass = 0, cfail = 0;
+string cnPath = Path.Combine(AppContext.BaseDirectory, "cardnft-vectors.json");
+if (File.Exists(cnPath))
+{
+    using var cdoc = JsonDocument.Parse(File.ReadAllText(cnPath));
+    var v = cdoc.RootElement;
+    string tableId = v.GetProperty("tableId").GetString()!, commitment = v.GetProperty("commitment").GetString()!;
+    string aliceCardPub = v.GetProperty("aliceCardPub").GetString()!, newCardPub = v.GetProperty("newCardPub").GetString()!;
+    byte[] bobPkh = Tx.FromHex(v.GetProperty("bobPkh").GetString()!);
+    var ao = v.GetProperty("aliceOutpoint");
+    var aliceOp = new OutpointN(ao.GetProperty("txid").GetString()!, ao.GetProperty("vout").GetInt64());
+
+    string gotScript = Tx.ToHex(CardNftN.CardNftScript(tableId, commitment, newCardPub, bobPkh));
+    var (tx, newOp) = CardNftN.BuildTransfer(aliceOp, tableId, commitment, newCardPub, bobPkh);
+    string gotSer = Tx.ToHex(Tx.Serialize(tx)), gotTxid = Tx.Txid(tx);
+
+    void Check(string what, bool ok) { if (ok) cpass++; else { Console.Error.WriteLine($"  [CARDNFT FAIL] {what}"); cfail++; } }
+    Check("output script bytes", gotScript == v.GetProperty("expectedScript").GetString());
+    Check("transfer serialized bytes", gotSer == v.GetProperty("expectedSerialized").GetString());
+    Check("transfer txid", gotTxid == v.GetProperty("expectedTxid").GetString());
+    // native verify ACCEPTS the true move it just built
+    Check("verify accepts the true move", CardNftN.VerifyCardTransfer(tx, aliceOp, aliceCardPub, tableId, commitment, newCardPub, 0, bobPkh).Ok);
+    // and REJECTS a copy that does not spend Alice's outpoint
+    var forged = tx with { Inputs = new[] { new TxInputN("00".PadLeft(64, '0'), 0, Array.Empty<byte>(), 0xffffffff) } };
+    Check("verify rejects a copy (no spend of Alice)", !CardNftN.VerifyCardTransfer(forged, aliceOp, aliceCardPub, tableId, commitment, newCardPub, 0, bobPkh).Ok);
+    _ = newOp;
+
+    Console.WriteLine($"Estates.Conformance (cardnft): {cpass} passed, {cfail} failed");
+    if (cfail == 0) Console.WriteLine("PASS: native card NFT output + transfer tx are byte-for-byte the TS reference; true move accepted, copy rejected.");
+}
+
+return (fail == 0 && kfail == 0 && tfail == 0 && cfail == 0) ? 0 : 1;
