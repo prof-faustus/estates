@@ -74,6 +74,9 @@ public static class TableMsg
                 string df = kind == "dcommit" ? "c" : "s";
                 sb.Append(",\"").Append(df).Append("\":"); Str(sb, msg.GetProperty(df).GetString()!);
                 break;
+            case "action":
+                sb.Append(",\"action\":").Append(ActionJson(StateJson.ParseAction(msg.GetProperty("action"))));
+                break;
             default:
                 throw new InvalidOperationException($"unknown message kind {kind}");
         }

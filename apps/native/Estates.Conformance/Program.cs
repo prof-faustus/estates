@@ -242,6 +242,22 @@ if (File.Exists(tmPath))
     if (mfail == 0) Console.WriteLine("PASS: native re-derives the canonical signed-frame bytes + verifies web table messages.");
 }
 
+// ---- REPLAY cross-validation: the native rebuild must replay a REAL game's
+// ordered relay log into the SAME canonical state hash as the web NetTable. ----
+int repfail = 0;
+string repPath = Path.Combine(AppContext.BaseDirectory, "replay-vectors.json");
+if (File.Exists(repPath))
+{
+    using var rdoc = JsonDocument.Parse(File.ReadAllText(repPath));
+    var rv = rdoc.RootElement;
+    var log = rv.GetProperty("log").EnumerateArray().Select(x => x.GetString()!).ToList();
+    string? got = GameReplay.ReplayStateHash(log);
+    string want = rv.GetProperty("stateHash").GetString()!;
+    bool ok = got == want;
+    Console.WriteLine($"Estates.Conformance (replay): {(ok ? $"PASS — native replayed {log.Count} frames (turn {rv.GetProperty("turnIndex").GetInt32()}) to the SAME state hash as the web" : $"FAIL — want {want[..16]}… got {got?[..16] ?? "null"}…")}");
+    if (!ok) repfail = 1;
+}
+
 // ---- BEACON cross-validation: native dice beacon (commit/reveal -> dice + chained
 // beacon) must equal the TS reference; a non-opening reveal is rejected. ----
 int bpass = 0, bfail = 0;
@@ -288,4 +304,4 @@ if (await relay.ReachableAsync())
 }
 else Console.WriteLine("Estates.Conformance (relay): skipped (relay not running on 127.0.0.1:8788)");
 
-return (fail == 0 && kfail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && gfail == 0 && mfail == 0 && bfail == 0 && ffail == 0 && rfail == 0) ? 0 : 1;
+return (fail == 0 && kfail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && gfail == 0 && mfail == 0 && bfail == 0 && ffail == 0 && repfail == 0 && rfail == 0) ? 0 : 1;
