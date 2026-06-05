@@ -132,6 +132,21 @@ importers:
         specifier: workspace:*
         version: link:../wallet
 
+  packages/cardnft:
+    dependencies:
+      '@estates/deck':
+        specifier: workspace:*
+        version: link:../deck
+      '@estates/onchain':
+        specifier: workspace:*
+        version: link:../onchain
+      '@estates/tx':
+        specifier: workspace:*
+        version: link:../tx
+      '@noble/hashes':
+        specifier: 1.5.0
+        version: 1.5.0
+
   packages/chainmap:
     dependencies:
       '@estates/bank':

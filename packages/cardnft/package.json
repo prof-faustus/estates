@@ -1,0 +1,16 @@
+{
+  "name": "@estates/cardnft",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ESTATES concealed cards as FULL 1-sat BSV NFTs: each card is a UTXO (outpoint + 1-sat <commitment> OP_DROP P2PKH output). A transfer SPENDS Alice's outpoint and creates Bob's successor 1-sat NFT, so Alice's card is on-chain DEAD (no copy). Bridges @estates/deck (concealment) + @estates/onchain (UTXO).",
+  "license": "MIT",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@estates/deck": "workspace:*",
+    "@estates/onchain": "workspace:*",
+    "@estates/tx": "workspace:*",
+    "@noble/hashes": "1.5.0"
+  },
+  "scripts": { "test": "node --test --experimental-strip-types \"test/**/*.test.ts\"" }
+}

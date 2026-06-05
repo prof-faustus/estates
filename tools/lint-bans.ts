@@ -17,7 +17,9 @@ import { fileURLToPath } from 'node:url';
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
 // Directories never scanned.
-const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'dist-app', 'build', '.vite', 'coverage']);
+// `bin`/`obj` are .NET build output (generated; contain absolute paths with the
+// repo's own folder name); `render-out` holds generated screenshots/profiles.
+const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'dist-app', 'build', '.vite', 'coverage', 'bin', 'obj', 'render-out']);
 
 // Files/paths sanctioned to mention banned tokens (the ban machinery itself,
 // the opcode table that must define them, the interpreter NO-OP, and tests
