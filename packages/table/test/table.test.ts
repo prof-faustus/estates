@@ -139,20 +139,27 @@ test('a separate simulated player (its own auto-play peer) joins over the relay 
   assert.equal(host.view().phase, 'playing');
   assert.equal(bot.view().phase, 'playing', 'the simulated peer follows the start over the relay');
 
-  // drive: the human plays seat 0; the bot peer auto-plays seat 1 via its own queue
-  for (let i = 0; i < 6000; i++) {
+  // drive: the human plays seat 0; the bot peer auto-plays seat 1 via its own
+  // queue. ROLLs are NOT submitted — they resolve through the dealerless beacon
+  // (both peers commit→reveal on each rebuild). Dice are random, so the game PATH
+  // varies; we only require the bot to genuinely take a turn and stay in lockstep.
+  for (let i = 0; i < 20000; i++) {
     const s = host.state!;
     if (s.phase === 'GAME_OVER') break;
-    if (s.current === 0) {
-      if (s.phase === 'AWAIT_ROLL') host.submit({ type: 'ROLL', dice: [3, 4] });
-      else if (s.phase === 'AWAIT_BUY') host.submit({ type: 'DECLINE' });
+    let acted = false;
+    if (s.current === 0 && s.phase !== 'AWAIT_ROLL') {        // host's non-roll actions
+      if (s.phase === 'AWAIT_BUY') host.submit({ type: 'DECLINE' });
       else if (s.phase === 'AWAIT_TAX') host.submit({ type: 'PAY_TAX', choice: 'flat' });
       else if (s.phase === 'AWAIT_POST') host.submit({ type: 'END_TURN' });
-    } else if (queue.length) { queue.shift()!(); }  // the bot's own scheduled move fires
-    else break; // no progress
-    if (s.turnIndex > 25) break;
+      acted = true;
+    }
+    while (queue.length) { queue.shift()!(); acted = true; }   // drain ALL queued bot moves
+    if (s.turnIndex >= 4) break;
+    if (!acted) break;                                         // AWAIT_ROLL auto-resolves; no progress ⇒ done
   }
-  assert.ok(host.state!.turnIndex >= 3, 'the table progressed with a separate simulated player');
+  // the bot (seat 1) completed at least one full turn (turnIndex reaches ≥2), or
+  // the game concluded — either way a separate simulated player drove the table.
+  assert.ok(host.state!.turnIndex >= 2 || host.state!.phase === 'GAME_OVER', 'a separate simulated player progressed the table');
   // both peers stay in lockstep — the bot is a real remote participant, not a local puppet
   assert.equal(JSON.stringify(host.state), JSON.stringify(bot.state), 'host and bot peer agree on state');
 });
