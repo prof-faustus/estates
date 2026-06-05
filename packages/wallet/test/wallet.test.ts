@@ -42,6 +42,7 @@ test('build + sign a real BIP-143 P2PKH tx — and the wallet SELF-VERIFIES it (
   // independently re-verify with the interpreter: the input must satisfy the prevout
   const prevout = { value: 100_000, script: serializeScript(p2pkh(w.key.pkh())) };
   const tx = deserializeTx(fromHex(hex));
+  assert(tx, 'the wallet emits canonically-parseable tx bytes');
   const chk = verifyTx(tx, [prevout]);
   assert.ok(chk.ok, `independently script-valid: ${chk.reason}`);
   assert.ok(chk.fee >= 256, 'a real, non-negative fee');
@@ -57,6 +58,7 @@ test('drainTo refunds the FULL balance (minus fee) to one address — nothing st
   const src = sourceTx(w.key.pkh(), total);
   const { hex } = w.buildRaw([{ sourceTxHex: src.hex, vout: 0, satoshis: total }], [{ satoshis: total - fee, script: serializeScript(p2pkh(addrPkh(funder))) }]);
   const tx = deserializeTx(fromHex(hex));
+  assert(tx, 'drain tx parses');
   assert.equal(tx.outputs.length, 1, 'exactly one output — the full refund, no change left behind');
   assert.equal(Number(tx.outputs[0]!.value), total - fee, 'the entire balance minus fee goes to the funder');
 });

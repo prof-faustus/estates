@@ -75,41 +75,85 @@ export function serializeTx(tx: Tx): Uint8Array {
   return concat(parts);
 }
 
-// ---- LE integer + varint readers -------------------------------------------
-function rdU32(b: Uint8Array, o: number): number { return (b[o]! | (b[o + 1]! << 8) | (b[o + 2]! << 16) | (b[o + 3]! << 24)) >>> 0; }
-function rdVarint(b: Uint8Array, o: number): [number, number] {
-  const f = b[o]!;
-  if (f < 0xfd) return [f, o + 1];
-  if (f === 0xfd) return [b[o + 1]! | (b[o + 2]! << 8), o + 3];
-  if (f === 0xfe) return [rdU32(b, o + 1), o + 5];
-  let v = 0n; for (let k = 0; k < 8; k++) v |= BigInt(b[o + 1 + k]!) << BigInt(8 * k); return [Number(v), o + 9];
+/**
+ * Bounded, fail-closed byte reader. EVERY read is bounds-checked against the
+ * buffer; on any out-of-bounds it sets `failed` and yields a zero value (it never
+ * reads past the end, never throws, never allocates beyond the buffer). The caller
+ * checks `failed` and returns null. (SANS/CWE: untrusted input; NASA: bounded.)
+ */
+class Reader {
+  private readonly b: Uint8Array;   // explicit field (strip-only mode forbids TS parameter properties)
+  private o = 0;
+  failed = false;
+  constructor(b: Uint8Array) { this.b = b; }
+  get rem(): number { return this.b.length - this.o; }
+  private need(n: number): boolean {
+    if (this.failed || !Number.isInteger(n) || n < 0 || n > this.rem) { this.failed = true; return false; }
+    return true;
+  }
+  u32(): number { if (!this.need(4)) return 0; const v = (this.b[this.o]! | (this.b[this.o + 1]! << 8) | (this.b[this.o + 2]! << 16) | (this.b[this.o + 3]! << 24)) >>> 0; this.o += 4; return v; }
+  u64(): number {
+    if (!this.need(8)) return 0;
+    let v = 0n; for (let k = 0; k < 8; k++) v |= BigInt(this.b[this.o + k]!) << BigInt(8 * k); this.o += 8;
+    if (v > BigInt(Number.MAX_SAFE_INTEGER)) { this.failed = true; return 0; }   // no silent precision loss
+    return Number(v);
+  }
+  /** CompactSize. Rejects non-canonical encodings and values past MAX_SAFE_INTEGER. */
+  varint(): number {
+    if (!this.need(1)) return 0;
+    const f = this.b[this.o++]!;
+    if (f < 0xfd) return f;
+    if (f === 0xfd) { if (!this.need(2)) return 0; const v = this.b[this.o]! | (this.b[this.o + 1]! << 8); this.o += 2; if (v < 0xfd) { this.failed = true; return 0; } return v; }
+    if (f === 0xfe) { const v = this.u32(); if (!this.failed && v <= 0xffff) { this.failed = true; } return v; }
+    const v = this.u64(); if (!this.failed && v <= 0xffffffff) { this.failed = true; } return v;
+  }
+  take(n: number): Uint8Array { if (!this.need(n)) return EMPTY; const s = this.b.slice(this.o, this.o + n); this.o += n; return s; }
 }
+const EMPTY = new Uint8Array(0);
+const MIN_INPUT_BYTES = 41;   // 32 prevTxid + 4 vout + 1 (empty scriptSig varint) + 4 sequence
+const MIN_OUTPUT_BYTES = 9;   // 8 value + 1 (empty script varint)
+const MAX_TX_BYTES = 0x10000000; // 256 MiB hard cap on a single tx
 
-/** Parse canonical tx bytes back into a Tx (inverse of serializeTx). Strict: throws
- *  on truncation. Used to re-verify a signed tx (e.g. against @estates/scriptvm). */
-export function deserializeTx(bytes: Uint8Array): Tx {
-  let o = 0;
-  const version = rdU32(bytes, o); o += 4;
-  let nIn: number; [nIn, o] = rdVarint(bytes, o);
-  const inputs = [];
+/**
+ * Parse canonical tx bytes back into a Tx (inverse of serializeTx). FAIL-CLOSED:
+ * returns `null` on ANY malformed/hostile input — never throws, never reads out of
+ * bounds, never runs an attacker-sized loop or allocation, and rejects trailing
+ * bytes. Counts are bounded by the minimum bytes each element needs, so a giant
+ * varint count cannot drive a long loop or a huge allocation.
+ */
+export function deserializeTx(bytes: Uint8Array): Tx | null {
+  if (!(bytes instanceof Uint8Array) || bytes.length < 10 || bytes.length > MAX_TX_BYTES) return null;
+  const r = new Reader(bytes);
+  const version = r.u32();
+
+  const nIn = r.varint();
+  if (r.failed || nIn > Math.floor(r.rem / MIN_INPUT_BYTES)) return null;   // can't fit that many inputs
+  const inputs: TxInput[] = [];
   for (let i = 0; i < nIn; i++) {
-    if (o + 36 > bytes.length) throw new Error('truncated input');
-    const prevTxid = toHex(reversed(bytes.slice(o, o + 32))); o += 32;
-    const prevVout = rdU32(bytes, o); o += 4;
-    let sl: number; [sl, o] = rdVarint(bytes, o);
-    const scriptSig = bytes.slice(o, o + sl); o += sl;
-    const sequence = rdU32(bytes, o); o += 4;
-    inputs.push({ prevTxid, prevVout, scriptSig, sequence });
+    const prev = r.take(32);
+    const prevVout = r.u32();
+    const sl = r.varint();
+    if (r.failed || sl > r.rem) return null;
+    const scriptSig = r.take(sl);
+    const sequence = r.u32();
+    if (r.failed) return null;
+    inputs.push({ prevTxid: toHex(reversed(prev)), prevVout, scriptSig, sequence });
   }
-  let nOut: number; [nOut, o] = rdVarint(bytes, o);
-  const outputs = [];
+
+  const nOut = r.varint();
+  if (r.failed || nOut > Math.floor(r.rem / MIN_OUTPUT_BYTES)) return null;
+  const outputs: TxOutput[] = [];
   for (let i = 0; i < nOut; i++) {
-    let val = 0n; for (let k = 0; k < 8; k++) val |= BigInt(bytes[o + k]!) << BigInt(8 * k); o += 8;
-    let sl: number; [sl, o] = rdVarint(bytes, o);
-    const script = bytes.slice(o, o + sl); o += sl;
-    outputs.push({ value: Number(val), script });
+    const value = r.u64();
+    const sl = r.varint();
+    if (r.failed || sl > r.rem) return null;
+    const script = r.take(sl);
+    if (r.failed) return null;
+    outputs.push({ value, script });
   }
-  const lockTime = rdU32(bytes, o);
+
+  const lockTime = r.u32();
+  if (r.failed || r.rem !== 0) return null;   // reject trailing garbage — exactly one canonical parse
   return { version, inputs, outputs, lockTime };
 }
 

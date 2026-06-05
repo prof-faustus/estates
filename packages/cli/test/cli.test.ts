@@ -29,6 +29,7 @@ test('table genesis: funds N seats + a covenant reserve, signed, real BSV tx', a
   assert.equal(built.reserve.satoshis, expectReserve);
 
   const tx = deserializeTx(fromHex(built.hex));
+  assert(tx, "genesis tx parses");
   assert.equal(tx.outputs.length, 5, '3 seats + reserve + change');
   for (let i = 0; i < 3; i++) assert.equal(Number(tx.outputs[i]!.value), P.scalars.starting_balance_per_seat);
   assert.equal(Number(tx.outputs[built.reserve.vout]!.value), expectReserve);
@@ -42,5 +43,7 @@ test('seat count is configurable', async () => {
   const funding = { txid: '', vout: 0, satoshis: 300_000_000, raw: sourceTxHex(funder.key.pkh(), 300_000_000) };
   const built = await buildTableTx({ network: 'testnet', funder, funding, seatCount: 6 });
   assert.equal(built.seats.length, 6);
-  assert.equal(deserializeTx(fromHex(built.hex)).outputs.length, 6 + 1 + 1, 'seats + reserve + change');
+  const tx2 = deserializeTx(fromHex(built.hex));
+  assert(tx2, "parses");
+  assert.equal(tx2.outputs.length, 6 + 1 + 1, 'seats + reserve + change');
 });

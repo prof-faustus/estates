@@ -57,3 +57,56 @@ test('a 1-sat NFT-style multi-output tx is deterministic + unique per content', 
   assert.notEqual(txid(mk(1000n)), txid(mk(1001n)), 'content-addressed');
   assert.equal(serializeTx(mk(1000n)).length > 0, true);
 });
+
+// ---- deserializeTx: round-trip + FAIL-CLOSED, FUZZ-PROOF (SANS/CWE + NASA) -----
+import { deserializeTx } from '../src/index.ts';
+
+test('deserializeTx round-trips a real tx and rejects trailing garbage', () => {
+  const tx: Tx = {
+    version: 1,
+    inputs: [{ prevTxid: 'ab'.repeat(32), prevVout: 2, scriptSig: new Uint8Array([1, 2, 3, 4]), sequence: 0xfffffffe }],
+    outputs: [{ value: 12345, script: new Uint8Array([0x76, 0xa9, 0x14]) }, { value: 0, script: new Uint8Array(0) }],
+    lockTime: 7,
+  };
+  const bytes = serializeTx(tx);
+  const back = deserializeTx(bytes);
+  assert(back, 'parses canonical bytes');
+  assert.equal(txHex(back), toHex(bytes), 're-serializes byte-for-byte (round-trip)');
+  // a single trailing byte must be rejected (exactly one canonical parse)
+  assert.equal(deserializeTx(new Uint8Array([...bytes, 0x00])), null, 'trailing garbage rejected');
+  // truncations at every length must fail-closed (null), never throw
+  for (let n = 0; n < bytes.length; n++) assert.equal(deserializeTx(bytes.slice(0, n)), null, `truncation @${n} rejected`);
+});
+
+test('deserializeTx is FUZZ-PROOF: never throws, never hangs, never OOB on hostile bytes', () => {
+  // adversarial seeds: huge varint counts/lengths that would drive unbounded
+  // loops/allocations in a naive parser; we assert the hardened parser handles them.
+  const adversarial = [
+    new Uint8Array([0x01, 0, 0, 0, 0xff, 255, 255, 255, 255, 255, 255, 255, 255]),  // version + nIn = 2^64-1
+    new Uint8Array([0x01, 0, 0, 0, 0xfe, 255, 255, 255, 255]),                       // nIn = 2^32-1
+    new Uint8Array([0x01, 0, 0, 0, 0x01, ...new Array(32).fill(0xaa), 0, 0, 0, 0, 0xff, 255, 255, 255, 255, 255, 255, 255, 255]), // 1 input, scriptSig len = 2^64-1
+    new Uint8Array(0), new Uint8Array(9), new Uint8Array(10).fill(0xff),
+  ];
+  let rng = 0x12345678 >>> 0;
+  const rand = (): number => { rng = (rng * 1103515245 + 12345) >>> 0; return rng; };
+  let ran = 0;
+  const run = (b: Uint8Array): void => {
+    ran++;
+    const t0 = Date.now();
+    let out: unknown;
+    assert.doesNotThrow(() => { out = deserializeTx(b); }, 'must never throw on hostile input');
+    assert.ok(Date.now() - t0 < 500, 'must not hang (bounded work)');
+    if (out !== null) {                                   // if it accepted, it MUST round-trip exactly
+      assert.equal(txHex(out as Tx), toHex(b), 'any accepted tx re-serializes identically');
+    }
+  };
+  for (const a of adversarial) run(a);
+  // 100k random byte strings of varied length — the parser must survive all of them
+  for (let i = 0; i < 100_000; i++) {
+    const len = rand() % 300;
+    const b = new Uint8Array(len);
+    for (let k = 0; k < len; k++) b[k] = rand() & 0xff;
+    run(b);
+  }
+  assert.ok(ran > 100_000, 'fuzzed >100k inputs with zero throws/hangs');
+});
