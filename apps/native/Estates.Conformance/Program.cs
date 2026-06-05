@@ -43,7 +43,38 @@ foreach (var v in vectors.EnumerateArray())
     }
 }
 
-Console.WriteLine($"\nEstates.Conformance: {pass} passed, {fail} failed of {pass + fail} vectors");
+Console.WriteLine($"\nEstates.Conformance (engine): {pass} passed, {fail} failed of {pass + fail} vectors");
 if (fail == 0) Console.WriteLine("PASS: the native C# engine is byte-for-byte identical to the audited TypeScript reference.");
 else Console.Error.WriteLine("FAIL: the native engine DIVERGES from the reference.");
-return fail == 0 ? 0 : 1;
+
+// ---- KEY-LIFECYCLE cross-validation: the native KeyLife must agree with the TS
+// reference on every manifest verdict (a TS-signed manifest verifies in C#). ----
+int kpass = 0, kfail = 0;
+string klPath = Path.Combine(AppContext.BaseDirectory, "keylife-vectors.json");
+if (File.Exists(klPath))
+{
+    using var kdoc = JsonDocument.Parse(File.ReadAllText(klPath));
+    var kr = kdoc.RootElement;
+    foreach (var v in kr.GetProperty("single").EnumerateArray())
+    {
+        string name = v.GetProperty("name").GetString()!;
+        bool expect = v.GetProperty("expectVerify").GetBoolean();
+        var m = KeyLife.Parse(v.GetProperty("manifest"));
+        bool got = KeyLife.VerifyManifest(m).Ok;
+        if (got == expect) kpass++;
+        else { Console.Error.WriteLine($"  [KEYLIFE FAIL] verifyManifest {name}: want {expect}, got {got}"); kfail++; }
+    }
+    foreach (var v in kr.GetProperty("crossGame").EnumerateArray())
+    {
+        string name = v.GetProperty("name").GetString()!;
+        bool expect = v.GetProperty("expectNoReuse").GetBoolean();
+        var ms = v.GetProperty("manifests").EnumerateArray().Select(KeyLife.Parse).ToList();
+        bool got = KeyLife.VerifyNoCrossGameReuse(ms).Ok;
+        if (got == expect) kpass++;
+        else { Console.Error.WriteLine($"  [KEYLIFE FAIL] noCrossGameReuse {name}: want {expect}, got {got}"); kfail++; }
+    }
+    Console.WriteLine($"Estates.Conformance (keylife): {kpass} passed, {kfail} failed");
+    if (kfail == 0) Console.WriteLine("PASS: native KeyLife agrees with the TS reference (TS-signed manifests verify in C#).");
+}
+
+return (fail == 0 && kfail == 0) ? 0 : 1;

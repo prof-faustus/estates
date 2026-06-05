@@ -1,0 +1,282 @@
+{
+  "single": [
+    {
+      "name": "valid-A",
+      "manifest": {
+        "gameId": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        "protocolVersion": "estates-1",
+        "paramsHash": "823a841a45e7f6782292848e15b24bb58b13f2397d6d8c0393b652529f7b94b7",
+        "entries": [
+          {
+            "purpose": "genesis",
+            "pub": "c77e30ca57374b84c394395ddc1093f7937b99b19dd01e5bde1a052f0653ba4b",
+            "keyType": "ed25519"
+          },
+          {
+            "purpose": "seat",
+            "pub": "62e28e8f3c075210150f764376aeb4d48adb2c9b18047a316e3ac893540109f0",
+            "keyType": "ed25519",
+            "seat": 0
+          },
+          {
+            "purpose": "seat",
+            "pub": "ce238a7d99f317626ea9d28bc2986a7daa80cecff1aa87d5f3574fa557e0b814",
+            "keyType": "ed25519",
+            "seat": 1
+          },
+          {
+            "purpose": "card",
+            "pub": "02a24894800d5698ef9722beef7051301f296dcbd87bdcac8ab7dff83bfe0078e3",
+            "keyType": "secp256k1"
+          }
+        ],
+        "authorityPub": "c77e30ca57374b84c394395ddc1093f7937b99b19dd01e5bde1a052f0653ba4b",
+        "sig": "df4b64ccf48195991c9fc58fbeb7e03b1c50eca84d965a9bd0cd2cb904558d65806e0c2a716d7a310c28c70eab745d7dc437ba2fec09ef8d7be1d3493a050e04"
+      },
+      "expectVerify": true
+    },
+    {
+      "name": "valid-B",
+      "manifest": {
+        "gameId": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+        "protocolVersion": "estates-1",
+        "paramsHash": "823a841a45e7f6782292848e15b24bb58b13f2397d6d8c0393b652529f7b94b7",
+        "entries": [
+          {
+            "purpose": "genesis",
+            "pub": "57ec556e82e265c895f39179b0d8cbe2c6c0910bf4876ff7d3cfcba595651a6c",
+            "keyType": "ed25519"
+          },
+          {
+            "purpose": "seat",
+            "pub": "4b40650d1ecf6d72f22ad9d38ced6166ef26956c694295b22b31e3ea9af4ed4e",
+            "keyType": "ed25519",
+            "seat": 0
+          },
+          {
+            "purpose": "seat",
+            "pub": "d7bdc308e00f351f1ab9e39b082c8ddf7bafbf49da778a5219f0b59f9a60b0ba",
+            "keyType": "ed25519",
+            "seat": 1
+          },
+          {
+            "purpose": "card",
+            "pub": "0278c0b8bc59bdb9270b91ef7aacd72c8312f7a8d195e5907d692559a7c33fe563",
+            "keyType": "secp256k1"
+          }
+        ],
+        "authorityPub": "57ec556e82e265c895f39179b0d8cbe2c6c0910bf4876ff7d3cfcba595651a6c",
+        "sig": "2a4f04b2ab1ff9b67147a8c7d5b36e0460f2fa795d52228003252062c18b0c838949cbb79c394f126e3f7d85bc927f7f5e7907c14a8523ca7b16717d01fb540f"
+      },
+      "expectVerify": true
+    },
+    {
+      "name": "tampered",
+      "manifest": {
+        "gameId": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        "protocolVersion": "estates-1",
+        "paramsHash": "823a841a45e7f6782292848e15b24bb58b13f2397d6d8c0393b652529f7b94b7",
+        "entries": [
+          {
+            "purpose": "genesis",
+            "pub": "c77e30ca57374b84c394395ddc1093f7937b99b19dd01e5bde1a052f0653ba4b",
+            "keyType": "ed25519"
+          },
+          {
+            "purpose": "seat",
+            "pub": "2a50070bd8d8a19794d83951be77f1d99812b6787ebba677856341a8e5966411",
+            "keyType": "ed25519",
+            "seat": 0
+          },
+          {
+            "purpose": "seat",
+            "pub": "ce238a7d99f317626ea9d28bc2986a7daa80cecff1aa87d5f3574fa557e0b814",
+            "keyType": "ed25519",
+            "seat": 1
+          },
+          {
+            "purpose": "card",
+            "pub": "02a24894800d5698ef9722beef7051301f296dcbd87bdcac8ab7dff83bfe0078e3",
+            "keyType": "secp256k1"
+          }
+        ],
+        "authorityPub": "c77e30ca57374b84c394395ddc1093f7937b99b19dd01e5bde1a052f0653ba4b",
+        "sig": "df4b64ccf48195991c9fc58fbeb7e03b1c50eca84d965a9bd0cd2cb904558d65806e0c2a716d7a310c28c70eab745d7dc437ba2fec09ef8d7be1d3493a050e04"
+      },
+      "expectVerify": false
+    },
+    {
+      "name": "wrong-gameId",
+      "manifest": {
+        "gameId": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+        "protocolVersion": "estates-1",
+        "paramsHash": "823a841a45e7f6782292848e15b24bb58b13f2397d6d8c0393b652529f7b94b7",
+        "entries": [
+          {
+            "purpose": "genesis",
+            "pub": "c77e30ca57374b84c394395ddc1093f7937b99b19dd01e5bde1a052f0653ba4b",
+            "keyType": "ed25519"
+          },
+          {
+            "purpose": "seat",
+            "pub": "62e28e8f3c075210150f764376aeb4d48adb2c9b18047a316e3ac893540109f0",
+            "keyType": "ed25519",
+            "seat": 0
+          },
+          {
+            "purpose": "seat",
+            "pub": "ce238a7d99f317626ea9d28bc2986a7daa80cecff1aa87d5f3574fa557e0b814",
+            "keyType": "ed25519",
+            "seat": 1
+          },
+          {
+            "purpose": "card",
+            "pub": "02a24894800d5698ef9722beef7051301f296dcbd87bdcac8ab7dff83bfe0078e3",
+            "keyType": "secp256k1"
+          }
+        ],
+        "authorityPub": "c77e30ca57374b84c394395ddc1093f7937b99b19dd01e5bde1a052f0653ba4b",
+        "sig": "df4b64ccf48195991c9fc58fbeb7e03b1c50eca84d965a9bd0cd2cb904558d65806e0c2a716d7a310c28c70eab745d7dc437ba2fec09ef8d7be1d3493a050e04"
+      },
+      "expectVerify": false
+    }
+  ],
+  "crossGame": [
+    {
+      "name": "fresh-AB",
+      "manifests": [
+        {
+          "gameId": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+          "protocolVersion": "estates-1",
+          "paramsHash": "823a841a45e7f6782292848e15b24bb58b13f2397d6d8c0393b652529f7b94b7",
+          "entries": [
+            {
+              "purpose": "genesis",
+              "pub": "c77e30ca57374b84c394395ddc1093f7937b99b19dd01e5bde1a052f0653ba4b",
+              "keyType": "ed25519"
+            },
+            {
+              "purpose": "seat",
+              "pub": "62e28e8f3c075210150f764376aeb4d48adb2c9b18047a316e3ac893540109f0",
+              "keyType": "ed25519",
+              "seat": 0
+            },
+            {
+              "purpose": "seat",
+              "pub": "ce238a7d99f317626ea9d28bc2986a7daa80cecff1aa87d5f3574fa557e0b814",
+              "keyType": "ed25519",
+              "seat": 1
+            },
+            {
+              "purpose": "card",
+              "pub": "02a24894800d5698ef9722beef7051301f296dcbd87bdcac8ab7dff83bfe0078e3",
+              "keyType": "secp256k1"
+            }
+          ],
+          "authorityPub": "c77e30ca57374b84c394395ddc1093f7937b99b19dd01e5bde1a052f0653ba4b",
+          "sig": "df4b64ccf48195991c9fc58fbeb7e03b1c50eca84d965a9bd0cd2cb904558d65806e0c2a716d7a310c28c70eab745d7dc437ba2fec09ef8d7be1d3493a050e04"
+        },
+        {
+          "gameId": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+          "protocolVersion": "estates-1",
+          "paramsHash": "823a841a45e7f6782292848e15b24bb58b13f2397d6d8c0393b652529f7b94b7",
+          "entries": [
+            {
+              "purpose": "genesis",
+              "pub": "57ec556e82e265c895f39179b0d8cbe2c6c0910bf4876ff7d3cfcba595651a6c",
+              "keyType": "ed25519"
+            },
+            {
+              "purpose": "seat",
+              "pub": "4b40650d1ecf6d72f22ad9d38ced6166ef26956c694295b22b31e3ea9af4ed4e",
+              "keyType": "ed25519",
+              "seat": 0
+            },
+            {
+              "purpose": "seat",
+              "pub": "d7bdc308e00f351f1ab9e39b082c8ddf7bafbf49da778a5219f0b59f9a60b0ba",
+              "keyType": "ed25519",
+              "seat": 1
+            },
+            {
+              "purpose": "card",
+              "pub": "0278c0b8bc59bdb9270b91ef7aacd72c8312f7a8d195e5907d692559a7c33fe563",
+              "keyType": "secp256k1"
+            }
+          ],
+          "authorityPub": "57ec556e82e265c895f39179b0d8cbe2c6c0910bf4876ff7d3cfcba595651a6c",
+          "sig": "2a4f04b2ab1ff9b67147a8c7d5b36e0460f2fa795d52228003252062c18b0c838949cbb79c394f126e3f7d85bc927f7f5e7907c14a8523ca7b16717d01fb540f"
+        }
+      ],
+      "expectNoReuse": true
+    },
+    {
+      "name": "reused-AB",
+      "manifests": [
+        {
+          "gameId": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+          "protocolVersion": "estates-1",
+          "paramsHash": "823a841a45e7f6782292848e15b24bb58b13f2397d6d8c0393b652529f7b94b7",
+          "entries": [
+            {
+              "purpose": "genesis",
+              "pub": "935c8a46757c7ff49b3d12055bd56f9732b636b3b3db44bb6025e4d07aa59921",
+              "keyType": "ed25519"
+            },
+            {
+              "purpose": "seat",
+              "pub": "c5e61353613db2cb0e8876d62a278aaf576f464cd6c85efce8a8ea6a28175d3f",
+              "keyType": "ed25519",
+              "seat": 0
+            },
+            {
+              "purpose": "seat",
+              "pub": "6d8aa7cb76f52ae4189dc61ef30436470ab90c1b46a2d01ec1fc13a436614036",
+              "keyType": "ed25519",
+              "seat": 1
+            },
+            {
+              "purpose": "card",
+              "pub": "0331883d59c7cf288793782e6245ea241e9bb39386f64e8fa7e8d3b78bed603285",
+              "keyType": "secp256k1"
+            }
+          ],
+          "authorityPub": "935c8a46757c7ff49b3d12055bd56f9732b636b3b3db44bb6025e4d07aa59921",
+          "sig": "7d0cd4631c2ba714119c1119269b6eb2bbaf1f67026c535a2d96f04a4f9cddbadc791910db4180b59a91de4f8a2011435985f5f0151461a69e6a057207884800"
+        },
+        {
+          "gameId": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+          "protocolVersion": "estates-1",
+          "paramsHash": "823a841a45e7f6782292848e15b24bb58b13f2397d6d8c0393b652529f7b94b7",
+          "entries": [
+            {
+              "purpose": "genesis",
+              "pub": "42e356f54d13d28f851171673f1328ffdb9985b099205621a153bcff340be998",
+              "keyType": "ed25519"
+            },
+            {
+              "purpose": "seat",
+              "pub": "c5e61353613db2cb0e8876d62a278aaf576f464cd6c85efce8a8ea6a28175d3f",
+              "keyType": "ed25519",
+              "seat": 0
+            },
+            {
+              "purpose": "seat",
+              "pub": "b7a69ec5a850784ff928458504c614065a885c16d27a807b35a6bb65b2fbe1a7",
+              "keyType": "ed25519",
+              "seat": 1
+            },
+            {
+              "purpose": "card",
+              "pub": "03f3716f8d8bf009a4c502174789365ff90d08fffd267890059431a8472c4094d9",
+              "keyType": "secp256k1"
+            }
+          ],
+          "authorityPub": "42e356f54d13d28f851171673f1328ffdb9985b099205621a153bcff340be998",
+          "sig": "4bb77447d3c0079633e93ff7afdca259d3b235a76fa68d2f2cfa9ce7589f0201980c844f6d643e8275e4c4a8082aa97c7332335a13972b9837a8d60705412a03"
+        }
+      ],
+      "expectNoReuse": false
+    }
+  ]
+}

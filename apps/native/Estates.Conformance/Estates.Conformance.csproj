@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <None Include="estates.v1.vectors.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="keylife-vectors.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
