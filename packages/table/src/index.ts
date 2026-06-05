@@ -504,6 +504,11 @@ export class NetTable {
           break;
         case 'action':
           if (started && state) {
+            // RAW DICE ARE NEVER ACCEPTED IN LIVE PLAY: a ROLL is produced ONLY by the
+            // dealerless commit→reveal beacon (tryRoll → verifyRollEntry). A signed
+            // `action:ROLL` — even from the active seat, even from a bot — is DROPPED
+            // here, so no single machine can ever choose its own dice.
+            if (m.action.type === 'ROLL') break;
             // LEAVE is signed by the leaving seat; every other action by the ACTIVE seat.
             const owner = m.action.type === 'LEAVE' ? m.action.seat : state.current;
             // apply is pure + total (returns {ok:false}); the try is defense-in-depth.
@@ -555,6 +560,10 @@ export class NetTable {
     if (!this.autoPlay) return;
     const s = this.state;
     if (!this.started || !s || s.phase === 'GAME_OVER' || !this.myTurn()) return;
+    // A bot NEVER emits a roll: in AWAIT_ROLL the dealerless beacon (maybeBeacon)
+    // drives this seat's commit→reveal, and rebuild() derives the dice. The bot only
+    // auto-plays NON-roll decisions, so it can never inject a locally chosen roll.
+    if (s.phase === 'AWAIT_ROLL') return;
     const key = `${s.turnIndex}:${s.phase}:${s.current}`;
     if (key === this.lastBotKey) return;
     this.lastBotKey = key;
@@ -568,10 +577,13 @@ export class NetTable {
   }
 }
 
-/** The optional simulated player's move (test-only; used only for bot-filled seats). */
+/** The optional simulated player's NON-ROLL move (test-only; bot-filled seats).
+ *  A bot NEVER rolls: in AWAIT_ROLL the dealerless beacon drives its commit→reveal
+ *  and rebuild() derives the dice, so calling this in AWAIT_ROLL is a contract
+ *  violation (it would be a locally chosen roll) and throws. */
 export function botAction(s: GameState): Action {
   switch (s.phase) {
-    case 'AWAIT_ROLL': return { type: 'ROLL', dice: rollDice() };
+    case 'AWAIT_ROLL': throw new Error('botAction: a bot must NEVER produce a roll — rolls come only from the beacon');
     case 'AWAIT_BUY': {
       const price = P.board[s.pendingTitle!]?.base_price ?? 0;
       return s.seats[s.current]!.balance - price >= 200 ? { type: 'BUY' } : { type: 'DECLINE' };
