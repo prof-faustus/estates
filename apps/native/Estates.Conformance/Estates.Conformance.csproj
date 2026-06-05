@@ -23,6 +23,7 @@
     <None Include="sign-vectors.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="tablemsg-vectors.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="beacon-vectors.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="frames-vectors.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

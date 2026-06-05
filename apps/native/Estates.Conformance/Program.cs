@@ -198,6 +198,27 @@ if (File.Exists(sgPath))
     if (gfail == 0) Console.WriteLine("PASS: native key derivation + Ed25519 match the TS reference (native player identity == web).");
 }
 
+// ---- FRAMES cross-validation: native re-derives the canonical signedBytes for
+// EVERY message kind and verifies the web signature (the replay's auth layer). ----
+int fpass = 0, ffail = 0;
+string frPath = Path.Combine(AppContext.BaseDirectory, "frames-vectors.json");
+if (File.Exists(frPath))
+{
+    using var fdoc = JsonDocument.Parse(File.ReadAllText(frPath));
+    foreach (var v in fdoc.RootElement.EnumerateArray())
+    {
+        string kind = v.GetProperty("kind").GetString()!;
+        var msg = v.GetProperty("msg");
+        string signPub = v.GetProperty("signPub").GetString()!;
+        bool bytesOk = Tx.ToHex(TableMsg.SignedBytes(msg, signPub)) == v.GetProperty("signedBytes").GetString();
+        bool verifyOk = TableMsg.VerifyFrame(msg, signPub, Tx.FromHex(v.GetProperty("sig").GetString()!));
+        if (bytesOk && verifyOk) fpass++;
+        else { Console.Error.WriteLine($"  [FRAMES FAIL] {kind}: bytes={bytesOk} verify={verifyOk}"); ffail++; }
+    }
+    Console.WriteLine($"Estates.Conformance (frames): {fpass} passed, {ffail} failed");
+    if (ffail == 0) Console.WriteLine("PASS: native re-derives signedBytes + verifies EVERY table message kind.");
+}
+
 // ---- TABLEMSG cross-validation: native re-derives the canonical signed-frame
 // bytes for a gameplay message and verifies the web's signature (so a native
 // client can authenticate the SAME table frames). ----
@@ -267,4 +288,4 @@ if (await relay.ReachableAsync())
 }
 else Console.WriteLine("Estates.Conformance (relay): skipped (relay not running on 127.0.0.1:8788)");
 
-return (fail == 0 && kfail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && gfail == 0 && mfail == 0 && bfail == 0 && rfail == 0) ? 0 : 1;
+return (fail == 0 && kfail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && gfail == 0 && mfail == 0 && bfail == 0 && ffail == 0 && rfail == 0) ? 0 : 1;
