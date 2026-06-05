@@ -38,3 +38,7 @@ apps/client-web/_serve.mjs
 
 # red-team / render-proof output (regenerable: node tools/redteam.mjs etc.)
 tools/render-out/
+
+# native build output
+apps/native/**/bin/
+apps/native/**/obj/
