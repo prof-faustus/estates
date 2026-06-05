@@ -7,7 +7,7 @@ import { hmac } from '@noble/hashes/hmac';
 import { paymentOutput, push, OP, serializeScript } from '@estates/onchain';
 import { covenantOutput } from '@estates/bank';
 import type { Tx } from '@estates/tx';
-import { verifyInput, verifyTx, sighash, compactToDer } from '../src/index.ts';
+import { verifyInput, verifyTx, sighash, compactToDer, parseScript } from '../src/index.ts';
 
 // enable sync ECDSA signing in @noble
 secp.etc.hmacSha256Sync = (k, ...m) => hmac(sha256, k, secp.etc.concatBytes(...m));
@@ -82,4 +82,42 @@ test('verifyTx rejects a NEGATIVE fee and a BANNED opcode in an output', () => {
   let tx2: Tx = { version: 1, inputs: [{ prevTxid: 'bb'.repeat(32), prevVout: 0, scriptSig: new Uint8Array(0), sequence: 0xffffffff }], outputs: [badOut], lockTime: 0 };
   tx2 = signP2pkh(tx2, 0, prevout, priv, pub);
   assert.equal(verifyTx(tx2, [prevout]).ok, false, 'banned opcode in output rejected');
+});
+
+// ---- the interpreter is fed UNTRUSTED scripts: verifyInput/verifyTx are total ----
+// A scriptSig and a prevout script are attacker-controlled bytes. The boundary
+// (verifyInput/verifyTx) must NEVER throw — every parse/exec failure is a clean
+// `{ok:false}`, never an exception, and never an unbounded loop.
+const mkTx = (scriptSig: Uint8Array): Tx => ({ version: 1, inputs: [{ prevTxid: 'ab'.repeat(32), prevVout: 0, scriptSig, sequence: 0xffffffff }], outputs: [payOut(500, new Uint8Array(20))], lockTime: 0 });
+
+test('verifyInput is FAIL-CLOSED on hostile scripts (truncated push, non-push sig, banned op, bad DER)', () => {
+  const pkhScript = paymentOutput(1000, new Uint8Array(20)).script;
+  for (const [sig, lock] of [
+    [new Uint8Array([0x05, 1, 2]), pkhScript],                       // truncated push (claims 5, has 2)
+    [new Uint8Array([OP.OP_PUSHDATA1, 0xff, 1]), pkhScript],         // truncated pushdata1
+    [new Uint8Array([OP.OP_PUSHDATA2, 0xff, 0xff, 1]), pkhScript],   // truncated pushdata2 (claims 65535)
+    [new Uint8Array([OP.OP_DUP]), pkhScript],                        // scriptSig not push-only
+    [new Uint8Array([0x47, ...new Uint8Array(0x47)]), pkhScript],    // push of garbage "sig+pub" → bad DER, no throw
+    [new Uint8Array(0), new Uint8Array([0x6a, 0x01, 0x01])],         // lock = OP_RETURN (banned) → caught, not thrown
+  ] as const) {
+    let out: unknown = 'unset';
+    assert.doesNotThrow(() => { out = verifyInput(mkTx(sig as Uint8Array), 0, { value: 1000, script: lock as Uint8Array }); });
+    assert.equal((out as { ok: boolean }).ok, false);
+  }
+  // parseScript itself throws by contract on a truncated push — the boundary catches it
+  assert.throws(() => parseScript(new Uint8Array([0x05, 1, 2])));
+});
+
+test('verifyInput / verifyTx are FUZZ-PROOF: 50k random scriptSig+prevout pairs never throw or hang', () => {
+  let rng = 0x7a1cf00d >>> 0; const rand = () => { rng = (rng * 1103515245 + 12345) >>> 0; return rng; };
+  const rbytes = (max: number) => { const n = rand() % max; const b = new Uint8Array(n); for (let k = 0; k < n; k++) b[k] = rand() & 0xff; return b; };
+  const t0 = Date.now();
+  for (let i = 0; i < 50_000; i++) {
+    const sig = rbytes(80); const lock = rbytes(80);
+    assert.doesNotThrow(() => {
+      verifyInput(mkTx(sig), 0, { value: 1000, script: lock });
+      verifyTx({ version: 1, inputs: [{ prevTxid: 'cd'.repeat(32), prevVout: 0, scriptSig: sig, sequence: 0 }], outputs: [{ value: 100, script: lock }], lockTime: 0 }, [{ value: 1000, script: lock }]);
+    });
+  }
+  assert.ok(Date.now() - t0 < 10000, 'bounded work — no hang');
 });
