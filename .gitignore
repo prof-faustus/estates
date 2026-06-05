@@ -43,3 +43,7 @@ tools/render-out/
 apps/native/**/bin/
 apps/native/**/obj/
 apps/native/nugetprobe/
+
+# native single-file exe (73MB binary) + publish output — build with: dotnet publish -c Release
+/estates.exe
+apps/native/**/publish/
