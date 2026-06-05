@@ -137,6 +137,7 @@ export interface MoveTx {
   readonly commit: TxOutput;        // the action, on chain
   readonly value: TxOutput[];       // sats paid to whoever gained (one-use keys)
   readonly nft: TxOutput[];         // re-minted title NFTs for changed titles
+  readonly nftTitles: number[];     // property ids parallel to `nft` — whose prior NFT output this move SPENDS (true move, not a copy)
   readonly conserved: boolean;      // sats in == sats out (none minted)
   readonly note: string;
 }
@@ -164,7 +165,8 @@ export function txForAction(
   const lost = seatDeltas.filter((d) => d.delta < 0).reduce((n, d) => n - d.delta, 0) + Math.max(0, -bankD);
   const conserved = gained === lost;
 
-  const nft: TxOutput[] = changedTitles(pre, post).map((id) => titleToNftOutput(post, id, ctx, oneUsePkh));
+  const nftTitles = changedTitles(pre, post);
+  const nft: TxOutput[] = nftTitles.map((id) => titleToNftOutput(post, id, ctx, oneUsePkh));
 
-  return { commit, value, nft, conserved, note: `${action.type}@t${turnIndex} seat${actor}` };
+  return { commit, value, nft, nftTitles, conserved, note: `${action.type}@t${turnIndex} seat${actor}` };
 }
