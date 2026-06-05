@@ -18,7 +18,8 @@
     "reproduce": "pnpm install --frozen-lockfile && node --experimental-strip-types tools/ci.ts && pnpm --filter @estates/conformance generate",
     "redteam": "node --experimental-strip-types tools/redteam.mjs",
     "proof:render": "node tools/render-check.mjs",
-    "proof:flow": "node tools/cdp-flow.mjs"
+    "proof:flow": "node tools/cdp-flow.mjs",
+    "web": "node tools/serve-web.mjs"
   },
   "devDependencies": {
     "@types/node": "22.19.19",
