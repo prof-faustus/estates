@@ -10,8 +10,9 @@
   "dependencies": {
     "@estates/params": "workspace:*",
     "@estates/bank": "workspace:*",
-    "@estates/wallet": "workspace:*",
-    "@bsv/sdk": "^1.4.0"
+    "@estates/onchain": "workspace:*",
+    "@estates/tx": "workspace:*",
+    "@estates/wallet": "workspace:*"
   },
   "scripts": {
     "test": "node --test --experimental-strip-types \"test/**/*.test.ts\""

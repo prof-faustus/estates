@@ -3,13 +3,17 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "ESTATES real BSV wallet: key→address, build/sign (BIP-143) real txs, and broadcast — regtest (node RPC), testnet/mainnet (WhatsOnChain/ARC). Bridges the engine/onchain model to live chain.",
+  "description": "ESTATES BSV wallet on the project's own @noble crypto (NO external SDK): secp256k1 keys, WIF, P2PKH addresses, BIP-143-signed P2PKH transactions, and node-RPC broadcast.",
   "license": "MIT",
   "exports": {
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@bsv/sdk": "^1.4.0"
+    "@noble/secp256k1": "2.1.0",
+    "@noble/hashes": "1.5.0",
+    "@estates/tx": "workspace:*",
+    "@estates/onchain": "workspace:*",
+    "@estates/scriptvm": "workspace:*"
   },
   "scripts": {
     "test": "node --test --experimental-strip-types \"test/**/*.test.ts\""

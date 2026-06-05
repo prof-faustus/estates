@@ -75,6 +75,44 @@ export function serializeTx(tx: Tx): Uint8Array {
   return concat(parts);
 }
 
+// ---- LE integer + varint readers -------------------------------------------
+function rdU32(b: Uint8Array, o: number): number { return (b[o]! | (b[o + 1]! << 8) | (b[o + 2]! << 16) | (b[o + 3]! << 24)) >>> 0; }
+function rdVarint(b: Uint8Array, o: number): [number, number] {
+  const f = b[o]!;
+  if (f < 0xfd) return [f, o + 1];
+  if (f === 0xfd) return [b[o + 1]! | (b[o + 2]! << 8), o + 3];
+  if (f === 0xfe) return [rdU32(b, o + 1), o + 5];
+  let v = 0n; for (let k = 0; k < 8; k++) v |= BigInt(b[o + 1 + k]!) << BigInt(8 * k); return [Number(v), o + 9];
+}
+
+/** Parse canonical tx bytes back into a Tx (inverse of serializeTx). Strict: throws
+ *  on truncation. Used to re-verify a signed tx (e.g. against @estates/scriptvm). */
+export function deserializeTx(bytes: Uint8Array): Tx {
+  let o = 0;
+  const version = rdU32(bytes, o); o += 4;
+  let nIn: number; [nIn, o] = rdVarint(bytes, o);
+  const inputs = [];
+  for (let i = 0; i < nIn; i++) {
+    if (o + 36 > bytes.length) throw new Error('truncated input');
+    const prevTxid = toHex(reversed(bytes.slice(o, o + 32))); o += 32;
+    const prevVout = rdU32(bytes, o); o += 4;
+    let sl: number; [sl, o] = rdVarint(bytes, o);
+    const scriptSig = bytes.slice(o, o + sl); o += sl;
+    const sequence = rdU32(bytes, o); o += 4;
+    inputs.push({ prevTxid, prevVout, scriptSig, sequence });
+  }
+  let nOut: number; [nOut, o] = rdVarint(bytes, o);
+  const outputs = [];
+  for (let i = 0; i < nOut; i++) {
+    let val = 0n; for (let k = 0; k < 8; k++) val |= BigInt(bytes[o + k]!) << BigInt(8 * k); o += 8;
+    let sl: number; [sl, o] = rdVarint(bytes, o);
+    const script = bytes.slice(o, o + sl); o += sl;
+    outputs.push({ value: Number(val), script });
+  }
+  const lockTime = rdU32(bytes, o);
+  return { version, inputs, outputs, lockTime };
+}
+
 /** txid in DISPLAY byte order (reverse of hash256(serialized)). */
 export function txid(tx: Tx): string { return toHex(reversed(hash256(serializeTx(tx)))); }
 /** Raw serialized tx as hex. */

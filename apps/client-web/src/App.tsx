@@ -72,30 +72,18 @@ export function App() {
 
   // Open a NEW WINDOW that is a SEPARATE simulated player joined to THIS table.
   // It connects over the relay socket like any remote human and auto-plays only
-  // its own seat. Desktop → a native Tauri window; web → a popup. You watch it.
-  async function spawnBotWindow() {
+  // its own seat (a browser popup window). You watch it.
+  function spawnBotWindow() {
     const addr = tableAddrRef.current;
     if (!addr) return;
     const net = v?.network ?? network;
     const botName = `bot-${Math.random().toString(36).slice(2, 6)}`;
     const url = `index.html?autoplay=1&table=${encodeURIComponent(addr)}&network=${net}&name=${botName}`;
-    if (typeof (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== 'undefined') {
-      const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
-      new WebviewWindow(`bot-${Date.now()}`, { url, title: `ESTATES — ${botName} (simulated player)`, width: 1100, height: 880 });
-    } else {
-      window.open(url, '_blank', 'width=1100,height=880');
-    }
+    window.open(url, '_blank', 'width=1100,height=880');
   }
 
-  // Close THIS window (a bot's own window) — native Tauri window or browser tab.
-  async function closeSelf() {
-    try {
-      if (typeof (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== 'undefined') {
-        const { getCurrentWindow } = await import('@tauri-apps/api/window');
-        await getCurrentWindow().close();
-      } else { window.close(); }
-    } catch { /* ignore */ }
-  }
+  // Close THIS window (a bot's own window).
+  function closeSelf() { try { window.close(); } catch { /* ignore */ } }
 
   // If launched with ?autoplay=1&table=…, THIS window is a simulated player:
   // auto-enter, connect to the given table over the relay, and claim our own seat.
@@ -131,17 +119,6 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // A bot window ENDS when its game ends: once GAME_OVER, close after a short beat
-  // so simulated players don't pile up across games ("bots not ending").
-  useEffect(() => {
-    if (!autoPlay) return;
-    if (v?.state?.phase === 'GAME_OVER') {
-      const id = setTimeout(() => { void closeSelf(); }, 4000);
-      return () => clearTimeout(id);
-    }
-    return undefined;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoPlay, v?.state?.phase]);
   function returnToLobby() {
     tableRef.current?.leaveGame();   // leaving mid-game gives your money + assets to the leading player
     tableRef.current?.disconnect();  // STOP the relay loops — else they pile up game-after-game and hang the app
@@ -151,6 +128,18 @@ export function App() {
   const t = tableRef.current;
   const v: TableView | null = t ? t.view() : null;
   const act = (a: Action) => t?.submit(a);
+
+  // A bot window ENDS when its game ends: once GAME_OVER, close after a short beat
+  // so simulated players don't pile up across games. (Declared AFTER `v` — its dep
+  // array reads v, which must already be initialized; otherwise it TDZ-crashes the
+  // whole render to a blank screen.)
+  const gameOverPhase = v?.state?.phase === 'GAME_OVER';
+  useEffect(() => {
+    if (!autoPlay || !gameOverPhase) return undefined;
+    const id = setTimeout(() => { closeSelf(); }, 4000);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoPlay, gameOverPhase]);
   const walletNet: Network = (v?.network ?? network) as Network;
 
   // ---------- ENTER ----------

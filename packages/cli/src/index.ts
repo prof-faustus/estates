@@ -6,13 +6,12 @@
  * only by a rules-legal payout — no trusted banker). The network is the user's
  * choice: a regtest node (JSON-RPC), testnet, or mainnet (guarded).
  */
-import { Transaction, P2PKH, LockingScript } from '@bsv/sdk';
 import { loadParams } from '@estates/params';
 import { covenantOutput, rulesHash } from '@estates/bank';
-import { Wallet, rpcBroadcast, type Network } from '@estates/wallet';
+import { p2pkh, serializeScript } from '@estates/onchain';
+import { Wallet, rpcBroadcast, type Network, type Utxo } from '@estates/wallet';
 
 const P = loadParams();
-const bytesToHex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
 
 export interface NodeRpc { url: string; user: string; pass: string; }
 
@@ -74,25 +73,20 @@ export async function buildTableTx(opts: TableOpts): Promise<TableTx> {
   const reserve = P.scalars.salary * (opts.reserveSalaryCap ?? 200);
 
   const seats: TableSeat[] = [];
-  const tx = new Transaction();
-  tx.addInput({
-    sourceTransaction: Transaction.fromHex(opts.funding.raw),
-    sourceOutputIndex: opts.funding.vout,
-    unlockingScriptTemplate: new P2PKH().unlock(opts.funder.key),
-  });
+  const outputs: { satoshis: number; script: Uint8Array }[] = [];
   for (let i = 0; i < opts.seatCount; i++) {
     const w = Wallet.random(opts.network);
     seats.push({ wif: w.key.toWif(), address: w.address, startingBalance });
-    tx.addOutput({ lockingScript: new P2PKH().lock(w.address), satoshis: startingBalance });
+    outputs.push({ satoshis: startingBalance, script: serializeScript(p2pkh(w.key.pkh())) });   // seat P2PKH
   }
-  const covScriptHex = bytesToHex(covenantOutput(reserve, rulesHash()).script);
   const reserveVout = opts.seatCount;
-  tx.addOutput({ lockingScript: LockingScript.fromHex(covScriptHex), satoshis: reserve });
-  tx.addOutput({ lockingScript: new P2PKH().lock(opts.funder.address), change: true });
-  await tx.fee();
-  await tx.sign();
+  outputs.push({ satoshis: reserve, script: covenantOutput(reserve, rulesHash()).script });      // bank covenant reserve
 
-  return { network: opts.network, hex: tx.toHex(), genesisTxid: tx.id('hex') as string, seats, reserve: { satoshis: reserve, vout: reserveVout } };
+  // spend the funder's UTXO → seat outputs + covenant + change (BIP-143, native, no SDK)
+  const utxo: Utxo = { sourceTxHex: opts.funding.raw, vout: opts.funding.vout, satoshis: opts.funding.satoshis };
+  const { hex, txid } = opts.funder.buildRaw([utxo], outputs);
+
+  return { network: opts.network, hex, genesisTxid: txid, seats, reserve: { satoshis: reserve, vout: reserveVout } };
 }
 
 /** Build the table genesis AND broadcast it to the chosen network. */

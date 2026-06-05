@@ -8,7 +8,7 @@
  * satoshis (ordinary P2PKH outputs) — never a token. No data-output opcode, no
  * locktime-verify opcodes; state is pushdata in live script, timing is tx-level.
  */
-import { createHash } from 'node:crypto';
+import { sha256 } from '@noble/hashes/sha256';
 import { OP, op, push, p2pkh, serializeScript, scriptHex, containsOpReturn, type ScriptItem } from './script.ts';
 
 export * from './script.ts';
@@ -122,7 +122,10 @@ export function paymentOutput(satoshis: number, ownerPkh: Uint8Array): TxOutput 
 
 /** Compute the game tag = SHA-256(gameId ‖ "ESTATES" ‖ kind). Domain-separated. */
 export function gameTag(gameId: Uint8Array, kind: NftKind): Uint8Array {
-  return new Uint8Array(createHash('sha256').update(gameId).update('ESTATES').update(kind).digest());
+  const te = new TextEncoder();
+  const m = new Uint8Array(gameId.length + 7 + kind.length);
+  m.set(gameId, 0); m.set(te.encode('ESTATES'), gameId.length); m.set(te.encode(kind), gameId.length + 7);
+  return sha256(m);
 }
 
 /**
