@@ -11,7 +11,7 @@ import { genCardKey, mintCard, type CardFace } from '@estates/deck';
 import { txid } from '@estates/tx';
 import {
   mintCardNft, transferCardNft, verifyCardTransfer, isLiveCard, opKey,
-  verifyTeeDeletionQuote, cardNftOutput, verifyCardCustodyChain, type Outpoint, type CardNft,
+  verifyTeeDeletionQuote, cardNftOutput, verifyCardCustodyChain, deckToNfts, verifyDeckNfts, type Outpoint, type CardNft,
 } from '../src/index.ts';
 
 const TABLE = 'a1'.repeat(32);
@@ -140,4 +140,21 @@ test('the custody chain REJECTS a transfer that does not spend the current live 
   // forge t1 to spend some unrelated outpoint
   const forged = { ...t1, spent: { txid: '00'.repeat(32), vout: 9 } };
   assert.equal(verifyCardCustodyChain(nft, [forged]).ok, false);
+});
+
+test('a whole concealed DECK becomes a set of real 1-sat card NFTs (unique UTXOs + keys)', async () => {
+  const { mintDeck } = await import('@estates/deck');
+  const dealer = genCardKey();
+  const dealerPkh = hash160(dealer.pub);
+  const faces: CardFace[] = Array.from({ length: 8 }, (_, i) => ({ kind: 'FATE', id: i }));
+  const minted = mintDeck(TABLE, faces, dealer.pub, new Uint8Array(32).fill(3));
+  const outpoints: Outpoint[] = minted.cards.map((_, i) => ({ txid: 'cc'.repeat(32), vout: i }));
+  const nfts = deckToNfts(minted.cards, dealerPkh, outpoints);
+  assert.equal(nfts.length, 8);
+  assert.ok(verifyDeckNfts(nfts, TABLE).ok, 'every card is a 1-sat NFT, unique UTXO + key');
+  // a deck with a duplicated outpoint or key is rejected
+  assert.equal(verifyDeckNfts([nfts[0]!, { ...nfts[1]!, outpoint: nfts[0]!.outpoint }], TABLE).ok, false);
+  assert.equal(verifyDeckNfts([nfts[0]!, { ...nfts[1]!, cardPub: nfts[0]!.cardPub }], TABLE).ok, false);
+  // wrong table rejected
+  assert.equal(verifyDeckNfts(nfts, 'b2'.repeat(32)).ok, false);
 });

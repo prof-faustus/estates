@@ -64,6 +64,34 @@ export function mintCardNft(card: ConcealedCard, ownerPkh: Uint8Array, outpoint:
   };
 }
 
+/**
+ * Pair a whole concealed deck (from @estates/deck.mintDeck) with its on-chain
+ * 1-sat NFT outpoints — so EVERY card in the deck is a real UTXO, not just one.
+ * `outpoints[i]` is the genesis outpoint of `cards[i]`. Throws if lengths differ.
+ */
+export function deckToNfts(cards: readonly ConcealedCard[], ownerPkh: Uint8Array, outpoints: readonly Outpoint[]): CardNft[] {
+  if (cards.length !== outpoints.length) throw new Error('deckToNfts: one outpoint per card required');
+  return cards.map((c, i) => mintCardNft(c, ownerPkh, outpoints[i]!));
+}
+
+export interface DeckCheck { readonly ok: boolean; readonly reason: string }
+/** Verify a deck of card NFTs: every card is a 1-sat NFT, table-bound, with a
+ *  UNIQUE outpoint and a UNIQUE one-use key (no two cards share a UTXO or a key). */
+export function verifyDeckNfts(cards: readonly CardNft[], expectedTableId: string): DeckCheck {
+  if (!Array.isArray(cards) || cards.length === 0) return { ok: false, reason: 'empty deck' };
+  const ops = new Set<string>(); const keys = new Set<string>();
+  for (let i = 0; i < cards.length; i++) {
+    const c = cards[i]!;
+    if (c.tableId !== expectedTableId) return { ok: false, reason: `card ${i} bound to a different table` };
+    if (c.satoshis !== NFT_SATS) return { ok: false, reason: `card ${i} is not a 1-sat NFT` };
+    const ok = opKey(c.outpoint);
+    if (ops.has(ok)) return { ok: false, reason: `card ${i} shares a UTXO with another card` };
+    if (keys.has(c.cardPub)) return { ok: false, reason: `card ${i} shares a one-use key with another card` };
+    ops.add(ok); keys.add(c.cardPub);
+  }
+  return { ok: true, reason: `verified ${cards.length} card NFTs: 1-sat, table-bound, unique UTXOs + keys` };
+}
+
 export interface CardTransfer {
   readonly tx: Tx;                 // spends Alice's card UTXO, creates Bob's
   readonly newCard: CardNft;       // Bob's successor NFT (live)
