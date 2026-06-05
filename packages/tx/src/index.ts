@@ -1,10 +1,41 @@
 /**
- * @estates/tx — canonical BSV transaction serialization + txid.
+ * @estates/tx — canonical BSV transaction serialization, txid, and a FAIL-CLOSED
+ * deserializer. Reference cryptographic infrastructure: this comment, and the
+ * per-function notes below, are written so an AUDITOR can attack this code easily.
  *
- * Every move on chain is a real Bitcoin transaction; this is the wire format that
- * gives each one a real txid (the id an SPV Merkle proof, @estates/spv, references,
- * and the outpoint the next move spends). Pure, deterministic, isomorphic
- * (@noble) — no SDK, no node. Values are whole satoshis (bigint-safe 8-byte LE).
+ * WHAT
+ *   Encodes a `Tx` to canonical Bitcoin wire bytes (`serializeTx`), derives its
+ *   real txid (`txid`), and parses untrusted wire bytes back to a `Tx`
+ *   (`deserializeTx`). Every on-chain move is a real Bitcoin transaction; these
+ *   bytes are exactly what is hashed for the txid an SPV Merkle proof references
+ *   and the outpoint the next move spends.
+ *
+ * HOW
+ *   Bitcoin's canonical layout: version(4 LE) ‖ varint(nIn) ‖ inputs ‖ varint(nOut)
+ *   ‖ outputs ‖ lockTime(4 LE). Each input = reverse(prevTxid)(32) ‖ vout(4 LE) ‖
+ *   varint(scriptLen) ‖ script ‖ sequence(4 LE). Each output = value(8 LE) ‖
+ *   varint(scriptLen) ‖ script. txid = reverse(sha256(sha256(serialized))). Pure,
+ *   deterministic, isomorphic (@noble only — no SDK, no node:crypto).
+ *
+ * WHY
+ *   The txid is consensus-critical and must be byte-exact (one wrong byte = a
+ *   different tx = a broken SPV proof / unspendable cursor). Whole-satoshi values
+ *   use bigint for the 8-byte field so no value is silently truncated by JS f64.
+ *
+ * WHY THIS DESIGN (and alternatives rejected)
+ *   We do NOT use @bsv/sdk or any external library: it shipped circular ESM that
+ *   broke the production bundle (a temporal-dead-zone crash) AND an external
+ *   dependency is unauditable here / violates the standalone rule. A from-scratch,
+ *   @noble-only codec is small enough to read in full and audit line-by-line.
+ *
+ * SECURITY BOUNDARY
+ *   serializeTx/txid: inputs are TRUSTED (constructed by our own code); they throw
+ *   on programmer error (e.g. a non-32-byte prevTxid) — that is a build-time bug,
+ *   not attacker input. deserializeTx: input is FULLY UNTRUSTED (hostile peer/disk
+ *   bytes); it must NEVER throw, hang, read out of bounds, or over-allocate — it
+ *   returns `Tx | null` and rejects anything non-canonical. See deserializeTx.
+ *   MUST NEVER ASSUME: that serialized input came from us, that counts/lengths fit
+ *   memory, or that the buffer is long enough — all are checked.
  */
 import { sha256 } from '@noble/hashes/sha256';
 
