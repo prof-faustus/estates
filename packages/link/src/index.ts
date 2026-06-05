@@ -88,11 +88,14 @@ export function listen(port: number, identity: Identity, onPeer: (link: PeerLink
         if (buf.length < 4 + len) return;
         // a malformed handshake must NOT throw out of the socket handler (#13):
         // destroy only the offending socket.
-        let msg: { t: string; hello: Hello };
-        try { msg = JSON.parse(buf.subarray(4, 4 + len).toString('utf8')) as { t: string; hello: Hello }; }
+        // a malformed handshake (non-JSON, or valid JSON that is null/array/scalar)
+        // must NOT throw out of the socket handler (#13) — `respond` is total, but
+        // guard the `.t` access so a JSON `null` body can't crash the listener.
+        let msg: { t?: unknown; hello?: Hello } | null;
+        try { msg = JSON.parse(buf.subarray(4, 4 + len).toString('utf8')) as { t?: unknown; hello?: Hello } | null; }
         catch { sock.destroy(); return; }
         buf = buf.subarray(4 + len);
-        const r = msg.t === 'hello' ? respond(identity, msg.hello) : null;
+        const r = (msg && typeof msg === 'object' && msg.t === 'hello') ? respond(identity, msg.hello as Hello) : null;
         if (!r) { sock.destroy(); return; }
         writeMsg(sock, { t: 'ack', ack: r.ack });
         handshaken = true;
@@ -122,11 +125,12 @@ export function connect(host: string, port: number, identity: Identity): Promise
         const len = buf.readUInt32BE(0);
         if (len > MAX_FRAME) { sock.destroy(); reject(new Error('oversized handshake frame')); return; } // (#12)
         if (buf.length < 4 + len) return;
-        let msg: { t: string; ack: Ack };
-        try { msg = JSON.parse(buf.subarray(4, 4 + len).toString('utf8')) as { t: string; ack: Ack }; }
+        let msg: { t?: unknown; ack?: Ack } | null;
+        try { msg = JSON.parse(buf.subarray(4, 4 + len).toString('utf8')) as { t?: unknown; ack?: Ack } | null; }
         catch { sock.destroy(); reject(new Error('malformed handshake')); return; }  // (#13)
         buf = buf.subarray(4 + len);
-        const session = msg.t === 'ack' ? complete(pending, msg.ack) : null;
+        // guard `.t` so a JSON `null`/scalar Ack from a hostile listener can't crash the dialer.
+        const session = (msg && typeof msg === 'object' && msg.t === 'ack') ? complete(pending, msg.ack as Ack) : null;
         if (!session) { sock.destroy(); reject(new Error('handshake failed')); return; }
         sock.removeListener('data', onData);
         const link = new PeerLink(sock, session);

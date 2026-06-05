@@ -1,7 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bytesToHex } from '@noble/hashes/utils';
+import * as secp from '@noble/secp256k1';
+import { sha256 } from '@noble/hashes/sha256';
+import { hmac } from '@noble/hashes/hmac';
+import { bytesToHex, hexToBytes, concatBytes } from '@noble/hashes/utils';
 import { genIdentity, initiate, respond, complete, seal, openFrame, type Session } from '../src/index.ts';
+
+secp.etc.hmacSha256Sync = (k: Uint8Array, ...m: Uint8Array[]): Uint8Array => hmac(sha256, k, secp.etc.concatBytes(...m));
 
 const td = (b: Uint8Array | null) => (b ? new TextDecoder().decode(b) : null);
 const te = (s: string) => new TextEncoder().encode(s);
@@ -64,4 +69,45 @@ test('a frame cannot be opened with the wrong session key', () => {
   const { a } = handshake();
   const other = handshake();
   assert.equal(openFrame(other.a, seal(a, te('secret'))), null);
+});
+
+// ---- totality of respond/complete: a hostile handshake never throws -----------
+// Reconstruct the exact protocol signing so we can forge a Hello whose signature
+// is VALID for our idPub but whose ephPub is an OFF-CURVE point. A valid identity
+// signature does not prove ephPub is a curve point; the ECDH inside respond used
+// to throw "point not on curve" → an unauthenticated remote crash (DoS). respond
+// must now return null, not throw.
+const enc = new TextEncoder();
+const H = (...p: Uint8Array[]) => sha256(concatBytes(...p));
+const proSign = (msg: Uint8Array, priv: Uint8Array) => secp.sign(msg, priv).toCompactRawBytes();
+
+test('a VALIDLY-SIGNED hello carrying an OFF-CURVE ephemeral key returns null, never throws (remote-DoS #1)', () => {
+  const eve = genIdentity(); const bob = genIdentity();
+  const offCurveEph = new Uint8Array(33); offCurveEph[0] = 0x02; offCurveEph.fill(0xff, 1); // x = 0xff..ff: not on secp256k1
+  const nonce = new Uint8Array(32).fill(7);
+  const sig = proSign(H(enc.encode('hello'), offCurveEph, nonce, eve.signPub), eve.priv); // a REAL signature by Eve
+  const hello = { idPub: bytesToHex(eve.pub), ephPub: bytesToHex(offCurveEph), nonce: bytesToHex(nonce), signPub: bytesToHex(eve.signPub), sig: bytesToHex(sig) };
+  let out: unknown = 'unset';
+  assert.doesNotThrow(() => { out = respond(bob, hello); });
+  assert.equal(out, null, 'off-curve ephemeral key is rejected, not a crash');
+});
+
+test('respond/complete are TOTAL: null/array/scalar/garbage handshakes never throw', () => {
+  const bob = genIdentity(); const { pending } = initiate(genIdentity());
+  for (const bad of [null, undefined, 42, 'x', [], {}, { idPub: 1 }, { idPub: 'zz', ephPub: 'zz', nonce: 'zz', signPub: 'zz', sig: 'zz' }, { idPub: '00', ephPub: '00', nonce: '00', signPub: '00'.repeat(32), sig: '00' }]) {
+    assert.doesNotThrow(() => { assert.equal(respond(bob, bad as any), null); });
+    assert.doesNotThrow(() => { assert.equal(complete(pending, bad as any), null); });
+  }
+});
+
+test('respond/complete are FUZZ-PROOF: 50k random hellos never throw', () => {
+  const bob = genIdentity(); const { pending } = initiate(genIdentity());
+  let rng = 0x2f6e15a3 >>> 0; const rand = () => { rng = (rng * 1103515245 + 12345) >>> 0; return rng; };
+  const rhex = () => { const n = rand() % 80; let s = ''; for (let i = 0; i < n; i++) s += (rand() & 0xff).toString(16).padStart(2, '0'); return s; };
+  const t0 = Date.now();
+  for (let i = 0; i < 50_000; i++) {
+    const h = { idPub: rhex(), ephPub: rhex(), nonce: rhex(), signPub: rhex(), sig: rhex() };
+    assert.doesNotThrow(() => { respond(bob, h as any); complete(pending, h as any); });
+  }
+  assert.ok(Date.now() - t0 < 15000, 'bounded work — no hang');
 });

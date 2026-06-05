@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { loadParams } from '@estates/params';
 import type { GameState, Action } from '@estates/engine';
 import { recordGame, type GameTranscript } from '@estates/audit';
-import { InMemoryRelay, PeerSession, broadcast } from '../src/index.ts';
+import { InMemoryRelay, PeerSession, broadcast, decodeEnvelope } from '../src/index.ts';
 
 const P = loadParams();
 const genesis = { network: 'regtest' as const, seatCount: 3, bankReserve: 1_000_000 };
@@ -83,4 +83,57 @@ test('the relay is opaque: it stores/fans out bytes and never interprets them', 
   const seq = relay.publish(new TextEncoder().encode('arbitrary opaque bytes'));
   assert.equal(seq, 0);
   assert.equal(relay.history().length, 1);
+});
+
+// ---- relay is UNTRUSTED: ingest/decodeEnvelope are total + fuzz-proof ----------
+const NE = (o: unknown) => new TextEncoder().encode(JSON.stringify(o));
+const H64 = 'ab'.repeat(32);
+
+test('decodeEnvelope accepts a valid envelope and rejects hostile payloads', () => {
+  assert.ok(decodeEnvelope(NE({ seq: 0, entry: { kind: 'action', action: { type: 'END_TURN' } } })));
+  assert.ok(decodeEnvelope(NE({ seq: 5, entry: { kind: 'roll', commits: [{ seat: 0, c: H64 }], reveals: [{ seat: 0, secret: H64 }], dice: [3, 4] } })));
+  for (const bad of [
+    new Uint8Array(0), new Uint8Array([0xff, 0x00]), NE(null), NE(42), NE('x'), NE([]),
+    NE({ seq: -1, entry: { kind: 'action', action: { type: 'BUY' } } }),
+    NE({ seq: 1e12, entry: { kind: 'action', action: { type: 'BUY' } } }),
+    NE({ seq: 0, entry: { kind: 'evil' } }),
+    NE({ seq: 0, entry: { kind: 'action', action: { type: '__proto__' } } }),
+    NE({ seq: 0, entry: { kind: 'action', action: { type: 'ROLL', dice: [9, 9] } } }),
+    NE({ seq: 0, entry: { kind: 'roll', commits: 'notarray', reveals: [], dice: [1, 1] } }),
+    NE({ seq: 0, entry: { kind: 'roll', commits: [{ seat: 0, c: 'zz' }], reveals: [], dice: [1, 1] } }), // bad hex → fromHex would throw
+    NE({ seq: 0, entry: { kind: 'roll', commits: Array.from({ length: 99 }, () => ({ seat: 0, c: H64 })), reveals: [], dice: [1, 1] } }), // oversized
+  ]) assert.equal(decodeEnvelope(bad), null);
+});
+
+test('a HOSTILE relay payload never crashes ingest and never advances state', () => {
+  const peer = new PeerSession(genesis);
+  const before = peer.hash();
+  for (const bad of [
+    new Uint8Array([1, 2, 3]), NE('x'), NE({ seq: 0, entry: { kind: 'roll', commits: [{ seat: 0, c: 'zz' }], reveals: [], dice: [1, 1] } }),
+    NE({ seq: 0, entry: { kind: 'action', action: { type: 'EVIL' } } }), NE({ seq: 1e15, entry: null }),
+  ]) assert.doesNotThrow(() => assert.equal(peer.ingest(bad), false));
+  assert.equal(peer.hash(), before, 'no hostile payload advanced state');
+});
+
+test('a hostile relay payload in the fan-out never breaks delivery to honest peers', () => {
+  const relay = new InMemoryRelay();
+  const peer = new PeerSession(genesis);
+  let crashed = false;
+  relay.subscribe(() => { throw new Error('a malicious subscriber'); });   // a bad subscriber
+  relay.subscribe((p) => { try { peer.ingest(p); } catch { crashed = true; } });
+  assert.doesNotThrow(() => relay.publish(NE({ seq: 99, entry: { kind: 'evil' } }))); // bad subscriber isolated
+  assert.equal(crashed, false);
+});
+
+test('decodeEnvelope is FUZZ-PROOF: 100k random payloads never throw or hang', () => {
+  let rng = 0x51ed270b >>> 0; const rand = () => { rng = (rng * 1103515245 + 12345) >>> 0; return rng; };
+  const t0 = Date.now();
+  for (let i = 0; i < 100_000; i++) {
+    const len = rand() % 200; const b = new Uint8Array(len);
+    for (let k = 0; k < len; k++) b[k] = rand() & 0xff;
+    let out: unknown = 'unset';
+    assert.doesNotThrow(() => { out = decodeEnvelope(b); });
+    assert.ok(out === null || typeof out === 'object');
+  }
+  assert.ok(Date.now() - t0 < 8000, 'bounded work — no hang');
 });

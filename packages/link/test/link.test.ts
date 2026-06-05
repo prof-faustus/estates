@@ -120,3 +120,30 @@ test('malformed handshake JSON (#13) destroys only that socket, no throw/crash',
     server.close();
   }
 });
+
+test('a JSON `null`/scalar handshake body (#13b) is dropped, never crashes the listener', async () => {
+  // valid JSON, but not an object: `msg.t` would throw if unguarded → uncaught
+  // exception in the socket data handler → whole-process crash (remote DoS).
+  const b = genIdentity();
+  let crashed = false;
+  const onErr = (): void => { crashed = true; };
+  process.once('uncaughtException', onErr);
+  const server = await listen(0, b, () => { /* never */ });
+  const port = (server.address() as AddressInfo).port;
+  try {
+    const net = await import('node:net');
+    for (const literal of ['null', '42', '"hi"', '[1,2,3]']) {
+      const sock = net.connect(port, '127.0.0.1');
+      await new Promise((r) => sock.on('connect', r));
+      const body = Buffer.from(literal);
+      const len = Buffer.allocUnsafe(4); len.writeUInt32BE(body.length, 0);
+      sock.write(Buffer.concat([len, body]));
+      const closed = await new Promise<boolean>((r) => { sock.on('close', () => r(true)); setTimeout(() => r(false), 1200); });
+      assert.ok(closed, `socket dropped for handshake body ${literal}`);
+    }
+    assert.equal(crashed, false, 'no uncaught exception escaped for any scalar handshake body');
+  } finally {
+    process.removeListener('uncaughtException', onErr);
+    server.close();
+  }
+});

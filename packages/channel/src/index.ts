@@ -88,30 +88,52 @@ export function initiate(id: Identity): { hello: Hello; pending: Pending } {
   };
 }
 
-/** Responder: verify the Hello, derive the session, and produce the Ack. */
-export function respond(id: Identity, hello: Hello): { ack: Ack; session: Session } | null {
-  let idPub: Uint8Array, ephPub: Uint8Array, nonce: Uint8Array, signPub: Uint8Array, sig: Uint8Array;
-  try { idPub = hexToBytes(hello.idPub); ephPub = hexToBytes(hello.ephPub); nonce = hexToBytes(hello.nonce); signPub = hexToBytes(hello.signPub); sig = hexToBytes(hello.sig); } catch { return null; }
-  if (signPub.length !== 32) return null;
-  if (!verify(sig, H(enc.encode('hello'), ephPub, nonce, signPub), idPub)) return null; // identity + signing key not proven
-  const ephPriv = secp.utils.randomPrivateKey();
-  const myEphPub = secp.getPublicKey(ephPriv, true);
-  const myNonce = randomBytes(32);
-  // bind the Ack to the initiator's ephemeral key (anti-replay) + our signing key
-  const ackSig = sign(H(enc.encode('ack'), myEphPub, myNonce, ephPub, id.signPub), id.priv);
-  return {
-    ack: { idPub: bytesToHex(id.pub), ephPub: bytesToHex(myEphPub), nonce: bytesToHex(myNonce), signPub: bytesToHex(id.signPub), sig: bytesToHex(ackSig) },
-    session: { key: sessionKey(ephPriv, ephPub), peerIdPub: idPub, peerSignPub: signPub },
-  };
+// A Hello/Ack is FULLY UNTRUSTED bytes from a possibly-hostile peer. `respond`
+// and `complete` are TOTAL: they return null on ANYTHING unexpected and NEVER
+// throw, so a single handshake message can never crash a listening node.
+//
+// The subtle trap: a valid identity signature does NOT prove `ephPub` is a valid
+// curve point — the attacker signs the *hash* with their own honest idPub and can
+// embed arbitrary (off-curve) ephPub bytes. The ephemeral key is only used as a
+// curve point at `sessionKey` (ECDH), where @noble throws on a bad point. So the
+// ECDH and every other crypto op must sit INSIDE the guard, not just hexToBytes.
+function asBytes(h: Hello): { idPub: Uint8Array; ephPub: Uint8Array; nonce: Uint8Array; signPub: Uint8Array; sig: Uint8Array } | null {
+  if (!h || typeof h !== 'object') return null;
+  try {
+    const idPub = hexToBytes(h.idPub), ephPub = hexToBytes(h.ephPub), nonce = hexToBytes(h.nonce), signPub = hexToBytes(h.signPub), sig = hexToBytes(h.sig);
+    if (signPub.length !== 32) return null;
+    return { idPub, ephPub, nonce, signPub, sig };
+  } catch { return null; }
 }
 
-/** Initiator step 2: verify the Ack (bound to our ephemeral key) and finish. */
+/** Responder: verify the Hello, derive the session, and produce the Ack. Total. */
+export function respond(id: Identity, hello: Hello): { ack: Ack; session: Session } | null {
+  const f = asBytes(hello);
+  if (!f) return null;
+  try {
+    if (!verify(f.sig, H(enc.encode('hello'), f.ephPub, f.nonce, f.signPub), f.idPub)) return null; // identity + signing key not proven
+    const ephPriv = secp.utils.randomPrivateKey();
+    const myEphPub = secp.getPublicKey(ephPriv, true);
+    const myNonce = randomBytes(32);
+    // sessionKey() runs ECDH against the peer's ephPub — throws on an off-curve
+    // point; caught here so a forged-but-signed Hello returns null, not a crash.
+    const session: Session = { key: sessionKey(ephPriv, f.ephPub), peerIdPub: f.idPub, peerSignPub: f.signPub };
+    const ackSig = sign(H(enc.encode('ack'), myEphPub, myNonce, f.ephPub, id.signPub), id.priv);
+    return {
+      ack: { idPub: bytesToHex(id.pub), ephPub: bytesToHex(myEphPub), nonce: bytesToHex(myNonce), signPub: bytesToHex(id.signPub), sig: bytesToHex(ackSig) },
+      session,
+    };
+  } catch { return null; }
+}
+
+/** Initiator step 2: verify the Ack (bound to our ephemeral key) and finish. Total. */
 export function complete(pending: Pending, ack: Ack): Session | null {
-  let idPub: Uint8Array, ephPub: Uint8Array, nonce: Uint8Array, signPub: Uint8Array, sig: Uint8Array;
-  try { idPub = hexToBytes(ack.idPub); ephPub = hexToBytes(ack.ephPub); nonce = hexToBytes(ack.nonce); signPub = hexToBytes(ack.signPub); sig = hexToBytes(ack.sig); } catch { return null; }
-  if (signPub.length !== 32) return null;
-  if (!verify(sig, H(enc.encode('ack'), ephPub, nonce, pending.ephPub, signPub), idPub)) return null;
-  return { key: sessionKey(pending.ephPriv, ephPub), peerIdPub: idPub, peerSignPub: signPub };
+  const f = asBytes(ack);
+  if (!f) return null;
+  try {
+    if (!verify(f.sig, H(enc.encode('ack'), f.ephPub, f.nonce, pending.ephPub, f.signPub), f.idPub)) return null;
+    return { key: sessionKey(pending.ephPriv, f.ephPub), peerIdPub: f.idPub, peerSignPub: f.signPub };
+  } catch { return null; }
 }
 
 // ---- authenticated framing over the session --------------------------------
