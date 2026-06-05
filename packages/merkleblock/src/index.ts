@@ -18,6 +18,12 @@ import type { MerkleProof } from '@estates/spv';
 function hash256(b: Uint8Array): Uint8Array { return sha256(sha256(b)); }
 function concat(a: Uint8Array, b: Uint8Array): Uint8Array { const o = new Uint8Array(a.length + b.length); o.set(a, 0); o.set(b, a.length); return o; }
 
+// A real block cannot hold more than a few million txs; cap well above that. The
+// cap is what makes the bit-shifts below safe: with n ≤ 2^25, every `1 << height`
+// stays < 2^31, so it never wraps into the sign bit (the classic JS `1<<h` mod-32
+// hazard that, on an attacker-chosen huge txCount, makes a naive treeHeight loop
+// spin forever and a naive traverse recurse to a stack overflow). See SECURITY.md.
+export const MAX_TREE_LEAVES = 1 << 25; // 33,554,432
 function treeHeight(n: number): number { let h = 0; while ((1 << h) < n) h++; return h; }
 /** number of nodes at `height` for `n` leaves. */
 function widthAt(n: number, height: number): number { return (n + (1 << height) - 1) >> height; }
@@ -73,6 +79,14 @@ interface Match { readonly index: number; readonly leafHash: Uint8Array; readonl
  *  (sibling hashes bottom→top). */
 export function parsePartialMerkleTree(pmt: PartialMerkleTree): ParsedMerkle {
   const { txCount: n, hashes, flags } = pmt;
+  // BOUND the attacker-controlled shape BEFORE any tree math (this function may be
+  // fed a proof from an untrusted node). An out-of-range txCount would otherwise
+  // make treeHeight spin / traverse overflow the stack; an over-long hashes/flags
+  // list is malformed. A valid tree has hashes ≤ txCount and flags ≤ 2·txCount.
+  if (!Number.isInteger(n) || n < 1 || n > MAX_TREE_LEAVES) throw new Error('malformed partial merkle tree (txCount out of range)');
+  if (!Array.isArray(hashes) || hashes.length > n) throw new Error('malformed partial merkle tree (too many hashes)');
+  if (!Array.isArray(flags) || flags.length > 2 * n + 8) throw new Error('malformed partial merkle tree (too many flag bits)');
+  for (const hash of hashes) if (!(hash instanceof Uint8Array) || hash.length !== 32) throw new Error('malformed partial merkle tree (bad hash)');
   const h = treeHeight(n);
   let bit = 0, hi = 0;
 

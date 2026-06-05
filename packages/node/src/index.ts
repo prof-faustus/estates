@@ -6,7 +6,7 @@
  * (de)serialization is pure and tested offline, the RPC calls hit your node.
  */
 import { serializeHeader, type BlockHeader, type MerkleProof } from '@estates/spv';
-import { parsePartialMerkleTree, type PartialMerkleTree } from '@estates/merkleblock';
+import { parsePartialMerkleTree, MAX_TREE_LEAVES, type PartialMerkleTree } from '@estates/merkleblock';
 
 const fromHex = (h: string): Uint8Array => { if (typeof h !== 'string' || h.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(h)) throw new Error('invalid hex'); const b = new Uint8Array(h.length / 2); for (let i = 0; i < b.length; i++) b[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16); return b; };
 const toHex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
@@ -60,27 +60,50 @@ export function serializeMerkleBlock(mb: MerkleBlock, flagBitsLen?: number): Uin
   return out;
 }
 
-/** Parse a CMerkleBlock (the bytes from gettxoutproof). */
-export function parseMerkleBlock(bytes: Uint8Array): MerkleBlock {
-  const header = parseHeader(bytes);
+// A CMerkleBlock from `gettxoutproof` is UNTRUSTED bytes — a hostile or MITM'd node
+// can return anything. `parseMerkleBlock` is TOTAL and BOUNDED: it never throws and
+// never allocates on an attacker-controlled count. A varint hash/flag count is only
+// honoured if the bytes to back it are actually present (no billion-slice DoS), and
+// txCount is capped (parsePartialMerkleTree's tree math is only safe within it).
+const MB_MAX_TX = MAX_TREE_LEAVES;             // ≤ 2^25 leaves (see merkleblock)
+const MB_MAX_FRAME = 1 << 24;                  // 16 MiB hard cap on the whole proof
+
+/** Parse a CMerkleBlock (the bytes from gettxoutproof). Total: null on malformed. */
+export function parseMerkleBlock(bytes: Uint8Array): MerkleBlock | null {
+  if (!(bytes instanceof Uint8Array) || bytes.length < 80 + 4 + 1 || bytes.length > MB_MAX_FRAME) return null;
+  let header: BlockHeader;
+  try { header = parseHeader(bytes); } catch { return null; }
   let o = 80;
   const txCount = readU32le(bytes, o); o += 4;
+  if (txCount < 1 || txCount > MB_MAX_TX) return null;
   const hc = readVarint(bytes, o); o += hc.size;
+  // every hash must be fully present in the buffer AND there can be at most txCount
+  // of them — reject before growing the array (memory-exhaustion DoS).
+  if (hc.value > txCount || o + hc.value * 32 > bytes.length) return null;
   const hashes: Uint8Array[] = [];
   for (let i = 0; i < hc.value; i++) { hashes.push(bytes.slice(o, o + 32)); o += 32; }
   const fc = readVarint(bytes, o); o += fc.size;
-  const flagBytes = bytes.slice(o, o + fc.value);
+  // flag bytes must be present, and a valid tree needs ≤ ~2·txCount flag BITS.
+  if (fc.value > 2 * txCount + 1 || o + fc.value > bytes.length) return null;
+  const flagBytes = bytes.slice(o, o + fc.value); o += fc.value;
+  if (o !== bytes.length) return null; // trailing garbage → reject (no ambiguity)
   // BIP-37 flag count is unknown a-priori; parse drives consumption, so supply
   // all available bits and let parsePartialMerkleTree consume what it needs.
   const flags = unpackFlags(flagBytes, fc.value * 8);
   return { header, pmt: { txCount, hashes, flags } };
 }
 
-/** Extract the SPV proof for `txid` (display order) from a CMerkleBlock hex. */
+/** Extract the SPV proof for `txid` (display order) from a CMerkleBlock hex.
+ *  Total: null on any malformed hex / proof — never throws. */
 export function proofFromMerkleBlockHex(hex: string, txidDisplay: string): { header: BlockHeader; proof: MerkleProof } | null {
-  const mb = parseMerkleBlock(fromHex(hex));
-  const parsed = parsePartialMerkleTree(mb.pmt);
-  const wantLeaf = toHex(fromHex(txidDisplay).reverse()); // display → internal
+  let raw: Uint8Array, want: Uint8Array;
+  try { raw = fromHex(hex); want = fromHex(txidDisplay).reverse(); } catch { return null; } // display → internal
+  if (want.length !== 32) return null;
+  const mb = parseMerkleBlock(raw);
+  if (!mb) return null;
+  let parsed;
+  try { parsed = parsePartialMerkleTree(mb.pmt); } catch { return null; } // structurally inconsistent proof
+  const wantLeaf = toHex(want);
   const m = parsed.matched.find((x) => toHex(x.hash) === wantLeaf);
   return m ? { header: mb.header, proof: m.proof } : null;
 }
