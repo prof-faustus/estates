@@ -165,4 +165,37 @@ if (File.Exists(svPath))
     if (sfail == 0) Console.WriteLine("PASS: native BIP-143 sighash + secp256k1 ECDSA verify match the TS reference.");
 }
 
-return (fail == 0 && kfail == 0 && tfail == 0 && cfail == 0 && sfail == 0) ? 0 : 1;
+// ---- SIGN cross-validation: native per-game key derivation (HKDF->Ed25519) must
+// equal the TS reference (same master+gameId -> same signPub), and Ed25519 sign/
+// verify round-trips + verifies a TS-made signature. ----
+int gpass = 0, gfail = 0;
+string sgPath = Path.Combine(AppContext.BaseDirectory, "sign-vectors.json");
+if (File.Exists(sgPath))
+{
+    using var gdoc = JsonDocument.Parse(File.ReadAllText(sgPath));
+    var root2 = gdoc.RootElement;
+    foreach (var d in root2.GetProperty("derivations").EnumerateArray())
+    {
+        byte[] master = Tx.FromHex(d.GetProperty("master").GetString()!);
+        var gid = d.GetProperty("gameId");
+        string? gameId = gid.ValueKind == JsonValueKind.Null ? null : gid.GetString();
+        string got = Tx.ToHex(Sign.SigningKeyFromMaster(master, gameId).Pub);
+        if (got == d.GetProperty("expectedSignPub").GetString()) gpass++;
+        else { Console.Error.WriteLine($"  [SIGN FAIL] derive(master,{gameId ?? "—"}): signPub mismatch"); gfail++; }
+    }
+    var sg = root2.GetProperty("signature");
+    byte[] msg = Tx.FromHex(sg.GetProperty("message").GetString()!);
+    byte[] tsSig = Tx.FromHex(sg.GetProperty("sig").GetString()!);
+    byte[] signPub = Tx.FromHex(sg.GetProperty("signPub").GetString()!);
+    void Ck(string what, bool ok) { if (ok) gpass++; else { Console.Error.WriteLine($"  [SIGN FAIL] {what}"); gfail++; } }
+    Ck("native verifies a TS-made Ed25519 signature", Sign.VerifyData(msg, tsSig, signPub));
+    // native sign -> TS-compatible verify (round-trip with a freshly derived key)
+    var (priv, pub) = Sign.SigningKeyFromMaster(Tx.FromHex("11".PadRight(64, '1')), "c3".PadLeft(64, 'c'));
+    Ck("native Ed25519 sign verifies", Sign.VerifyData(msg, Sign.SignData(msg, priv), pub));
+    Ck("native rejects a tampered Ed25519 signature", !Sign.VerifyData(msg, tsSig.Select((b, i) => i == 5 ? (byte)(b ^ 0xff) : b).ToArray(), signPub));
+
+    Console.WriteLine($"Estates.Conformance (sign): {gpass} passed, {gfail} failed");
+    if (gfail == 0) Console.WriteLine("PASS: native key derivation + Ed25519 match the TS reference (native player identity == web).");
+}
+
+return (fail == 0 && kfail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && gfail == 0) ? 0 : 1;
