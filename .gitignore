@@ -42,3 +42,4 @@ tools/render-out/
 # native build output
 apps/native/**/bin/
 apps/native/**/obj/
+apps/native/nugetprobe/
