@@ -324,7 +324,14 @@ export class NetTable {
    * such a peer as a separate process/window/daemon; it connects over the relay
    * socket exactly like a remote human. `scheduleBot` lets tests pump it.
    */
-  constructor(relay: Relay, name: string, onUpdate: () => void, opts?: { autoPlay?: boolean; scheduleBot?: (cb: () => void) => void; identity?: Identity }) {
+  // When set, the live game is bound to a signed one-game key manifest: a seat
+  // can be CLAIMED only by the manifest's bound seat key (a per-game key — see
+  // @estates/keylife + channel.gameIdentityFrom). Because every action/commit/
+  // reveal is then checked against seatKeys (which only ever holds manifest keys),
+  // the whole live game is manifest-scoped. Omitted = legacy seat-claim binding.
+  private manifest: GameKeyManifest | null;
+
+  constructor(relay: Relay, name: string, onUpdate: () => void, opts?: { autoPlay?: boolean; scheduleBot?: (cb: () => void) => void; identity?: Identity; manifest?: GameKeyManifest }) {
     this.relay = relay;
     this.id = opts?.identity ?? genIdentity();      // the player's non-custodial key
     this.me = toHex(this.id.signPub);                // identity = the player's signing pubkey, not a random string
@@ -332,6 +339,14 @@ export class NetTable {
     this.onUpdate = onUpdate;
     this.autoPlay = opts?.autoPlay ?? false;
     this.botTimer = opts?.scheduleBot ?? null;
+    this.manifest = opts?.manifest ?? null;
+  }
+
+  /** The manifest-bound seat key for `seat`, or null if no manifest / not bound. */
+  private manifestSeatKey(seat: number): string | null {
+    if (!this.manifest) return null;
+    const e = this.manifest.entries.find((x) => x.purpose === 'seat' && x.seat === seat);
+    return e ? e.pub : null;
   }
 
   private unsub: (() => void) | null = null;
@@ -473,8 +488,11 @@ export class NetTable {
           break;
         case 'seat':
           // a seat is claimed by the key that SIGNED the claim (no spoofing, audit #2);
-          // one key controls at most one seat.
-          if (!started && !seats.has(m.seat) && m.who === signPub && ![...seatKeys.values()].includes(signPub)) {
+          // one key controls at most one seat. With a one-game key MANIFEST, the
+          // claimant MUST be the manifest's bound seat key for this seat — so only
+          // per-game keys play, and a stranger/cross-game key is rejected here.
+          if (!started && !seats.has(m.seat) && m.who === signPub && ![...seatKeys.values()].includes(signPub)
+              && (this.manifest === null || this.manifestSeatKey(m.seat) === signPub)) {
             seats.set(m.seat, { who: signPub, name: m.name, bot: m.bot });
             seatKeys.set(m.seat, signPub);
           }
