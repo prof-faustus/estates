@@ -198,4 +198,27 @@ if (File.Exists(sgPath))
     if (gfail == 0) Console.WriteLine("PASS: native key derivation + Ed25519 match the TS reference (native player identity == web).");
 }
 
-return (fail == 0 && kfail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && gfail == 0) ? 0 : 1;
+// ---- TABLEMSG cross-validation: native re-derives the canonical signed-frame
+// bytes for a gameplay message and verifies the web's signature (so a native
+// client can authenticate the SAME table frames). ----
+int mpass = 0, mfail = 0;
+string tmPath = Path.Combine(AppContext.BaseDirectory, "tablemsg-vectors.json");
+if (File.Exists(tmPath))
+{
+    using var mdoc = JsonDocument.Parse(File.ReadAllText(tmPath));
+    foreach (var v in mdoc.RootElement.EnumerateArray())
+    {
+        string name = v.GetProperty("name").GetString()!;
+        var action = StateJson.ParseAction(v.GetProperty("action"));
+        string signPub = v.GetProperty("signPub").GetString()!;
+        string gotBytes = Tx.ToHex(TableMsg.SignedBytesForAction(action, signPub));
+        bool bytesOk = gotBytes == v.GetProperty("signedBytes").GetString();
+        bool verifyOk = TableMsg.VerifyActionFrame(action, signPub, Tx.FromHex(v.GetProperty("sig").GetString()!));
+        if (bytesOk && verifyOk) mpass++;
+        else { Console.Error.WriteLine($"  [TABLEMSG FAIL] {name}: bytes={bytesOk} verify={verifyOk}"); mfail++; }
+    }
+    Console.WriteLine($"Estates.Conformance (tablemsg): {mpass} passed, {mfail} failed");
+    if (mfail == 0) Console.WriteLine("PASS: native re-derives the canonical signed-frame bytes + verifies web table messages.");
+}
+
+return (fail == 0 && kfail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && gfail == 0 && mfail == 0) ? 0 : 1;

@@ -21,6 +21,7 @@
     <None Include="cardnft-vectors.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="scriptvm-vectors.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="sign-vectors.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="tablemsg-vectors.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
