@@ -71,7 +71,12 @@ export function verifyGenesisManifest(tx: Tx, manifest: GenesisManifest, gameId:
     const out = tx.outputs[i]!;
 
     if (e.custody === 'covenant') {
-      const rh = e.rulesHashHex ? fromHex(e.rulesHashHex) : rulesHash();
+      // the covenant is game-bound: use the entry's explicit rulesHash, else derive
+      // it from THIS game's id. Fail closed if neither yields a 32-byte game binding.
+      let rh: Uint8Array | null = null;
+      if (e.rulesHashHex) { try { rh = fromHex(e.rulesHashHex); } catch { rh = null; } }
+      else { try { const gid = fromHex(gameId); if (gid.length === 32) rh = rulesHash(gid); } catch { rh = null; } }
+      if (!rh) return { ok: false, reason: `output ${i} covenant entry lacks a valid game-bound rulesHash` };
       if (toHex(out.script) !== toHex(covenantOutput(Number(out.value), rh).script)) return { ok: false, reason: `output ${i} is not the covenant reserve script` };
       continue;
     }
@@ -105,7 +110,8 @@ export function certifyGenesisKey(master: KeyPair, gameId: string, network: stri
   return { ...base, certSig: toHex(signData(entryBytes(gameId, base), signKey.priv)) };
 }
 
-/** A covenant manifest entry (bank reserve / bank-held NFT — no spend key). */
-export function covenantGenesisEntry(outputIndex: number, purpose: string, rh: Uint8Array = rulesHash()): GenesisKeyEntry {
+/** A covenant manifest entry (bank reserve / bank-held NFT — no spend key). `rh`
+ *  MUST be the game-bound rulesHash(gameId) so the reserve belongs to one game. */
+export function covenantGenesisEntry(outputIndex: number, purpose: string, rh: Uint8Array): GenesisKeyEntry {
   return { outputIndex, purpose, custody: 'covenant', rulesHashHex: toHex(rh) };
 }

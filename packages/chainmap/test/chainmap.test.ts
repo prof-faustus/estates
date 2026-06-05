@@ -106,7 +106,7 @@ test('bank reserve leg is COVENANT-locked by default (no reused bankPkh)', async
   const { covenantOutput, rulesHash } = await import('@estates/bank');
   const { bankValueOutput } = await import('../src/index.ts');
   const cov = bankValueOutput(500, ctx);                       // default mode = covenant
-  assert.deepEqual(cov, covenantOutput(500, rulesHash()), 'bank value is the self-enforcing covenant output');
+  assert.deepEqual(cov, covenantOutput(500, rulesHash(ctx.gameId)), 'bank value is the game-bound self-enforcing covenant output');
   // it is NOT a plain P2PKH to the static bankPkh
   const { paymentOutput } = await import('@estates/onchain');
   assert.notDeepEqual(cov.script, paymentOutput(500, ctx.bankPkh).script, 'not a reused-pkh payment');
@@ -133,10 +133,10 @@ test('owned-title NFT custody uses the FRESH provider key, never the static seat
 });
 
 test('a bank-held (unowned) title NFT is covenant-locked, not bankPkh', async () => {
-  const { covenantScriptItems } = await import('@estates/bank');
+  const { covenantScriptItems, rulesHash } = await import('@estates/bank');
   const { nftOutputWith } = await import('@estates/onchain');
   const s = initialState(cfg);                                // all titles unowned at start
   const out = titleToNftOutput(s, 1, ctx);                    // owner === null
-  const expected = nftOutputWith(titleToNftState(s, 1, ctx), covenantScriptItems());
+  const expected = nftOutputWith(titleToNftState(s, 1, ctx), covenantScriptItems(rulesHash(ctx.gameId)));
   assert.deepEqual(out.script, expected.script, 'bank-held NFT sits under the covenant');
 });

@@ -8,6 +8,7 @@ import { covenantOutput, rulesHash } from '@estates/bank';
 import { buildTableTx } from '../src/index.ts';
 
 const P = loadParams();
+const GAME = new Uint8Array(32).fill(9);                        // the table/game id
 const toHex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
 const fromHex = (h: string): Uint8Array => { const b = new Uint8Array(h.length / 2); for (let i = 0; i < b.length; i++) b[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16); return b; };
 
@@ -21,7 +22,7 @@ test('table genesis: funds N seats + a covenant reserve, signed, real BSV tx', a
   const funder = Wallet.random('regtest');
   const funding = { txid: '', vout: 0, satoshis: 300_000_000, raw: sourceTxHex(funder.key.pkh(), 300_000_000) };
 
-  const built = await buildTableTx({ network: 'regtest', funder, funding, seatCount: 3, reserveSalaryCap: 200 });
+  const built = await buildTableTx({ network: 'regtest', funder, funding, seatCount: 3, reserveSalaryCap: 200, gameId: GAME });
 
   assert.equal(built.seats.length, 3);
   for (const s of built.seats) assert.equal(s.startingBalance, P.scalars.starting_balance_per_seat);
@@ -33,7 +34,7 @@ test('table genesis: funds N seats + a covenant reserve, signed, real BSV tx', a
   assert.equal(tx.outputs.length, 5, '3 seats + reserve + change');
   for (let i = 0; i < 3; i++) assert.equal(Number(tx.outputs[i]!.value), P.scalars.starting_balance_per_seat);
   assert.equal(Number(tx.outputs[built.reserve.vout]!.value), expectReserve);
-  assert.equal(toHex(tx.outputs[built.reserve.vout]!.script), toHex(covenantOutput(expectReserve, rulesHash()).script), 'reserve carries the covenant script');
+  assert.equal(toHex(tx.outputs[built.reserve.vout]!.script), toHex(covenantOutput(expectReserve, rulesHash(GAME)).script), 'reserve carries the game-bound covenant script');
   assert.ok(tx.inputs[0]!.scriptSig.length > 0, 'input is signed (BIP-143)');
   assert.match(built.genesisTxid, /^[0-9a-f]{64}$/);
 });
@@ -41,7 +42,7 @@ test('table genesis: funds N seats + a covenant reserve, signed, real BSV tx', a
 test('seat count is configurable', async () => {
   const funder = Wallet.random('testnet');
   const funding = { txid: '', vout: 0, satoshis: 300_000_000, raw: sourceTxHex(funder.key.pkh(), 300_000_000) };
-  const built = await buildTableTx({ network: 'testnet', funder, funding, seatCount: 6 });
+  const built = await buildTableTx({ network: 'testnet', funder, funding, seatCount: 6, gameId: GAME });
   assert.equal(built.seats.length, 6);
   const tx2 = deserializeTx(fromHex(built.hex));
   assert(tx2, "parses");

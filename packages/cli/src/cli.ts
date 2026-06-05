@@ -9,8 +9,19 @@
  *                  --funding <txid>:<vout>:<sats>:<rawhex>
  *   estates table  --network mainnet ... --confirm-real-value   (REAL value)
  */
+import { randomBytes } from 'node:crypto';
 import { Wallet, type Network } from '@estates/wallet';
 import { createTable, nodeFund, type NodeRpc, type Funding } from './index.ts';
+
+const toHex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+/** The 32-byte game id: parse a supplied 64-hex value, or mint a fresh random one. */
+function parseGameId(hex: string | undefined): Uint8Array {
+  if (hex === undefined) return new Uint8Array(randomBytes(32));
+  if (!/^[0-9a-fA-F]{64}$/.test(hex)) throw new Error('--game-id must be 64 hex chars (32 bytes)');
+  const b = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) b[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  return b;
+}
 
 function parse(argv: string[]): { _: string[]; flags: Record<string, string | true> } {
   const _: string[] = []; const flags: Record<string, string | true> = {};
@@ -47,6 +58,11 @@ async function main(): Promise<void> {
     const node = nodeFromFlags();
     const reserveSalaryCap = str('reserve-cap') ? Number(str('reserve-cap')) : undefined;
 
+    // the 32-byte table/game id binds the bank reserve covenant to THIS game (one-game
+    // lifecycle). Supply it (shared via the lobby) with --game-id <64hex>, or mint a
+    // fresh one for a brand-new table; it is echoed in the output so peers can match.
+    const gameId = parseGameId(str('game-id'));
+
     // funder + funding UTXO
     const funder = str('funder-wif') ? Wallet.fromWif(str('funder-wif')!, network) : Wallet.random(network);
     let funding: Funding;
@@ -61,12 +77,12 @@ async function main(): Promise<void> {
     }
 
     const res = await createTable({
-      network, funder, funding, seatCount,
+      network, funder, funding, seatCount, gameId,
       ...(reserveSalaryCap !== undefined ? { reserveSalaryCap } : {}),
       ...(node ? { node } : {}),
       confirmRealValue: flags['confirm-real-value'] === true,
     });
-    console.log(JSON.stringify(res, null, 2));
+    console.log(JSON.stringify({ ...res, gameId: toHex(gameId) }, null, 2));
     return;
   }
 

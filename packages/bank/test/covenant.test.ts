@@ -10,7 +10,8 @@ import {
 const seatPkh = new Uint8Array(20).fill(7);
 const attackerPkh = new Uint8Array(20).fill(0xee);
 const prevOutpoint = { txid: 'ab'.repeat(32), vout: 0 };
-const reserve: Covenant = { reserve: 40_000, rulesHash: rulesHash() };
+const GAME = new Uint8Array(32).fill(0x5a);
+const reserve: Covenant = { reserve: 40_000, rulesHash: rulesHash(GAME) };
 
 test('trustless payout: a legal payout verifies with ZERO signatures', () => {
   const tx = buildCovenantPayout(reserve, prevOutpoint, seatPkh, 200);
@@ -59,7 +60,7 @@ test('failing to re-lock the remainder to the covenant is rejected', () => {
 });
 
 test('a payout exceeding the reserve is rejected', () => {
-  const small: Covenant = { reserve: 100, rulesHash: rulesHash() };
+  const small: Covenant = { reserve: 100, rulesHash: rulesHash(GAME) };
   const tx = buildCovenantPayout(small, prevOutpoint, seatPkh, 100);
   assert.equal(verifyCovenantPayout(small, tx, seatPkh, 200).valid, false); // claim 200 > 100
 });
@@ -97,4 +98,35 @@ test('verifyCovenantSpend binds to the spent outpoint AND the prev covenant scri
 
   // wrong amount / recipient still rejected (delegates to the payout predicate)
   assert.equal(verifyCovenantSpend(reserve, prevOutpoint, prevScript, tx, attackerPkh, 200).valid, false);
+});
+
+// ---- one-game lifecycle: a reserve belongs to exactly ONE game ---------------
+test('the covenant is bound to one game: a different gameId yields a DISTINCT script', () => {
+  const other = new Uint8Array(32).fill(0xa5);
+  // same params, DIFFERENT game → different rules hash → different covenant script.
+  assert.notDeepEqual(rulesHash(GAME), rulesHash(other), 'rules hash binds the gameId');
+  assert.notDeepEqual(
+    covenantOutput(reserve.reserve, rulesHash(GAME)).script,
+    covenantOutput(reserve.reserve, rulesHash(other)).script,
+    'two games never share a reserve covenant script',
+  );
+});
+
+test('a payout assembled for one game does NOT validate against another game reserve', () => {
+  const other = new Uint8Array(32).fill(0xa5);
+  const otherReserve: Covenant = { reserve: reserve.reserve, rulesHash: rulesHash(other) };
+  // a legal-looking payout built against GAME's covenant…
+  const tx = buildCovenantPayout(reserve, prevOutpoint, seatPkh, 200);
+  const prevScript = covenantOutput(reserve.reserve, reserve.rulesHash).script;
+  // …re-locks the residual under GAME's rules, so it cannot re-lock the OTHER
+  // game's reserve: bound-spend against the other game's covenant is rejected.
+  assert.equal(verifyCovenantSpend(otherReserve, prevOutpoint, prevScript, tx, seatPkh, 200).valid, false,
+    'cross-game reserve reuse is rejected');
+  // and the structural payout predicate against the other reserve fails to re-lock too
+  assert.equal(verifyCovenantPayout(otherReserve, tx, seatPkh, 200).valid, false);
+});
+
+test('rulesHash rejects a non-32-byte gameId (fail closed)', () => {
+  assert.throws(() => rulesHash(new Uint8Array(31)));
+  assert.throws(() => rulesHash(new Uint8Array(0)));
 });

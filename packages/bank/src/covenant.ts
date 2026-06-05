@@ -19,10 +19,27 @@ import { paymentOutput, push, op, OP, serializeScript, type TxOutput, type Scrip
 import type { Tx, KeyPair } from '@estates/trade';
 
 const COVENANT_TAG = new TextEncoder().encode('ESTATES-BANK-COVENANT-v1');
+const RULES_TAG = new TextEncoder().encode('ESTATES-BANK-RULES-v1|');
 
-/** Hash of the rule-set (params SoT) pinned by the covenant. */
-export function rulesHash(): Uint8Array {
-  return new Uint8Array(createHash('sha256').update(JSON.stringify(loadParams())).digest());
+/**
+ * Hash of the rule-set pinned by the covenant, BOUND TO ONE GAME.
+ *
+ * Audit (one-game lifecycle): a covenant reserve must belong to exactly one game.
+ * If the rules hash pinned only the params SoT, every game sharing the same params
+ * would lock its reserve under the IDENTICAL script — making reserves fungible
+ * across concurrent games (a payout assembled against one game's covenant would be
+ * structurally valid against another's, and ledger/manifest checks could not tell
+ * two games' reserves apart). Folding the 32-byte gameId makes each game's covenant
+ * a DISTINCT script, so a reserve is worthless outside the game that created it —
+ * the same one-game binding the seat keys / NFTs (gameTag) already carry.
+ */
+export function rulesHash(gameId: Uint8Array): Uint8Array {
+  if (!(gameId instanceof Uint8Array) || gameId.length !== 32) throw new Error('rulesHash: gameId must be 32 bytes');
+  const h = createHash('sha256');
+  h.update(RULES_TAG);
+  h.update(gameId);
+  h.update(JSON.stringify(loadParams()));
+  return new Uint8Array(h.digest());
 }
 
 export interface Covenant { readonly reserve: number; readonly rulesHash: Uint8Array; }
@@ -34,11 +51,11 @@ export interface Covenant { readonly reserve: number; readonly rulesHash: Uint8A
  */
 /** The covenant predicate script items: `<rulesHash> <COVENANT_TAG> OP_2DROP OP_TRUE`.
  *  Reused as the custody for both the reserve output and bank-held NFTs. */
-export function covenantScriptItems(rh: Uint8Array = rulesHash()): ScriptItem[] {
+export function covenantScriptItems(rh: Uint8Array): ScriptItem[] {
   return [push(rh), push(COVENANT_TAG), op(OP.OP_2DROP), op(0x51 /* OP_TRUE */)];
 }
 
-export function covenantOutput(reserve: number, rh: Uint8Array = rulesHash()): TxOutput {
+export function covenantOutput(reserve: number, rh: Uint8Array): TxOutput {
   return { satoshis: reserve, script: serializeScript(covenantScriptItems(rh)) };
 }
 

@@ -19,7 +19,7 @@ import {
   type TxOutput, type TitleState, type Outpoint,
 } from '@estates/onchain';
 import { sighashPreimage, signInput, type Tx, type TxInput, type KeyPair } from '@estates/trade';
-import { covenantOutput, verifyCovenantSpend, rulesHash, type Covenant, type CovenantCheck } from './covenant.ts';
+import { covenantOutput, verifyCovenantSpend, type Covenant, type CovenantCheck } from './covenant.ts';
 
 // Trustless covenant bank (D-BANK-ENFORCE upgrade) + banker role.
 export * from './covenant.ts';
@@ -113,9 +113,15 @@ export function certify(tx: Tx, expected: readonly TxOutput[]): boolean {
  */
 export type BankMode = 'quorum' | 'covenant';
 
-/** The reserve output for the chosen enforcement mode. */
-export function reserveOutput(mode: BankMode, reserve: number, bankPkh: Uint8Array, rh: Uint8Array = rulesHash()): TxOutput {
-  return mode === 'covenant' ? covenantOutput(reserve, rh) : paymentOutput(reserve, bankPkh);
+/** The reserve output for the chosen enforcement mode. Covenant mode REQUIRES a
+ *  game-bound rules hash (rulesHash(gameId)) so the reserve belongs to one game;
+ *  quorum mode pays the banker pkh and ignores `rh`. */
+export function reserveOutput(mode: BankMode, reserve: number, bankPkh: Uint8Array, rh?: Uint8Array): TxOutput {
+  if (mode === 'covenant') {
+    if (!rh) throw new Error('reserveOutput: covenant mode requires a game-bound rulesHash(gameId)');
+    return covenantOutput(reserve, rh);
+  }
+  return paymentOutput(reserve, bankPkh);
 }
 
 export type ReserveSpend =

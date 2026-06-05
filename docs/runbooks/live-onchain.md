@@ -45,13 +45,20 @@ network you pick. Verified live against the running `nftbsv-regtest` node:
 estates table --network regtest --seats 2 \
   --rpc-url http://127.0.0.1:18332 --rpc-user <U> --rpc-pass <P>
 # regtest auto-funds the funder from the node, builds + signs the genesis tx,
-# broadcasts it, prints the genesis txid + seat keys + reserve outpoint.
+# broadcasts it, prints the genesis txid + seat keys + reserve outpoint + gameId.
 
 estates table --network testnet --seats 2 --funder-wif <WIF> \
   --funding <txid>:<vout>:<sats>:<rawhex>          # broadcasts via WhatsOnChain
 estates table --network mainnet ... --confirm-real-value   # REAL value (guarded)
 estates keygen --network testnet                            # a fresh key/address
 ```
+
+The bank reserve covenant is **bound to one game**: pass the 32-byte table id with
+`--game-id <64hex>` (shared via the lobby) so every peer derives the identical
+reserve script, or omit it to mint a fresh random id for a brand-new table — either
+way the chosen `gameId` is echoed in the JSON output. A reserve created for one game
+is worthless in another (its script differs), the same one-game binding the seat
+keys and title/Reprieve NFTs carry.
 
 > **Verified live:** `estates table --network regtest …` against the running node
 > minted a genesis tx (2 seat outputs @ 1500 sat + a 40,000-sat covenant reserve)

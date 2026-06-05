@@ -115,12 +115,12 @@ test('reserve enforcement choice: quorum (M-of-N) and covenant (trustless) both 
   assert.equal(verifyReserveSpend({ mode: 'quorum', tx: qbad, sigs, policy, action }).valid, false);
 
   // COVENANT mode: trustless, ZERO signatures, bound to the spent outpoint+script
-  const reserve: Covenant = { reserve: 40_000, rulesHash: rulesHash() };
+  const reserve: Covenant = { reserve: 40_000, rulesHash: rulesHash(GAME) };
   const prevOutpoint = { txid: 'cd'.repeat(32), vout: 0 };
   const prevScript = reserveOutput('covenant', reserve.reserve, seats[0]!.pkh, reserve.rulesHash).script;
   const ctx = buildCovenantPayout(reserve, prevOutpoint, seats[0]!.pkh, 200);
   assert.ok(verifyReserveSpend({ mode: 'covenant', tx: ctx, covenant: reserve, prevOutpoint, prevScript, recipientPkh: seats[0]!.pkh, amount: 200 }).valid, 'covenant spend verifies');
 
   // the reserve OUTPUT differs by chosen mode (P2PKH-to-bank vs covenant script)
-  assert.notDeepEqual(reserveOutput('quorum', 40_000, seats[0]!.pkh).script, reserveOutput('covenant', 40_000, seats[0]!.pkh).script);
+  assert.notDeepEqual(reserveOutput('quorum', 40_000, seats[0]!.pkh).script, reserveOutput('covenant', 40_000, seats[0]!.pkh, rulesHash(GAME)).script);
 });

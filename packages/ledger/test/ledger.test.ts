@@ -82,17 +82,18 @@ test('verifyGenesisManifest: accepts a fully-derived+certified genesis, rejects 
   const { buildGenesis, certifyGenesisKey, covenantGenesisEntry, verifyGenesisManifest } = await import('../src/index.ts');
 
   const gameId = 'a1'.repeat(32);
+  const gid = fromHexLocal(gameId);                            // 32-byte game id (covenant binding)
   const A = genMaster(); const B = genMaster();
   // genesis: out0 cursor (A), out1 seat-fund A, out2 seat-fund B, out3 covenant reserve
   const e0 = certifyGenesisKey(A, gameId, 'regtest', 'cursor', 0);
   const e1 = certifyGenesisKey(A, gameId, 'regtest', 'seat-fund', 1);
   const e2 = certifyGenesisKey(B, gameId, 'regtest', 'seat-fund', 2);
-  const e3 = covenantGenesisEntry(3, 'reserve');
+  const e3 = covenantGenesisEntry(3, 'reserve', rulesHash(gid));
   const g = buildGenesis({
     fundingOutpoint: { txid: 'cd'.repeat(32), vout: 0 },
     cursorScript: paymentOutput(1, fromHexLocal(e0.pkh!)).script,
     seatFunds: [{ satoshis: 1500, script: paymentOutput(1500, fromHexLocal(e1.pkh!)).script }, { satoshis: 1500, script: paymentOutput(1500, fromHexLocal(e2.pkh!)).script }],
-    mints: [{ satoshis: 1_000_000, script: covenantOutput(1_000_000, rulesHash()).script }],
+    mints: [{ satoshis: 1_000_000, script: covenantOutput(1_000_000, rulesHash(gid)).script }],
   });
   const manifest = [e0, e1, e2, e3];
   assert.ok(verifyGenesisManifest(g.tx, manifest, gameId).ok, 'a fully-derived + covenant genesis verifies');

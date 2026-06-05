@@ -5,7 +5,7 @@ import { sha256 } from '@noble/hashes/sha256';
 import { ripemd160 } from '@noble/hashes/ripemd160';
 import { hmac } from '@noble/hashes/hmac';
 import { paymentOutput, push, OP, serializeScript } from '@estates/onchain';
-import { covenantOutput } from '@estates/bank';
+import { covenantOutput, rulesHash } from '@estates/bank';
 import type { Tx } from '@estates/tx';
 import { verifyInput, verifyTx, sighash, compactToDer, parseScript } from '../src/index.ts';
 
@@ -15,7 +15,8 @@ const hash160 = (b: Uint8Array) => ripemd160(sha256(b));
 const HASHTYPE = 0x41; // SIGHASH_ALL | FORKID
 // a Tx output ({value,script}) paying a pkh
 const payOut = (sats: number, pkh: Uint8Array) => ({ value: sats, script: paymentOutput(sats, pkh).script });
-const covOut = (sats: number) => ({ value: sats, script: covenantOutput(sats).script });
+const RH = rulesHash(new Uint8Array(32).fill(7));               // a game-bound covenant rules hash
+const covOut = (sats: number) => ({ value: sats, script: covenantOutput(sats, RH).script });
 
 function signP2pkh(tx: Tx, i: number, prevout: { value: number; script: Uint8Array }, priv: Uint8Array, pub: Uint8Array): Tx {
   const h = sighash(tx, i, prevout, HASHTYPE);
@@ -63,7 +64,7 @@ test('a signature over a DIFFERENT amount fails (BIP-143 binds the prevout value
 });
 
 test('the bank covenant output (OP_TRUE predicate) is spendable with an empty scriptSig', () => {
-  const prevout = { value: 1_000_000, script: covenantOutput(1_000_000).script };
+  const prevout = { value: 1_000_000, script: covenantOutput(1_000_000, RH).script };
   const tx: Tx = { version: 1, inputs: [{ prevTxid: 'aa'.repeat(32), prevVout: 0, scriptSig: new Uint8Array(0), sequence: 0xffffffff }], outputs: [covOut(999_500)], lockTime: 0 };
   assert.ok(verifyInput(tx, 0, prevout).ok, 'covenant script evaluates true (payout predicate enforced separately)');
 });

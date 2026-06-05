@@ -59,6 +59,9 @@ export interface TableOpts {
   funder: Wallet;
   funding: Funding;
   seatCount: number;
+  /** 32-byte table id (the game id agreed at the lobby). The bank reserve covenant
+   *  is bound to it so the reserve belongs to THIS game only (one-game lifecycle). */
+  gameId: Uint8Array;
   reserveSalaryCap?: number;
   node?: NodeRpc;
   confirmRealValue?: boolean;
@@ -80,7 +83,8 @@ export async function buildTableTx(opts: TableOpts): Promise<TableTx> {
     outputs.push({ satoshis: startingBalance, script: serializeScript(p2pkh(w.key.pkh())) });   // seat P2PKH
   }
   const reserveVout = opts.seatCount;
-  outputs.push({ satoshis: reserve, script: covenantOutput(reserve, rulesHash()).script });      // bank covenant reserve
+  if (opts.gameId.length !== 32) throw new Error('buildTableTx: gameId must be 32 bytes');
+  outputs.push({ satoshis: reserve, script: covenantOutput(reserve, rulesHash(opts.gameId)).script }); // bank covenant reserve (game-bound)
 
   // spend the funder's UTXO → seat outputs + covenant + change (BIP-143, native, no SDK)
   const utxo: Utxo = { sourceTxHex: opts.funding.raw, vout: opts.funding.vout, satoshis: opts.funding.satoshis };

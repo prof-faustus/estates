@@ -32,11 +32,13 @@ export interface MapContext {
   /** Bank custody form. DEFAULT 'covenant' (trustless, self-enforcing script);
    *  'quorum' (M-of-N banker sigs to ctx.bankPkh) is opt-in. */
   readonly bankMode?: BankMode;
-  readonly rulesHash?: Uint8Array;         // covenant rules-hash (defaults to params SoT)
+  readonly rulesHash?: Uint8Array;         // covenant rules-hash (defaults to the game-bound rulesHash(gameId))
 }
 
 const bankModeOf = (ctx: MapContext): BankMode => ctx.bankMode ?? 'covenant';
-const rhOf = (ctx: MapContext): Uint8Array => ctx.rulesHash ?? rulesHash();
+// the covenant rules hash is bound to THIS game (rulesHash(gameId)) so the reserve
+// belongs to one game only — never a game-agnostic params-only hash.
+const rhOf = (ctx: MapContext): Uint8Array => ctx.rulesHash ?? rulesHash(ctx.gameId);
 
 /** A value leg paid TO the bank reserve: covenant-locked by default (no reused
  *  pkh), or P2PKH to the banker pkh under the opt-in quorum mode. */
