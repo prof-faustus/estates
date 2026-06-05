@@ -15,6 +15,7 @@ import { HttpRelay, InMemoryRelay, type Relay } from '@estates/chat';
 import { genIdentity, identityFrom, gameIdentityFrom, signData, verifyData, signingKeyFromMaster, type Identity } from '@estates/channel';
 import { sha256 } from '@noble/hashes/sha256';
 import { commit as beaconCommit, verifyRollEntry, ZERO_BEACON } from '@estates/beacon';
+import { dealerlessDeckOrder, commitEntropy, type SeedParty } from '@estates/deck';
 import { buildManifest, hashHex, verifyManifest, type GameKeyManifest, type KeyEntry } from '@estates/keylife';
 
 export const P = loadParams();
@@ -138,6 +139,8 @@ type Msg =
   | { kind: 'seat'; seat: number; who: string; name: string; bot: boolean }
   | { kind: 'start'; by: string; config: EngineConfig; seatMap: { seat: number; who: string }[] }
   | { kind: 'manifest'; m: GameKeyManifest }                     // host's signed one-game key manifest
+  | { kind: 'dcommit'; seat: number; c: string }                // DECK-shuffle entropy commitment (pre-start)
+  | { kind: 'dreveal'; seat: number; s: string }                // DECK-shuffle entropy reveal
   | { kind: 'commit'; roll: number; seat: number; c: string }   // beacon commitment for roll #roll (audit #3)
   | { kind: 'reveal'; roll: number; seat: number; s: string }   // beacon reveal
   | { kind: 'action'; action: Action };
@@ -246,6 +249,12 @@ export function decodeSigned(payload: Uint8Array): { msg: Msg; id: string; signP
       // the deep validation in rebuild. Here we only require it is an object.
       if (!isObj(o.m)) return null;
       return { msg: { kind: 'manifest', m: o.m as unknown as GameKeyManifest }, ...meta };
+    case 'dcommit':
+      if (!isInt(o.seat, 0, MAX_SEATS - 1) || !isHexLen(o.c, SHA256_HEX)) return null;
+      return { msg: { kind: 'dcommit', seat: o.seat, c: o.c }, ...meta };
+    case 'dreveal':
+      if (!isInt(o.seat, 0, MAX_SEATS - 1) || !isHexLen(o.s, SHA256_HEX)) return null;
+      return { msg: { kind: 'dreveal', seat: o.seat, s: o.s }, ...meta };
     default:
       return null;
   }
@@ -429,6 +438,22 @@ export class NetTable {
     if (seat < 0) return;
     this.send({ kind: 'seat', seat, who: this.me, name: this.name, bot: simulated });
   }
+
+  private myDeckSecret: Uint8Array | null = null;
+  /** Commit this seat's entropy for the dealerless DECK shuffle (pre-start). Every
+   *  seat that does this contributes to the jointly-generated deck order; reveal
+   *  after all have committed. */
+  commitDeckEntropy(): void {
+    if (this.mySeat === null || this.started || this.myDeckSecret) return;
+    const s = new Uint8Array(32); crypto.getRandomValues(s);
+    this.myDeckSecret = s;
+    this.send({ kind: 'dcommit', seat: this.mySeat, c: commitEntropy(s) }); // commitEntropy already returns hex
+  }
+  /** Reveal this seat's deck entropy (after committing). */
+  revealDeckEntropy(): void {
+    if (this.mySeat === null || this.started || !this.myDeckSecret) return;
+    this.send({ kind: 'dreveal', seat: this.mySeat, s: toHex(this.myDeckSecret) });
+  }
   /** HOST + HUMAN ONLY. Binds the final seat map into the signed start, then
    *  BROADCASTS the signed one-game key manifest so every peer + auditor verifies
    *  the seat keys are this game's keys only. */
@@ -496,6 +521,8 @@ export class NetTable {
     let liveManifest: GameKeyManifest | null = null; // host's broadcast one-game key manifest, once verified
     const seats = new Map<number, { who: string; name: string; bot: boolean }>();
     const seatKeys = new Map<number, string>();  // seat → controlling signing pub
+    const deckCommits = new Map<number, string>(); // seat → deck-entropy commitment (hex)
+    const deckReveals = new Map<number, Uint8Array>(); // seat → deck-entropy secret
     const commitsBySeq = new Map<number, Map<number, Uint8Array>>();
     const revealsBySeq = new Map<number, Map<number, Uint8Array>>();
     let rollsApplied = 0;
@@ -552,14 +579,39 @@ export class NetTable {
             seatKeys.set(m.seat, signPub);
           }
           break;
+        case 'dcommit':
+          // deck-shuffle entropy commitment, only from that seat's own key (pre-start)
+          if (!started && seatKeys.get(m.seat) === signPub && !deckCommits.has(m.seat)) deckCommits.set(m.seat, m.c);
+          break;
+        case 'dreveal':
+          if (!started && seatKeys.get(m.seat) === signPub && !deckReveals.has(m.seat)) deckReveals.set(m.seat, fromHex(m.s));
+          break;
         case 'start':
           // host-signed AND the bound seat map must match the claimed seats (audit #2)
           if (!started && signPub === host) {
             const cur = JSON.stringify([...seats.entries()].map(([seat, v]) => ({ seat, who: v.who })).sort((a, b) => a.seat - b.seat));
             const claimed = JSON.stringify([...m.seatMap].sort((a, b) => a.seat - b.seat));
-            // initialState can throw on a (validly-signed) config that requires fair
-            // decks without a valid permutation — keep rebuild TOTAL: fail closed.
-            if (cur === claimed) { try { state = initialState(m.config); started = true; tryRoll(); } catch { state = null; started = false; } }
+            if (cur === claimed) {
+              // DEALERLESS DECK SHUFFLE: if every seat committed→revealed deck
+              // entropy, EVERY peer independently recomputes the SAME jointly-
+              // generated deck order (no single machine — incl. the host — chooses
+              // it). Otherwise (no entropy round) the public declared order is used.
+              let config = m.config;
+              const parties: SeedParty[] = [];
+              for (const [seat, who] of seatKeys) {
+                const c = deckCommits.get(seat); const r = deckReveals.get(seat);
+                if (c !== undefined && r !== undefined && commitEntropy(r) === c) parties.push({ seat, pub: who, commitment: c, reveal: r });
+              }
+              if (parties.length === seats.size && parties.length > 0) {
+                const sizes: Record<string, number> = {};
+                for (const name of Object.keys(P.decks)) sizes[name] = P.decks[name]!.length;
+                const order = dealerlessDeckOrder(parties, this.gameId, sizes);
+                if (order) config = { ...config, deckOrder: order, requireFairDecks: true };
+              }
+              // initialState can throw on a (validly-signed) config that requires fair
+              // decks without a valid permutation — keep rebuild TOTAL: fail closed.
+              try { state = initialState(config); started = true; tryRoll(); } catch { state = null; started = false; }
+            }
           }
           break;
         case 'commit':

@@ -433,6 +433,9 @@ importers:
       '@estates/chat':
         specifier: workspace:*
         version: link:../chat
+      '@estates/deck':
+        specifier: workspace:*
+        version: link:../deck
       '@estates/engine':
         specifier: workspace:*
         version: link:../engine
