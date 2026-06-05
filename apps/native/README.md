@@ -59,7 +59,7 @@ runner:
 
 ```bash
 # (re)generate the cross-validation vectors from the audited TS reference
-for v in keylife tx cardnft scriptvm sign tablemsg beacon frames replay; do
+for v in keylife tx cardnft scriptvm sign tablemsg beacon frames replay deckreplay; do
   node --experimental-strip-types tools/$v-vectors.ts
 done
 
@@ -69,8 +69,10 @@ cd apps/native/Estates.Conformance && dotnet run -c Release
 
 Layers checked: engine rules, canonical state hash, tx serialization + txid, card-NFT
 output/transfer, BIP-143 sighash + ECDSA verify, key derivation + Ed25519, every signed
-table-message kind, dice beacon, and a full-game **replay** (an ordered relay log replays
-to the *same* canonical hash as the web NetTable).
+table-message kind, dice beacon, a full-game **replay** (an ordered relay log replays to
+the *same* canonical hash as the web NetTable), and a **dealerless-deck-shuffle replay**
+(a game that ran the commit→reveal entropy round replays to the *same* jointly-generated
+deck order — no single party, not even the host, chose it).
 
 ### Live HTTP spectate — the read path over the real wire
 

@@ -3,8 +3,10 @@
 // read path of native multiplayer — it assembles the already-validated primitives
 // (frame auth via TableMsg/Sign, the engine, the dice beacon, canonical hashing)
 // into the deterministic state machine ported from @estates/table NetTable.rebuild.
-// (Deck-shuffle entropy / deckOrder is a follow-up; this covers the core path:
-// table/seat/start/beacon-roll/action, with full per-frame authentication.)
+// The dealerless DECK shuffle (dcommit/dreveal -> jointly-generated deckOrder) is
+// reproduced too: when a gameId is supplied and every seat contributed entropy, the
+// SAME participant-bound order the web computed is recomputed here (Deck.cs).
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using GameAction = Estates.Core.Action;
@@ -13,22 +15,32 @@ namespace Estates.Core;
 
 public static class GameReplay
 {
-    /// <summary>Replay the ordered relay log to the canonical state hash (or null).</summary>
-    public static string? ReplayStateHash(IReadOnlyList<string> logHex)
+    /// <summary>gameId = hex(sha256("estates-game:" + channel)) — the same binding the
+    /// web uses (gameIdFromChannel), so a native spectator derives the identical id.</summary>
+    public static string GameIdFromChannel(string channel)
+        => Tx.ToHex(SHA256.HashData(Encoding.UTF8.GetBytes("estates-game:" + channel)));
+
+    /// <summary>Replay the ordered relay log to the canonical state hash (or null).
+    /// Pass the gameId (gameIdFromChannel) so the dealerless deck order is reproduced.</summary>
+    public static string? ReplayStateHash(IReadOnlyList<string> logHex, string? gameId = null)
     {
-        var s = ReplayState(logHex);
+        var s = ReplayState(logHex, gameId);
         return s == null ? null : Canonical.HashState(s);
     }
 
     /// <summary>Replay the ordered relay log (hex frames) into the live GameState, or
     /// null if the game never started. Every frame is authenticated (Ed25519 over the
     /// canonical signedBytes) and bound to its seat key, exactly like the web; raw
-    /// ROLL actions are dropped (dice only from the beacon).</summary>
-    public static GameState? ReplayState(IReadOnlyList<string> logHex)
+    /// ROLL actions are dropped (dice only from the beacon). When <paramref name="gameId"/>
+    /// is given and every seat committed→revealed deck entropy, the jointly-generated
+    /// deckOrder is recomputed (no single party — incl. the host — chooses it).</summary>
+    public static GameState? ReplayState(IReadOnlyList<string> logHex, string? gameId = null)
     {
         int? maxSeats = null; string? host = null; bool started = false; GameState? state = null;
         var seats = new Dictionary<int, string>();          // seat -> who (= signer)
         var seatKeys = new Dictionary<int, string>();        // seat -> controlling signing pub
+        var deckCommits = new Dictionary<int, string>();     // seat -> deck-entropy commitment (hex)
+        var deckReveals = new Dictionary<int, byte[]>();     // seat -> revealed deck entropy
         var commitsBySeq = new Dictionary<long, Dictionary<int, byte[]>>();
         var revealsBySeq = new Dictionary<long, Dictionary<int, byte[]>>();
         long rollsApplied = 0; byte[] prevBeacon = Beacon.ZeroBeacon;
@@ -77,6 +89,20 @@ public static class GameReplay
                     { seats[seat] = who; seatKeys[seat] = signPub; }
                     break;
                 }
+                case "dcommit":
+                {
+                    int seat = f.GetProperty("seat").GetInt32();
+                    if (!started && seatKeys.GetValueOrDefault(seat) == signPub && !deckCommits.ContainsKey(seat))
+                        deckCommits[seat] = f.GetProperty("c").GetString()!;
+                    break;
+                }
+                case "dreveal":
+                {
+                    int seat = f.GetProperty("seat").GetInt32();
+                    if (!started && seatKeys.GetValueOrDefault(seat) == signPub && !deckReveals.ContainsKey(seat))
+                        try { deckReveals[seat] = Tx.FromHex(f.GetProperty("s").GetString()!); } catch { }
+                    break;
+                }
                 case "start":
                 {
                     if (!started && signPub == host)
@@ -88,7 +114,27 @@ public static class GameReplay
                         if (cur == claimed)
                         {
                             var cfg = f.GetProperty("config");
-                            try { state = Engine.InitialState(cfg.GetProperty("network").GetString()!, cfg.GetProperty("seatCount").GetInt32(), cfg.GetProperty("bankReserve").GetInt64()); started = true; TryRoll(); }
+                            // DEALERLESS DECK SHUFFLE: if a gameId is known and every seat
+                            // committed→revealed entropy, recompute the SAME jointly-generated
+                            // order the web did; otherwise the declared (no-shuffle) order stands.
+                            Dictionary<string, List<int>>? deckOrder = null; bool requireFair = false;
+                            if (gameId != null)
+                            {
+                                var parties = new List<SeedParty>();
+                                foreach (var (seat, who) in seatKeys)
+                                {
+                                    if (deckCommits.TryGetValue(seat, out var c) && deckReveals.TryGetValue(seat, out var r)
+                                        && Deck.CommitEntropy(r) == c)
+                                        parties.Add(new SeedParty(seat, who, c, r));
+                                }
+                                if (parties.Count == seats.Count && parties.Count > 0)
+                                {
+                                    var sizes = Params.Instance.Decks.ToDictionary(kv => kv.Key, kv => kv.Value.Count);
+                                    deckOrder = Deck.DealerlessDeckOrder(parties, gameId, sizes);
+                                    if (deckOrder != null) requireFair = true;
+                                }
+                            }
+                            try { state = Engine.InitialState(cfg.GetProperty("network").GetString()!, cfg.GetProperty("seatCount").GetInt32(), cfg.GetProperty("bankReserve").GetInt64(), deckOrder, requireFair); started = true; TryRoll(); }
                             catch { state = null; started = false; }
                         }
                     }

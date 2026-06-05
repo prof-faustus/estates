@@ -29,6 +29,10 @@ const peers = masters.map((m) => new NetTable(mem, 'p', () => {}, { identity: ga
 peers.forEach((p) => p.connect());
 peers[0]!.createTable(2, 'regtest');
 peers.forEach((p) => p.joinSeat());
+// dealerless deck shuffle: every seat commits→reveals entropy before start, so the
+// live channel also carries the jointly-generated deck order the native must rebuild.
+peers.forEach((p) => p.commitDeckEntropy());
+peers.forEach((p) => p.revealDeckEntropy());
 peers[0]!.start();
 
 for (let step = 0; step < 600; step++) {

@@ -130,8 +130,10 @@ public partial class MainWindow : Window
 
             var logHex = frames.Select(f => Tx.ToHex(f)).ToList();
             // replay the ordered, per-frame-authenticated log into the canonical state.
+            // gameId = gameIdFromChannel(channel) so the dealerless deck order is rebuilt.
+            string gameId = GameReplay.GameIdFromChannel(channel);
             GameState? s;
-            try { s = GameReplay.ReplayState(logHex); }
+            try { s = GameReplay.ReplayState(logHex, gameId); }
             catch (Exception ex) { LiveLine.Text = $"{frames.Count} frames · replay error: " + ex.Message; return; }
 
             if (s == null) { LiveLine.Text = $"{frames.Count} frames · game not started yet"; return; }

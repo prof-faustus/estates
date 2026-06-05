@@ -251,12 +251,42 @@ if (File.Exists(repPath))
     using var rdoc = JsonDocument.Parse(File.ReadAllText(repPath));
     var rv = rdoc.RootElement;
     var log = rv.GetProperty("log").EnumerateArray().Select(x => x.GetString()!).ToList();
-    string? got = GameReplay.ReplayStateHash(log);
+    string? rgid = rv.TryGetProperty("gameId", out var rg) ? rg.GetString() : null;
+    string? got = GameReplay.ReplayStateHash(log, rgid);
     string want = rv.GetProperty("stateHash").GetString()!;
     bool ok = got == want;
     Console.WriteLine($"Estates.Conformance (replay): {(ok ? $"PASS — native replayed {log.Count} frames (turn {rv.GetProperty("turnIndex").GetInt32()}) to the SAME state hash as the web" : $"FAIL — want {want[..16]}… got {got?[..16] ?? "null"}…")}");
     if (!ok) repfail = 1;
 }
+
+// ---- DEALERLESS DECK SHUFFLE replay: a game that ran the entropy round must
+// replay to the SAME jointly-generated deckOrder + canonical hash. Proves Deck.cs
+// (combineSeedBound / permutation / dealerlessDeckOrder) + GameReplay's dcommit/
+// dreveal path agree with the web byte-for-byte. ----
+int drfail = 0;
+string drPath = Path.Combine(AppContext.BaseDirectory, "deckreplay-vectors.json");
+if (File.Exists(drPath))
+{
+    using var ddoc = JsonDocument.Parse(File.ReadAllText(drPath));
+    var dv = ddoc.RootElement;
+    var dlog = dv.GetProperty("log").EnumerateArray().Select(x => x.GetString()!).ToList();
+    string dgid = dv.GetProperty("gameId").GetString()!;
+    var dstate = GameReplay.ReplayState(dlog, dgid);
+    string? dgot = dstate == null ? null : Canonical.HashState(dstate);
+    string dwant = dv.GetProperty("stateHash").GetString()!;
+    // direct check: the recomputed deckOrder must equal the web's, deck by deck.
+    bool orderOk = dstate?.DeckOrder != null;
+    foreach (var deck in dv.GetProperty("deckOrder").EnumerateObject())
+    {
+        var wantArr = deck.Value.EnumerateArray().Select(x => x.GetInt32()).ToList();
+        var gotArr = dstate?.DeckOrder?.GetValueOrDefault(deck.Name);
+        if (gotArr == null || !gotArr.SequenceEqual(wantArr)) orderOk = false;
+    }
+    bool dok = dgot == dwant && orderOk;
+    Console.WriteLine($"Estates.Conformance (deckshuffle): {(dok ? $"PASS — native recomputed the jointly-generated deck order [{string.Join(", ", dstate!.DeckOrder!.Keys)}] and replayed {dlog.Count} frames to the SAME hash as the web" : $"FAIL — orderOk {orderOk}, want {dwant[..16]}… got {dgot?[..16] ?? "null"}…")}");
+    if (!dok) drfail = 1;
+}
+else Console.WriteLine("Estates.Conformance (deckshuffle): skipped (no deckreplay-vectors.json)");
 
 // ---- BEACON cross-validation: native dice beacon (commit/reveal -> dice + chained
 // beacon) must equal the TS reference; a non-opening reveal is rejected. ----
@@ -327,7 +357,8 @@ if (File.Exists(livePath))
     {
         var lhist = await lclient.HistoryAsync(lch);
         var lhex = lhist.Select(f => Tx.ToHex(f)).ToList();
-        string? lgot = GameReplay.ReplayStateHash(lhex);
+        string? lgid = lm.TryGetProperty("gameId", out var lg) ? lg.GetString() : null;
+        string? lgot = GameReplay.ReplayStateHash(lhex, lgid);
         bool lok = lhist.Count == lframes && lgot == lwant;
         Console.WriteLine($"Estates.Conformance (spectate): {(lok ? $"PASS — native read {lhist.Count} frames live over HTTP from '{lch}' and replayed to the SAME hash as the web ({lwant[..16]}…)" : $"FAIL — frames {lhist.Count}/{lframes}, want {lwant[..16]}… got {lgot?[..16] ?? "null"}…")}");
         if (!lok) lfail = 1;
@@ -336,4 +367,4 @@ if (File.Exists(livePath))
 }
 else Console.WriteLine("Estates.Conformance (spectate): skipped (no live-spectate.json; run tools/live-spectate.ts alongside)");
 
-return (fail == 0 && kfail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && gfail == 0 && mfail == 0 && bfail == 0 && ffail == 0 && repfail == 0 && rfail == 0 && lfail == 0) ? 0 : 1;
+return (fail == 0 && kfail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && gfail == 0 && mfail == 0 && bfail == 0 && ffail == 0 && repfail == 0 && drfail == 0 && rfail == 0 && lfail == 0) ? 0 : 1;
