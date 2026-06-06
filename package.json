@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "ESTATES — a dealerless, fully-on-chain, fully-auditable property game on BSV. Original non-copyright content; money in native satoshis; title/Reprieve cards as 1-sat NFTs.",
+  "description": "ESTATES — a dealerless, peer-to-peer (NO server), real-BSV property game. Original non-copyright content; money in native satoshis; title/Reprieve cards as 1-sat NFTs (concealed deck cards via @estates/cardnft). On-chain settlement + audit are being completed; nothing is claimed complete that is not.",
   "license": "MIT",
   "packageManager": "pnpm@9.0.0",
   "engines": {
