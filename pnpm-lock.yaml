@@ -83,6 +83,9 @@ importers:
 
   packages/bank:
     dependencies:
+      '@estates/cardchain':
+        specifier: workspace:*
+        version: link:../cardchain
       '@estates/onchain':
         specifier: workspace:*
         version: link:../onchain
@@ -131,6 +134,9 @@ importers:
       '@estates/deck':
         specifier: workspace:*
         version: link:../deck
+      '@estates/onchain':
+        specifier: workspace:*
+        version: link:../onchain
       '@estates/params':
         specifier: workspace:*
         version: link:../params

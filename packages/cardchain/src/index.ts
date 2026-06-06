@@ -18,9 +18,10 @@
  * PLUS the ECIES re-seal to the new holder (the old holder can no longer decrypt).
  */
 import { loadParams } from '@estates/params';
-import { mintCard, openCard, type ConcealedCard, type CardFace, type CardSecret } from '@estates/deck';
+import { mintCard, openCard, genCardKey, type ConcealedCard, type CardFace, type CardSecret, type CardKey } from '@estates/deck';
+import { type TxOutput } from '@estates/onchain';
 import {
-  mintCardNft, transferCardNft, verifyDeckNfts, isLiveCard,
+  cardNftOutput, mintCardNft, transferCardNft, deckToNfts, verifyDeckNfts, isLiveCard,
   type CardNft, type Outpoint, type CardTransfer, type DeckCheck,
 } from '@estates/cardnft';
 import { ripemd160 } from '@noble/hashes/ripemd160';
@@ -74,6 +75,43 @@ export function mintCardDeck(
   return { nfts, secrets };
 }
 
+export interface CardDeckGenesis {
+  readonly outputs: readonly TxOutput[];        // 1-sat card NFT outputs to add to the genesis tx
+  readonly concealed: readonly ConcealedCard[]; // the concealment per deck position (no outpoint yet)
+  readonly secrets: readonly CardSecret[];       // the BANK's view (face + blind + key) per position
+}
+
+/**
+ * Build the 1-sat card NFT OUTPUTS for a deck to mint at genesis (sealed to the bank, in
+ * the jointly-generated draw `order`). The outputs are appended to the genesis tx; once
+ * the genesis txid is known, `bindCardNfts(concealed, bankPkh, outpoints)` produces the
+ * live CardNft records. Returned `secrets` are the bank's (it holds every card initially).
+ */
+export function cardDeckOutputs(
+  gameId: string, deckName: string, order: readonly number[], bankPub: Uint8Array, bankPkh: Uint8Array,
+): CardDeckGenesis {
+  const faces = deckFaces(deckName);
+  if (order.length !== faces.length) throw new Error('cardchain: order length must equal the deck size');
+  const outputs: TxOutput[] = [];
+  const concealed: ConcealedCard[] = [];
+  const secrets: CardSecret[] = [];
+  order.forEach((faceIdx) => {
+    const face = faces[faceIdx];
+    if (!face) throw new Error(`cardchain: order references a non-existent face ${faceIdx}`);
+    const { card, secret } = mintCard(gameId, face, bankPub);
+    outputs.push(cardNftOutput(card.tableId, card.commitment, card.cardPub, bankPkh));
+    concealed.push(card);
+    secrets.push(secret);
+  });
+  return { outputs, concealed, secrets };
+}
+
+/** Bind genesis-minted concealed cards to their on-chain outpoints (after the genesis
+ *  txid is known) → the live bank-held card NFTs. */
+export function bindCardNfts(concealed: readonly ConcealedCard[], bankPkh: Uint8Array, outpoints: readonly Outpoint[]): CardNft[] {
+  return deckToNfts(concealed, bankPkh, outpoints);
+}
+
 /** The ConcealedCard view of a card NFT (its concealment fields). */
 export function concealedOf(nft: CardNft): ConcealedCard {
   return { tableId: nft.tableId, cardPub: nft.cardPub, commitment: nft.commitment, sealed: nft.sealed };
@@ -102,5 +140,5 @@ export function openHeld(nft: CardNft, holderPriv: Uint8Array, blind: Uint8Array
   return openCard(concealedOf(nft), holderPriv, blind, nft.tableId);
 }
 
-export { verifyDeckNfts, isLiveCard };
-export type { CardNft, CardTransfer, DeckCheck, CardSecret, Outpoint };
+export { verifyDeckNfts, isLiveCard, genCardKey };
+export type { CardNft, CardTransfer, DeckCheck, CardSecret, CardKey, Outpoint };

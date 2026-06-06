@@ -19,6 +19,7 @@ import {
   type TxOutput, type TitleState, type Outpoint,
 } from '@estates/onchain';
 import { sighashPreimage, signInput, type Tx, type TxInput, type KeyPair } from '@estates/trade';
+import { cardDeckOutputs, type CardDeckGenesis } from '@estates/cardchain';
 import { covenantOutput, verifyCovenantSpend, type Covenant, type CovenantCheck } from './covenant.ts';
 
 // Trustless covenant bank (D-BANK-ENFORCE upgrade) + banker role.
@@ -172,6 +173,11 @@ export interface GenesisConfig {
   readonly bankReserve: number;
   readonly fundingInputs: readonly Outpoint[];
   readonly beaconSeed: Uint8Array;      // initial prev_beacon (≥32 bytes)
+  /** Optional: ALSO mint the concealed Fate/Treasury card decks as 1-sat card NFTs
+   *  (held by the bank), sealed to this card-holder pubkey. Omit to mint titles only. */
+  readonly cardDealerPub?: Uint8Array;
+  /** The jointly-generated draw order per deck (dealerless shuffle); identity if absent. */
+  readonly cardDeckOrder?: Readonly<Record<string, readonly number[]>>;
 }
 
 export interface GenesisResult {
@@ -181,6 +187,10 @@ export interface GenesisResult {
   readonly reserveVout: number;
   readonly paramsVout: number;
   readonly beaconVout: number;
+  /** When cardDealerPub was supplied: deck name -> the genesis vouts of its card NFTs,
+   *  and the bank's concealed-card view (for binding outpoints + drawing). */
+  readonly cardVouts?: Readonly<Record<string, readonly number[]>>;
+  readonly cardDecks?: Readonly<Record<string, CardDeckGenesis>>;
 }
 
 const toHex = (b: Uint8Array): string => Buffer.from(b).toString('hex');
@@ -221,6 +231,24 @@ export function buildGenesis(cfg: GenesisConfig): GenesisResult {
     reprieveVouts.push(outputs.length);
     outputs.push(nftOutput(state, cfg.bankPkh));
   }
+  // OPTIONAL: the concealed Fate/Treasury card decks as 1-sat card NFTs, held by the
+  // bank (sealed to cfg.cardDealerPub). Each card is a real UTXO; @estates/cardchain
+  // later transfers them on draw/pass (spending the outpoint + re-sealing to the player,
+  // so the bank loses access). Minted only when a card dealer pubkey is supplied.
+  let cardVouts: Record<string, readonly number[]> | undefined;
+  let cardDecks: Record<string, CardDeckGenesis> | undefined;
+  if (cfg.cardDealerPub) {
+    cardVouts = {}; cardDecks = {};
+    const gid = toHex(cfg.gameId);
+    for (const deck of Object.keys(P.decks)) {
+      const order = cfg.cardDeckOrder?.[deck] ?? P.decks[deck]!.map((_c, i) => i);
+      const cg = cardDeckOutputs(gid, deck, order, cfg.cardDealerPub, cfg.bankPkh);
+      const vouts: number[] = [];
+      for (const o of cg.outputs) { vouts.push(outputs.length); outputs.push(o); }
+      cardVouts[deck] = vouts;
+      cardDecks[deck] = cg;
+    }
+  }
   // seat starting balances (native sats)
   for (const pkh of cfg.seatPkhs) outputs.push(paymentOutput(cfg.startingBalance, pkh));
   // bank reserve
@@ -238,5 +266,8 @@ export function buildGenesis(cfg: GenesisConfig): GenesisResult {
 
   const inputs: TxInput[] = cfg.fundingInputs.map((o) => ({ outpoint: o, owner: cfg.bankPkh, sequence: 0xffffffff }));
   const tx: Tx = { version: 1, inputs, outputs, nLockTime: 0 };
-  return { tx, titleVout, reprieveVouts, reserveVout, paramsVout, beaconVout };
+  return {
+    tx, titleVout, reprieveVouts, reserveVout, paramsVout, beaconVout,
+    ...(cardVouts ? { cardVouts } : {}), ...(cardDecks ? { cardDecks } : {}),
+  };
 }

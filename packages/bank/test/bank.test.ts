@@ -8,6 +8,7 @@ import {
   verifyReserveSpend, reserveOutput, rulesHash, buildCovenantPayout, bankActionBelongsToGame,
   type BankPolicy, type Covenant,
 } from '../src/index.ts';
+import { bindCardNfts, verifyDeckNfts, genCardKey } from '@estates/cardchain';
 
 const P = loadParams();
 const GAME = new Uint8Array(32).fill(11);
@@ -84,6 +85,31 @@ test('genesis tx mints all 1-sat NFTs and funds seats + reserve', () => {
   assert.equal(g.tx.outputs[g.reserveVout]!.satoshis, 40000);
   // total NFTs = 30 (28 + 2)
   assert.equal(nftIdx.length, 30);
+});
+
+test('genesis can ALSO mint the Fate/Treasury decks as concealed 1-sat card NFTs (bank-held)', () => {
+  const seats = [genKeyPair(), genKeyPair()];
+  const bank = genKeyPair();
+  const dealer = genCardKey();   // the bank's card-holder key — every card is sealed to it
+  const g = buildGenesis({
+    network: 'regtest', gameId: GAME, seatPkhs: seats.map((k) => k.pkh), bankPkh: bank.pkh,
+    startingBalance: 1500, bankReserve: 40000, fundingInputs: [op], beaconSeed: new Uint8Array(32).fill(1),
+    cardDealerPub: dealer.pub,
+  });
+  assert.ok(g.cardVouts && g.cardDecks, 'the card decks were minted at genesis');
+  const gameHex = Buffer.from(GAME).toString('hex');
+  for (const deck of ['Fate', 'Treasury'] as const) {
+    const vouts: readonly number[] = g.cardVouts![deck]!;
+    assert.equal(vouts.length, 12, `${deck} has 12 concealed card NFTs`);
+    for (const v of vouts) assert.equal(g.tx.outputs[v]!.satoshis, 1, 'every card is a 1-sat NFT output');
+    // bind the genesis outpoints (txid:vout) → the live bank-held card NFTs
+    const nfts = bindCardNfts(g.cardDecks![deck]!.concealed, bank.pkh, vouts.map((v: number) => ({ txid: 'ab'.repeat(32), vout: v })));
+    const check = verifyDeckNfts(nfts, gameHex);
+    assert.ok(check.ok, check.reason);
+  }
+  // titles + reprieve are still minted alongside (28 + 2)
+  assert.equal(Object.keys(g.titleVout).length, 28);
+  assert.equal(g.reprieveVouts.length, 2);
 });
 
 test('genesis output count is fully accounted for', () => {

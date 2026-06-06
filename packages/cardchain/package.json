@@ -10,6 +10,7 @@
     "@estates/params": "workspace:*",
     "@estates/deck": "workspace:*",
     "@estates/cardnft": "workspace:*",
+    "@estates/onchain": "workspace:*",
     "@noble/hashes": "1.5.0"
   },
   "scripts": { "test": "node --test --experimental-strip-types \"test/**/*.test.ts\"" }
