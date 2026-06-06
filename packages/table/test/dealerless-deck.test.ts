@@ -48,6 +48,20 @@ test('different entropy → a different deck order (no single party fixes it)', 
   assert.notDeepEqual(run(1), run(5), 'changing a participant changes the order');
 });
 
+test('a reveal published BEFORE every seat has committed is REJECTED (commit-before-reveal soundness)', () => {
+  const { peers } = lobby([new Uint8Array(32).fill(1), new Uint8Array(32).fill(2)]);
+  peers[0]!.commitDeckEntropy();   // seat 0 commits
+  peers[0]!.revealDeckEntropy();   // seat 0 reveals PREMATURELY — seat 1 has NOT committed yet → dropped by the gate
+  peers[1]!.commitDeckEntropy();   // seat 1 commits (all committed now, but seat 0 already leaked early)
+  peers[1]!.revealDeckEntropy();   // seat 1 reveals (valid)
+  peers[0]!.start();
+  // seat 0's early reveal was dropped and never re-sent, so the joint shuffle is
+  // incomplete — the game must NOT seed a partial/biasable order. No single seat could
+  // have chosen its entropy after seeing another's reveal.
+  assert.equal(peers[0]!.state?.deckOrder, undefined, 'a premature reveal cannot seed the shuffle');
+  assert.deepEqual(peers[1]!.state?.deckOrder, peers[0]!.state?.deckOrder, 'both peers agree (no order)');
+});
+
 test('backward compatible: without the entropy round, the game starts with the declared order', () => {
   const { peers } = lobby([new Uint8Array(32).fill(3), new Uint8Array(32).fill(4)]);
   peers[0]!.start(); // no deck entropy committed

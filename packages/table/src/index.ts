@@ -591,11 +591,16 @@ export class NetTable {
           }
           break;
         case 'dcommit':
-          // deck-shuffle entropy commitment, only from that seat's own key (pre-start)
-          if (!started && seatKeys.get(m.seat) === signPub && !deckCommits.has(m.seat)) deckCommits.set(m.seat, m.c);
+          // COMMIT PHASE only (mental-poker soundness): a deck-entropy commitment from
+          // that seat's own key, accepted ONLY before ANY reveal has appeared — so no
+          // seat can pick its entropy after seeing another seat's revealed secret.
+          if (!started && seatKeys.get(m.seat) === signPub && !deckCommits.has(m.seat) && deckReveals.size === 0) deckCommits.set(m.seat, m.c);
           break;
         case 'dreveal':
-          if (!started && seatKeys.get(m.seat) === signPub && !deckReveals.has(m.seat)) deckReveals.set(m.seat, fromHex(m.s));
+          // REVEAL PHASE: a reveal is accepted ONLY once EVERY seated seat has already
+          // committed, so all commitments are fixed before any secret is exposed.
+          if (!started && seatKeys.get(m.seat) === signPub && !deckReveals.has(m.seat)
+              && seatKeys.size > 0 && [...seatKeys.keys()].every((s) => deckCommits.has(s))) deckReveals.set(m.seat, fromHex(m.s));
           break;
         case 'start':
           // host-signed AND the bound seat map must match the claimed seats (audit #2)

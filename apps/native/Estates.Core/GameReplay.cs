@@ -92,15 +92,18 @@ public static class GameReplay
                 }
                 case "dcommit":
                 {
+                    // COMMIT PHASE only: accepted ONLY before any reveal (mental-poker soundness).
                     int seat = f.GetProperty("seat").GetInt32();
-                    if (!started && seatKeys.GetValueOrDefault(seat) == signPub && !deckCommits.ContainsKey(seat))
+                    if (!started && seatKeys.GetValueOrDefault(seat) == signPub && !deckCommits.ContainsKey(seat) && deckReveals.Count == 0)
                         deckCommits[seat] = f.GetProperty("c").GetString()!;
                     break;
                 }
                 case "dreveal":
                 {
+                    // REVEAL PHASE: accepted ONLY once EVERY seated seat has committed.
                     int seat = f.GetProperty("seat").GetInt32();
-                    if (!started && seatKeys.GetValueOrDefault(seat) == signPub && !deckReveals.ContainsKey(seat))
+                    if (!started && seatKeys.GetValueOrDefault(seat) == signPub && !deckReveals.ContainsKey(seat)
+                        && seatKeys.Count > 0 && seatKeys.Keys.All(s => deckCommits.ContainsKey(s)))
                         try { deckReveals[seat] = Tx.FromHex(f.GetProperty("s").GetString()!); } catch { }
                     break;
                 }
