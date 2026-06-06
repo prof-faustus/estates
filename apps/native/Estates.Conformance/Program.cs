@@ -329,6 +329,39 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("headers: an 81-byte buffer is rejected (total parse)", BsvHeaders.Parse(new byte[81]) is null);
 }
 
+// On-chain SMART CONTRACTS: the OP_PUSH_TX covenant engine + auctions where EVERY bid is a
+// conditional contract (win pays the grantor + mints the role NFT; refund only once outbid/closed).
+{
+    byte[] gpkh = Recovery.Hash160(Secp256k1.PublicKey(RandomNumberGenerator.GetBytes(32)));
+    byte[] bpkh = Recovery.Hash160(Secp256k1.PublicKey(RandomNumberGenerator.GetBytes(32)));
+    string prev = Tx.ToHex(SHA256.HashData("auction-prev"u8.ToArray()));
+    byte[] scriptCode = Recovery.P2pkh(gpkh);
+    var sampleTx = new NativeTx(2, new[] { new TxInputN(prev, 0, Array.Empty<byte>(), 0xffffffff) }, new[] { new TxOutputN(90000, Recovery.P2pkh(bpkh)) }, 0);
+    X("pushtx: preimage double-hashes to the BIP-143 sighash (matches Scriptvm)",
+        Tx.ToHex(Tx.Hash256(PushTx.Preimage(sampleTx, 0, scriptCode, 100000))) == Tx.ToHex(Scriptvm.Sighash(sampleTx, 0, scriptCode, 100000, 0x41)));
+    X("pushtx: CheckPreimage accepts the genuine preimage", PushTx.CheckPreimage(sampleTx, 0, scriptCode, 100000, PushTx.Preimage(sampleTx, 0, scriptCode, 100000)) is not null);
+    var tampered = (byte[])PushTx.Preimage(sampleTx, 0, scriptCode, 100000).Clone(); tampered[0] ^= 0xff;
+    X("pushtx: CheckPreimage rejects a forged preimage", PushTx.CheckPreimage(sampleTx, 0, scriptCode, 100000, tampered) is null);
+    X("pushtx: extracted hashOutputs equals the tx's hashOutputs", Tx.ToHex(PushTx.PreimageHashOutputs(PushTx.Preimage(sampleTx, 0, scriptCode, 100000), scriptCode.Length)) == Tx.ToHex(PushTx.HashOutputs(sampleTx)));
+
+    long deadline = 800_000;
+    var bid = new Bid("auction:banker:table7", gpkh, bpkh, 100_000, deadline);
+    byte[] roleNft = Auction.RoleNft("banker", bpkh);
+    byte[] cov = Auction.CovenantScript(bid, roleNft);
+    string covTxid = Tx.ToHex(SHA256.HashData("bid-cov"u8.ToArray()));
+    var bidTx = Auction.BuildBidTx(bid, roleNft, prev, 1, Array.Empty<byte>());
+    X("auction: a bid is its own on-chain tx locking the covenant", bidTx.Outputs.Count == 1 && bidTx.Outputs[0].Script.AsSpan().SequenceEqual(cov));
+    var winTx = Auction.BuildWin(bid, roleNft, covTxid, 0);
+    X("auction: the highest bid settles (grantor paid + role NFT to bidder)", Auction.VerifyWin(bid, roleNft, winTx, 100_000, new long[] { 50_000, 90_000 }).Ok);
+    X("auction: a non-highest bid CANNOT win (outbid ⇒ rejected)", !Auction.VerifyWin(bid, roleNft, winTx, 100_000, new long[] { 120_000 }).Ok);
+    var forgedWin = winTx with { Outputs = new[] { new TxOutputN(100_000, Auction.RoleNft("banker", gpkh)) } }; // attacker redirects the role
+    X("auction: forged win outputs are rejected by the covenant", !Auction.VerifyWin(bid, roleNft, forgedWin, 100_000, Array.Empty<long>()).Ok);
+    var refundTx = Auction.BuildRefund(bid, covTxid, 0);
+    X("auction: refund is BLOCKED while winning and before the deadline", !Auction.VerifyRefund(bid, roleNft, refundTx, 100_000, new long[] { 50_000 }, 0).Ok);
+    X("auction: refund is ALLOWED once outbid", Auction.VerifyRefund(bid, roleNft, refundTx, 100_000, new long[] { 150_000 }, 0).Ok);
+    X("auction: refund is ALLOWED once the deadline passes", Auction.VerifyRefund(bid, roleNft, refundTx, 100_000, Array.Empty<long>(), deadline).Ok);
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
