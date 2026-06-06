@@ -56,7 +56,7 @@ test('all-bots is rejected (need a human); non-authority START rejected', () => 
   assert.ok(!noHuman.ok && noHuman.code === 'NEED_A_HUMAN');
 });
 
-test('regtest START auto-funds and emits an EngineConfig that seeds the core', () => {
+test('START emits an EngineConfig seeded by the banker buy-in — SAME model on regtest', () => {
   let s = createLobby(cfg);
   s = run(s, [
     { type: 'JOIN', playerId: 'host' }, { type: 'READY', playerId: 'host', ready: true },
@@ -64,8 +64,9 @@ test('regtest START auto-funds and emits an EngineConfig that seeds the core', (
   ]);
   const r = applyLobby(s, { type: 'START', by: 'host' });
   assert.ok(r.ok); const g = r.state.genesis!;
-  assert.equal(g.autoFunded, true);
-  assert.ok(g.fundLog.length >= 2);
+  // NO auto-funding on ANY network — funded by the banker's real buy-in.
+  assert.match(g.fundLog[0]!, /buy-in/);
+  assert.doesNotMatch(g.fundLog[0]!, /auto-fund/);
   assert.equal(g.engineConfig.network, 'regtest');
   assert.equal(g.engineConfig.seatCount, 2);
   assert.ok(g.engineConfig.bankReserve > 0);
@@ -75,17 +76,23 @@ test('regtest START auto-funds and emits an EngineConfig that seeds the core', (
   assert.equal(gs.bankReserve, g.engineConfig.bankReserve);
 });
 
-test('network mode is fixed at genesis (testnet does not auto-fund seat balances)', () => {
-  let s = createLobby({ network: 'testnet', authority: 'host' });
-  s = run(s, [
-    { type: 'JOIN', playerId: 'host' }, { type: 'READY', playerId: 'host', ready: true },
-    { type: 'FILL_BOT', by: 'host', policy: 'balanced' },
-  ]);
-  const r = applyLobby(s, { type: 'START', by: 'host' });
-  assert.ok(r.ok); const g = r.state.genesis!;
-  assert.equal(g.autoFunded, false);
-  assert.equal(g.engineConfig.network, 'testnet');
-  assert.match(g.fundLog[0]!, /buy-in/);
+test('the funding model is IDENTICAL on regtest, testnet, and mainnet (no auto-fund anywhere)', () => {
+  const fundLogs = (['regtest', 'testnet', 'mainnet'] as const).map((network) => {
+    let s = createLobby({ network, authority: 'host' });
+    s = run(s, [
+      { type: 'JOIN', playerId: 'host' }, { type: 'READY', playerId: 'host', ready: true },
+      { type: 'FILL_BOT', by: 'host', policy: 'balanced' },
+    ]);
+    const r = applyLobby(s, { type: 'START', by: 'host' });
+    assert.ok(r.ok); const g = r.state.genesis!;
+    assert.match(g.fundLog[0]!, /buy-in/);
+    assert.doesNotMatch(g.fundLog[0]!, /auto-fund/);
+    assert.equal(g.engineConfig.network, network);
+    return g.fundLog[0]!.replace(`[${network}]`, '[NET]');
+  });
+  // the funding message (minus the network name) is identical → one model for all
+  assert.equal(fundLogs[0], fundLogs[1]);
+  assert.equal(fundLogs[1], fundLogs[2]);
 });
 
 test('actions after START are rejected', () => {

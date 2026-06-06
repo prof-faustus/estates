@@ -8,9 +8,10 @@ attack it.
 
 Pure join / leave / ready / fill-bot / start. The **network mode is fixed at lobby
 genesis and immutable**. The start-authority (host) may START once there are ≥2
-occupied seats including ≥1 human, optionally overriding the all-ready gate. On
-regtest, START auto-funds seat balances and the bank reserve (explicit + logged) and
-emits the `EngineConfig` for `@estates/engine`.
+occupied seats including ≥1 human, optionally overriding the all-ready gate. START
+emits the `EngineConfig` for `@estates/engine`. Funding is the **same on every
+network** (regtest = testnet = real BSV): the banker's REAL buy-in at the genesis tx
+— there is NO auto-funding / free grant on any network.
 
 ## The properties this exists to guarantee
 
@@ -22,8 +23,9 @@ emits the `EngineConfig` for `@estates/engine`.
   (without override) all-ready; a non-authority START is rejected.
 - **Human-control:** an all-bots lobby cannot start — every game has a human, who
   controls every real decision (the project's human-control invariant).
-- **Immutable network:** the network mode is fixed at genesis; testnet/mainnet do not
-  silently auto-fund (only regtest does, explicitly and logged).
+- **Immutable network + one funding model:** the network mode is fixed at genesis, and
+  funding is identical on every network — the banker's real buy-in. No network is ever
+  auto-funded or given a free grant.
 - **No post-start mutation:** actions after START are rejected.
 
 ## Threat model
@@ -38,4 +40,5 @@ emits the `EngineConfig` for `@estates/engine`.
 ## What this package does NOT do
 
 - It does not run the game (that is `@estates/engine` via the config it emits) and
-  does not move real money beyond the explicit, logged regtest auto-fund.
+  moves no money itself — funding is the banker's real buy-in at the genesis tx, the
+  same on every network.

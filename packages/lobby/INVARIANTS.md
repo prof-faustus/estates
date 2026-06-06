@@ -16,11 +16,12 @@ to break it.
 |---|---|---|
 | G1 | START requires authority, ≥2 seats, ≥1 human, and (non-override) all ready | "START requires authority, ≥2 seats, ≥1 human, and (non-override) all ready" |
 | G2 | All-bots is rejected (need a human); non-authority START rejected | "all-bots is rejected (need a human); non-authority START rejected" |
-| G3 | Regtest START auto-funds and emits an EngineConfig that seeds the core | "regtest START auto-funds and emits an EngineConfig that seeds the core" |
+| G3 | START emits an EngineConfig seeded by the banker buy-in (same model on regtest) | "START emits an EngineConfig seeded by the banker buy-in — SAME model on regtest" |
+| G4 | The funding model is IDENTICAL on regtest, testnet, and mainnet (no free grant anywhere) | "the funding model is IDENTICAL on regtest, testnet, and mainnet (no auto-fund anywhere)" |
 
 ## Immutability
 
 | # | Claim | Test |
 |---|---|---|
-| I1 | Network mode is fixed at genesis (testnet does not auto-fund seat balances) | "network mode is fixed at genesis (testnet does not auto-fund seat balances)" |
+| I1 | The chosen network is carried unchanged into the genesis EngineConfig (per network) | "the funding model is IDENTICAL on regtest, testnet, and mainnet (no auto-fund anywhere)" |
 | I2 | Actions after START are rejected | "actions after START are rejected" |

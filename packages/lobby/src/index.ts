@@ -4,9 +4,10 @@
  * Pure state machine: join / leave / ready / fill-bot / start. The network mode
  * is fixed at lobby genesis and is immutable. The start-authority (host) may
  * START once there are ≥2 occupied seats including ≥1 human, optionally
- * overriding the all-ready gate ("override start", 1 human + bot … 6). On
- * regtest, START auto-funds seat balances and the bank reserve (explicit +
- * logged). START emits the EngineConfig that seeds @estates/engine.
+ * overriding the all-ready gate ("override start", 1 human + bot … 6). START emits
+ * the EngineConfig that seeds @estates/engine. Funding is the SAME on EVERY network
+ * (regtest = testnet = real BSV): the banker's REAL buy-in at the genesis tx — there
+ * is NO auto-funding anywhere.
  */
 import { loadParams, type NetworkMode, type EstatesParams } from '@estates/params';
 import type { EngineConfig } from '@estates/engine';
@@ -31,7 +32,6 @@ export interface SeatMeta {
 export interface Genesis {
   readonly engineConfig: EngineConfig;
   readonly seats: readonly SeatMeta[];
-  readonly autoFunded: boolean;
   readonly fundLog: readonly string[];
 }
 
@@ -48,7 +48,7 @@ export interface LobbyConfig {
   readonly network: NetworkMode;
   readonly authority: string;
   readonly maxSeats?: number;       // ≤ params.max_seats
-  /** bank reserve sized as this many salary payments (regtest auto-fund). */
+  /** bank reserve sized as this many salary payments (funded by the banker's real buy-in). */
   readonly reserveSalaryCap?: number;
 }
 
@@ -130,24 +130,18 @@ function buildGenesis(s: LobbyState, reserveSalaryCap = 200): Genesis {
       : { kind: x.kind, playerId: x.playerId, policy: x.policy },
   );
   const seatCount = seats.length;
-  const fundLog: string[] = [];
-  let bankReserve = 0;
-  let autoFunded = false;
+  const bankReserve = P.scalars.salary * reserveSalaryCap;
 
-  if (s.network === 'regtest') {
-    autoFunded = true;
-    bankReserve = P.scalars.salary * reserveSalaryCap;
-    for (let i = 0; i < seatCount; i++) {
-      fundLog.push(`[regtest auto-fund] seat ${i} balance = ${P.scalars.starting_balance_per_seat} sats`);
-    }
-    fundLog.push(`[regtest auto-fund] bank reserve = ${bankReserve} sats (${reserveSalaryCap} × salary ${P.scalars.salary})`);
-  } else {
-    // testnet/mainnet: funded by buy-in at the genesis tx (Phase 3). The
-    // engine still seeds with the agreed reserve once that tx confirms.
-    bankReserve = P.scalars.salary * reserveSalaryCap;
-    fundLog.push(`[${s.network}] seat balances + bank reserve funded by buy-in at the genesis tx`);
-  }
+  // SAME MODEL ON EVERY NETWORK — regtest = testnet = real BSV. There is NO
+  // auto-funding anywhere: it is a REAL BSV game. The banker funds the seat balances
+  // and the bank reserve with a REAL buy-in at the genesis tx (the banker must hold
+  // enough sats BEFORE minting), and the engine seeds the agreed reserve once that tx
+  // confirms. (A regtest node is the player's OWN external node — same flow, real
+  // sats from their own coinbase, not a free grant.)
+  const fundLog = [
+    `[${s.network}] seat balances + bank reserve (${bankReserve} sats) are funded by the banker's REAL buy-in at the genesis tx — identical on regtest, testnet, and mainnet; no free grant on any network`,
+  ];
 
   const engineConfig: EngineConfig = { network: s.network, seatCount, bankReserve };
-  return { engineConfig, seats, autoFunded, fundLog };
+  return { engineConfig, seats, fundLog };
 }
