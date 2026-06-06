@@ -363,21 +363,29 @@ public partial class MainWindow : Window
         // Send — build + SIGN a real BSV tx in-process. The raw tx is shown to hand to a peer or
         // broadcast yourself; the wallet performs no network action.
         var send = new StackPanel(); var to = F(); var amt = F(); var fee = F(); fee.Text = "500"; var so = O(); var raw = Mono(120);
-        var sbtn = Btn("Build + sign");
-        sbtn.Click += (_, _) =>
+        var peer = F(); peer.Text = _network == "regtest" ? "127.0.0.1:18444" : "";
+        var sbtn = Btn("Send (build, sign + broadcast)");
+        sbtn.Click += async (_, _) =>
         {
             try
             {
                 var built = w.BuildSend(to.Text.Trim(), long.Parse(amt.Text.Trim()), long.Parse(fee.Text.Trim()));
-                bool ok = w.VerifySpend(built);
-                so.Text = $"txid {built.Txid}  ·  change {built.Change} sat  ·  signatures {(ok ? "VALID" : "INVALID")}";
+                if (!w.VerifySpend(built)) { so.Text = "internal error: signatures invalid"; return; }
                 raw.Text = built.RawHex;
-                w.SpendCoins(built.Spent); ShowBal();
+                var hp = peer.Text.Trim().Split(':');
+                if (hp.Length != 2 || !int.TryParse(hp[1], out int port)) { so.Text = "to broadcast, enter a peer as host:port"; return; }
+                var net = _network == "mainnet" ? BsvNet.Mainnet : _network == "testnet" ? BsvNet.Testnet : BsvNet.Regtest;
+                so.Text = $"broadcasting {built.Txid[..16]}… to {peer.Text.Trim()} …"; sbtn.IsEnabled = false;
+                bool ok = await Broadcaster.BroadcastAsync(net, hp[0], port, Tx.FromHex(built.RawHex), 15000);
+                sbtn.IsEnabled = true;
+                if (ok) { w.SpendCoins(built.Spent); ShowBal(); so.Text = $"SENT · txid {built.Txid} · accepted by peer · change {built.Change} sat"; }
+                else so.Text = $"built + signed (txid {built.Txid}) but the peer did not accept/pull it — check the host:port. Raw tx below to broadcast elsewhere.";
             }
-            catch (Exception e) { so.Text = e.Message; raw.Text = ""; }
+            catch (Exception e) { sbtn.IsEnabled = true; so.Text = e.Message; }
         };
-        send.Children.Add(L("Pay to (address)")); send.Children.Add(to); send.Children.Add(L("Amount (sat)")); send.Children.Add(amt); send.Children.Add(L("Fee (sat)")); send.Children.Add(fee); send.Children.Add(sbtn); send.Children.Add(so);
-        send.Children.Add(L("Signed raw transaction (hand to a peer / broadcast)")); send.Children.Add(raw);
+        send.Children.Add(L("Pay to (address)")); send.Children.Add(to); send.Children.Add(L("Amount (sat)")); send.Children.Add(amt); send.Children.Add(L("Fee (sat)")); send.Children.Add(fee);
+        send.Children.Add(L("Broadcast peer (host:port)")); send.Children.Add(peer); send.Children.Add(sbtn); send.Children.Add(so);
+        send.Children.Add(L("Signed raw transaction")); send.Children.Add(raw);
         tabs.Items.Add(Tab("Send", send));
 
         // Receive
