@@ -17,8 +17,10 @@ using System.Security.Cryptography;
 
 namespace Estates.Core;
 
-/// <summary>A coin this wallet owns: the outpoint, its value, and which child address holds it.</summary>
-public sealed record Coin(string Txid, long Vout, long Sats, int AddrIndex);
+/// <summary>A coin this wallet owns: the outpoint, its value, which child address holds it, and
+/// (for non-P2PKH coins like NFTs/covenants) the prevout locking script that must be signed over.
+/// `Script` null = a standard P2PKH at `AddrIndex`.</summary>
+public sealed record Coin(string Txid, long Vout, long Sats, int AddrIndex, byte[]? Script = null);
 
 public sealed class StandaloneWallet
 {
@@ -75,28 +77,58 @@ public sealed class StandaloneWallet
     public BuiltTx BuildSend(string toAddress, long amountSats, long feeSats, int changeIndex = 0)
     {
         if (amountSats <= 0) throw new ArgumentException("amount must be positive");
-        if (feeSats < 0) throw new ArgumentException("fee cannot be negative");
         byte[] recipientPkh = AddressToPkh(toAddress);
+        return BuildAndSign(new[] { new TxOutputN(amountSats, Recovery.P2pkh(recipientPkh)) }, feeSats, changeIndex);
+    }
 
-        long need = amountSats + feeSats;
-        var selected = new List<Coin>();
-        long gathered = 0;
+    /// <summary>General builder: pay EXACTLY `outputs` (any scripts — payments, NFTs, data-carriers),
+    /// select our coins to cover their value + `feeSats`, append change to `changeIndex`, and sign
+    /// every input. The whole "everything is an on-chain tx" path runs through here — entirely local.</summary>
+    public BuiltTx BuildAndSign(IReadOnlyList<TxOutputN> outputs, long feeSats, int changeIndex = 0)
+    {
+        if (feeSats < 0) throw new ArgumentException("fee cannot be negative");
+        long need = outputs.Sum(o => o.Value) + feeSats;
+        var (selected, gathered) = SelectCoins(need, null);
+        return Assemble(selected, AppendChange(outputs, gathered - need, changeIndex), gathered - need);
+    }
+
+    /// <summary>Build a tx that MUST spend `forced` (e.g. the exact NFT being transferred) as input 0,
+    /// selecting extra coins only to cover the fee/shortfall. Used for NFT transfer + covenant spends.</summary>
+    public BuiltTx BuildWithForcedInput(Coin forced, IReadOnlyList<TxOutputN> outputs, long feeSats, int changeIndex = 0)
+    {
+        if (feeSats < 0) throw new ArgumentException("fee cannot be negative");
+        long need = outputs.Sum(o => o.Value) + feeSats;
+        var (extra, gathered) = SelectCoins(need - forced.Sats, forced);
+        var selected = new List<Coin> { forced }; selected.AddRange(extra);
+        long total = forced.Sats + gathered;
+        return Assemble(selected, AppendChange(outputs, total - need, changeIndex), total - need);
+    }
+
+    private (List<Coin> sel, long got) SelectCoins(long need, Coin? exclude)
+    {
+        var sel = new List<Coin>(); long got = 0;
+        if (need <= 0) return (sel, 0);
         foreach (var c in _coins.OrderByDescending(c => c.Sats))
         {
-            selected.Add(c); gathered += c.Sats;
-            if (gathered >= need) break;
+            if (exclude is not null && c.Txid == exclude.Txid && c.Vout == exclude.Vout) continue;
+            sel.Add(c); got += c.Sats;
+            if (got >= need) break;
         }
-        if (gathered < need) throw new InvalidOperationException($"insufficient funds: have {gathered}, need {need}");
+        if (got < need) throw new InvalidOperationException($"insufficient funds: have {got}, need {need}");
+        return (sel, got);
+    }
 
-        long change = gathered - need;
-        var outputs = new List<TxOutputN> { new(amountSats, Recovery.P2pkh(recipientPkh)) };
-        if (change > 0) outputs.Add(new TxOutputN(change, Recovery.P2pkh(Recovery.Hash160(ChildPub(changeIndex)))));
+    private List<TxOutputN> AppendChange(IReadOnlyList<TxOutputN> outputs, long change, int changeIndex)
+    {
+        var outs = outputs.ToList();
+        if (change > 0) outs.Add(new TxOutputN(change, Recovery.P2pkh(Recovery.Hash160(ChildPub(changeIndex)))));
+        return outs;
+    }
 
-        // unsigned inputs first (sighash is computed over the whole tx with empty scriptSigs)
+    private BuiltTx Assemble(IReadOnlyList<Coin> selected, IReadOnlyList<TxOutputN> outs, long change)
+    {
         var inputs = selected.Select(c => new TxInputN(c.Txid, c.Vout, Array.Empty<byte>(), 0xffffffff)).ToArray();
-        var unsigned = new NativeTx(2, inputs, outputs.ToArray(), 0);
-
-        // sign each input with its holding child key over the BIP-143 preimage
+        var unsigned = new NativeTx(2, inputs, outs.ToArray(), 0);
         var signedInputs = new TxInputN[selected.Count];
         for (int i = 0; i < selected.Count; i++)
         {
@@ -111,7 +143,8 @@ public sealed class StandaloneWallet
             signedInputs[i] = unsigned.Inputs[i] with { ScriptSig = ss.ToArray() };
         }
         var signed = new NativeTx(unsigned.Version, signedInputs, unsigned.Outputs, unsigned.LockTime);
-        return new BuiltTx(Tx.Txid(signed), Tx.ToHex(Tx.Serialize(signed)), signed, selected, feeSats, change);
+        long fee = selected.Sum(c => c.Sats) - outs.Sum(o => o.Value);
+        return new BuiltTx(Tx.Txid(signed), Tx.ToHex(Tx.Serialize(signed)), signed, selected, fee, change);
     }
 
     /// <summary>Verify a built tx's input signatures locally (no node) — proves it is spend-valid

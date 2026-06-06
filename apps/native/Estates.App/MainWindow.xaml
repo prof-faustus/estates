@@ -1,7 +1,7 @@
 <Window x:Class="Estates.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="ESTATES" Height="860" Width="1280"
+        Title="ESTATES" Height="860" Width="1280" Icon="appicon.ico"
         Background="{StaticResource Bg}" WindowStartupLocation="CenterScreen">
     <DockPanel Margin="16">
         <TextBlock x:Name="Wordmark" DockPanel.Dock="Top" Text="ESTATES" Foreground="{StaticResource Fg}" FontSize="24" FontWeight="Bold" Margin="4,0,0,12"/>

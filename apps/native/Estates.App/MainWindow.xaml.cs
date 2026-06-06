@@ -439,7 +439,7 @@ public partial class MainWindow : Window
     private void SendChat(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return;
-        var frame = ChatCodec.Seal(_walletPub, _node.PeerWalletPubs(), text);
+        var frame = ChatCodec.Seal(_master, _node.PeerWalletPubs(), text);
         if (frame is null) { AppendChat("(no peers connected)", text); return; }
         foreach (var l in _node.LiveLinks()) l.Send(frame);
         AppendChat(_node.Name, text);

@@ -1,17 +1,24 @@
 <Window x:Class="Estates.App.BotWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="ESTATES — automated bot" Height="440" Width="520"
-        Background="#101814" WindowStartupLocation="Manual">
-    <!-- A BOT, not a person: it plays automatically, no human controls it. Its own small,
-         visually distinct window, positioned away from the player so it never opens on top. -->
-    <StackPanel Margin="18">
-        <TextBlock Text="🤖 ESTATES — AUTOMATED BOT" Foreground="#7bd88f" FontSize="18" FontWeight="Bold"/>
-        <TextBlock Text="A bot system — it plays itself, no human input. Separate node. Close to stop it."
-                   Foreground="#9aa0a6" FontSize="12" Margin="0,4,0,10" TextWrapping="Wrap"/>
-        <TextBlock x:Name="BotStatus" Foreground="#ffd54f" FontSize="13" Margin="0,0,0,8" TextWrapping="Wrap"/>
-        <TextBox x:Name="BotLog" IsReadOnly="True" Background="#0a120d" Foreground="#cfd2d6"
-                 FontFamily="Consolas" FontSize="11" Height="300" VerticalScrollBarVisibility="Auto"
+        Title="ESTATES · automated bot" Height="600" Width="340" Icon="appicon.ico"
+        Background="#1a1206" WindowStartupLocation="Manual" Topmost="False"
+        ResizeMode="CanMinimize" ShowInTaskbar="True">
+    <!-- A BOT — fully automated, NOT a person. Deliberately UNLIKE the player window: a narrow amber
+         console, NOT the wide emerald board; docked to a screen corner; never opens on top; never the
+         same size or look. It plays itself; the human may watch its wallet, take a move for it, or
+         close it to stop it. There is NO "run a bot" here — a bot never starts another bot. -->
+    <StackPanel Margin="14">
+        <TextBlock Text="🤖 AUTOMATED BOT" Foreground="#f5a623" FontSize="16" FontWeight="Bold"/>
+        <TextBlock Text="Plays itself. You can watch its wallet, take a move for it, or close it to stop it. It never opens over your window."
+                   Foreground="#b8a98a" FontSize="11" Margin="0,4,0,10" TextWrapping="Wrap"/>
+        <TextBlock x:Name="BotWallet" Foreground="#7bd88f" FontSize="12" FontFamily="Consolas" Margin="0,0,0,2" TextWrapping="Wrap"/>
+        <TextBlock x:Name="BotStatus" Foreground="#ffd54f" FontSize="12" Margin="0,2,0,8" TextWrapping="Wrap"/>
+        <CheckBox x:Name="AutoToggle" Content="Auto-play" IsChecked="True" Foreground="#b8a98a" Margin="0,0,0,6"/>
+        <TextBlock Text="take a move for it:" Foreground="#8a7c5e" FontSize="10" Margin="0,0,0,2"/>
+        <WrapPanel x:Name="BotMoves" Margin="0,0,0,8"/>
+        <TextBox x:Name="BotLog" IsReadOnly="True" Background="#0f0a03" Foreground="#cfc4ad"
+                 FontFamily="Consolas" FontSize="11" Height="320" VerticalScrollBarVisibility="Auto"
                  BorderThickness="0" Padding="8"/>
     </StackPanel>
 </Window>

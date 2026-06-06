@@ -249,18 +249,20 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("refund rejects a tampered output (sig no longer covers it)", !Recovery.VerifyRefund(tamperedRefund, ms, stake, funderPub, sigF, counterPub, sigC));
 }
 
-// ECIES (the 2-person ECDH path) + authenticated key-wrap + AEAD: round-trip, and a
-// wrong recipient / tampered ciphertext yields NOTHING (returns null, never plaintext).
+// ECDH + AES (the ONLY asymmetric encryption — NO ECIES): Alice seals to Bob with HER key; Bob
+// opens with HIS key + Alice's pub. The ECDH x-coord is the AES key. Wrong key / tamper ⇒ nothing.
 {
+    byte[] aPriv = RandomNumberGenerator.GetBytes(32), aPub = Secp256k1.PublicKey(aPriv);
     byte[] bobPriv = RandomNumberGenerator.GetBytes(32), bobPub = Secp256k1.PublicKey(bobPriv);
     byte[] evePriv = RandomNumberGenerator.GetBytes(32);
     byte[] plain = "Alice -> Bob: the deed is yours, and only yours."u8.ToArray();
     byte[] aad = "estates/aad/v1"u8.ToArray();
-    var ct = Cipher.EciesEncrypt(bobPub, plain, aad);
-    X("ECIES decrypts for the intended recipient", (Cipher.EciesDecrypt(bobPriv, ct, aad) ?? Array.Empty<byte>()).AsSpan().SequenceEqual(plain));
-    X("ECIES yields nothing for the wrong recipient", Cipher.EciesDecrypt(evePriv, ct, aad) is null);
+    var ct = Cipher.EcdhSeal(aPriv, bobPub, plain, aad);
+    X("ECDH+AES: Bob (his key + Alice's pub) decrypts", (Cipher.EcdhOpen(bobPriv, aPub, ct, aad) ?? Array.Empty<byte>()).AsSpan().SequenceEqual(plain));
+    X("ECDH+AES: a wrong key yields nothing", Cipher.EcdhOpen(evePriv, aPub, ct, aad) is null);
+    X("ECDH+AES: the shared key is symmetric (both parties reach it)", Tx.ToHex(Cipher.EcdhKey(aPriv, bobPub)) == Tx.ToHex(Cipher.EcdhKey(bobPriv, aPub)));
     byte[] tamp = (byte[])ct.Bytes.Clone(); tamp[0] ^= 0xff;
-    X("ECIES rejects a tampered ciphertext", Cipher.EciesDecrypt(bobPriv, new Cipher.EciesCiphertext(ct.EphemeralPublicKey, tamp), aad) is null);
+    X("ECDH+AES: a tampered ciphertext yields nothing", Cipher.EcdhOpen(bobPriv, aPub, new Cipher.EcdhSealed(ct.Nonce, tamp), aad) is null);
     // authenticated key-wrap
     byte[] wrapKey = RandomNumberGenerator.GetBytes(32), payloadKey = RandomNumberGenerator.GetBytes(32);
     var wrapped = Cipher.Wrap(wrapKey, payloadKey);

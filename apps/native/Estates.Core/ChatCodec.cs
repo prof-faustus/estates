@@ -1,8 +1,9 @@
 // Estates.Core/ChatCodec.cs — the ESTATES chat wire frame, combining BOTH primitives
 // exactly as specified: the message is broadcast-encrypted ONCE under the GB 2623780 B
 // key-graph root (Broadcast), and each member's leaf key is delivered by 2-person ECDH
-// (Cipher.EciesEncrypt to that member's wallet pubkey). A non-member has no leaf key and
-// cannot reach the message key; ciphertext only on the wire. Total: hostile bytes → null.
+// (Cipher.EcdhSeal — the sender's OWN key ↔ that member's wallet pubkey; NO ECIES, no
+// ephemeral key). A non-member has no leaf key and cannot reach the message key; ciphertext
+// only on the wire. Total: hostile bytes → null.
 using System.Text;
 using System.Text.Json;
 
@@ -12,11 +13,13 @@ public static class ChatCodec
 {
     private static readonly byte[] LeafAad = Encoding.ASCII.GetBytes("chat/leaf/v1");
 
-    /// <summary>Seal `text` to `recipientPubs` (their compressed wallet pubkeys) as a full
-    /// chat frame. Returns null with no recipients (the message goes nowhere).</summary>
-    public static byte[]? Seal(byte[] myWalletPub, IReadOnlyList<byte[]> recipientPubs, string text)
+    /// <summary>Seal `text` to `recipientPubs` (their compressed wallet pubkeys) as a full chat
+    /// frame, signed by YOUR key `myWalletPriv` (used for the 2-person ECDH leaf delivery — the
+    /// recipients ECDH with your `from` pubkey). Returns null with no recipients.</summary>
+    public static byte[]? Seal(byte[] myWalletPriv, IReadOnlyList<byte[]> recipientPubs, string text)
     {
         if (recipientPubs.Count == 0) return null;
+        byte[] myWalletPub = Secp256k1.PublicKey(myWalletPriv);
         var graph = Broadcast.Build(recipientPubs.Count);
         var msg = (Cipher.SealedMessage.Symmetric)graph.EncryptMessage(Encoding.UTF8.GetBytes(text));
         var items = graph.EncryptedDataItems();
@@ -25,11 +28,11 @@ public static class ChatCodec
         for (int i = 0; i < recipientPubs.Count; i++)
         {
             byte[] leafKey = graph.MemberLeafKey(i);
-            var ecies = Cipher.EciesEncrypt(recipientPubs[i], leafKey, LeafAad);
+            var sealed_ = Cipher.EcdhSeal(myWalletPriv, recipientPubs[i], leafKey, LeafAad);
             leaf.Add(new Dictionary<string, object>
             {
                 ["pub"] = Tx.ToHex(recipientPubs[i]), ["m"] = i,
-                ["eph"] = Tx.ToHex(ecies.EphemeralPublicKey), ["ct"] = Tx.ToHex(ecies.Bytes),
+                ["n"] = Tx.ToHex(sealed_.Nonce), ["ct"] = Tx.ToHex(sealed_.Bytes),
             });
         }
 
@@ -63,17 +66,18 @@ public static class ChatCodec
             int leaves = e.GetProperty("leaves").GetInt32();
             string myPubHex = Tx.ToHex(myWalletPub);
 
-            // find my leaf-key delivery (2-person ECDH to my wallet key)
-            int member = -1; Cipher.EciesCiphertext? mine = null;
+            // find my leaf-key delivery (2-person ECDH: my key ↔ the sender's `from` key)
+            byte[] fromPub = Tx.FromHex(f.GetString()!);
+            int member = -1; Cipher.EcdhSealed? mine = null;
             foreach (var l in e.GetProperty("leaf").EnumerateArray())
             {
                 if (l.GetProperty("pub").GetString() != myPubHex) continue;
                 member = l.GetProperty("m").GetInt32();
-                mine = new Cipher.EciesCiphertext(Tx.FromHex(l.GetProperty("eph").GetString()!), Tx.FromHex(l.GetProperty("ct").GetString()!));
+                mine = new Cipher.EcdhSealed(Tx.FromHex(l.GetProperty("n").GetString()!), Tx.FromHex(l.GetProperty("ct").GetString()!));
                 break;
             }
             if (mine is null) return null;                            // not a recipient
-            byte[]? leafKey = Cipher.EciesDecrypt(myPriv, mine, LeafAad);
+            byte[]? leafKey = Cipher.EcdhOpen(myPriv, fromPub, mine, LeafAad);
             if (leafKey is null) return null;
 
             // rebuild the published items + sealed message
