@@ -664,6 +664,13 @@ export class NetTable {
           break;
       }
     }
+    // MANDATORY one-game manifest (audit #13): a live game bound to a REAL game id MUST
+    // carry its verified, seat-matching key manifest — broadcast by the host at start and
+    // checked above (signed by host, valid, game-bound, seat entries == committed seats).
+    // Without it the seat keys are unaccounted for, so the game is NOT validly live: fail
+    // closed (no state, not started). Only a zero/placeholder game id (offline/test) is
+    // exempt. After the start-path manifest broadcast fix, every real game supplies it.
+    if (started && this.gameId !== '00'.repeat(32) && liveManifest === null) { started = false; state = null; }
     this.liveManifest = liveManifest;
     this.commitsBySeq = commitsBySeq;
     this.revealsBySeq = revealsBySeq;

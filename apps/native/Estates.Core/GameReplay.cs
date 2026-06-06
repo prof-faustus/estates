@@ -37,6 +37,7 @@ public static class GameReplay
     public static GameState? ReplayState(IReadOnlyList<string> logHex, string? gameId = null)
     {
         int? maxSeats = null; string? host = null; bool started = false; GameState? state = null;
+        bool manifestOk = false;   // the verified, seat-matching one-game key manifest was broadcast
         var seats = new Dictionary<int, string>();          // seat -> who (= signer)
         var seatKeys = new Dictionary<int, string>();        // seat -> controlling signing pub
         var deckCommits = new Dictionary<int, string>();     // seat -> deck-entropy commitment (hex)
@@ -70,7 +71,7 @@ public static class GameReplay
             catch { continue; }
             if (f.ValueKind != JsonValueKind.Object || !f.TryGetProperty("kind", out var kE)) continue;
             string kind = kE.GetString() ?? "";
-            if (kind is "manifest" or "announce" or "chat") continue;       // do not affect game state
+            if (kind is "announce" or "chat") continue;                     // do not affect game state
             if (!f.TryGetProperty("signPub", out var spE) || !f.TryGetProperty("sig", out var sgE)) continue;
             string signPub = spE.GetString() ?? "";
             byte[] sig; try { sig = Tx.FromHex(sgE.GetString()!); } catch { continue; }
@@ -175,8 +176,35 @@ public static class GameReplay
                     }
                     break;
                 }
+                case "manifest":
+                {
+                    // Verify the host's one-game key manifest EXACTLY as the web rebuild does:
+                    // host-signed (the frame sig was verified above), internally valid, bound to
+                    // THIS game id, and its seat entries match the committed seat map. Required
+                    // below for a real game (parity with the web's mandatory-manifest gate).
+                    if (gameId != null && !manifestOk && signPub == host && f.TryGetProperty("m", out var mEl))
+                    {
+                        try
+                        {
+                            var km = KeyLife.Parse(mEl);
+                            if (KeyLife.VerifyManifest(km).Ok && km.GameId == gameId)
+                            {
+                                var want = string.Join(",", seatKeys.Select(k => $"{k.Key}:{k.Value}").OrderBy(x => x, StringComparer.Ordinal));
+                                var got = string.Join(",", km.Entries.Where(e => e.Purpose == "seat").Select(e => $"{e.Seat}:{e.Pub}").OrderBy(x => x, StringComparer.Ordinal));
+                                if (want == got && want.Length > 0) manifestOk = true;
+                            }
+                        }
+                        catch { }
+                    }
+                    break;
+                }
             }
         }
+        // MANDATORY one-game manifest (parity with the web rebuild): a live game bound to a
+        // REAL game id MUST carry its verified, seat-matching key manifest, else it is not
+        // validly live — fail closed. A null gameId (offline/local) is exempt, exactly as the
+        // web exempts the zero game id.
+        if (started && gameId != null && !manifestOk) return null;
         return state;
     }
 }

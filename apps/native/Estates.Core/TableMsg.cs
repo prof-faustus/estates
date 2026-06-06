@@ -77,6 +77,12 @@ public static class TableMsg
             case "action":
                 sb.Append(",\"action\":").Append(ActionJson(StateJson.ParseAction(msg.GetProperty("action"))));
                 break;
+            case "manifest":
+                // signedBytes = JSON({kind:'manifest', m:<manifest>, signPub}). The `m`
+                // object was produced by the web's JSON.stringify and is byte-identical in
+                // the published frame, so its raw JSON text reconstructs the signed bytes.
+                sb.Append(",\"m\":").Append(msg.GetProperty("m").GetRawText());
+                break;
             default:
                 throw new InvalidOperationException($"unknown message kind {kind}");
         }
