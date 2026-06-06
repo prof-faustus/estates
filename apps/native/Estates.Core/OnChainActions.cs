@@ -59,6 +59,13 @@ public static class OnChainActions
     /// <summary>REVEAL (#7) — opening a prior commitment.</summary>
     public static StandaloneWallet.BuiltTx Reveal(StandaloneWallet w, byte[] secret, long feeSats) => Typed(w, TxType.Reveal, secret, feeSats);
 
+    /// <summary>TABLE-OPEN (#14) — open a table on-chain.</summary>
+    public static StandaloneWallet.BuiltTx TableOpen(StandaloneWallet w, byte[] tableParams, long feeSats) => Typed(w, TxType.TableOpen, tableParams, feeSats);
+    /// <summary>GAME-START (#15) — start a game on-chain.</summary>
+    public static StandaloneWallet.BuiltTx GameStart(StandaloneWallet w, byte[] gameParams, long feeSats) => Typed(w, TxType.GameStart, gameParams, feeSats);
+    /// <summary>DEAL (#12) — an on-chain card deal record.</summary>
+    public static StandaloneWallet.BuiltTx Deal(StandaloneWallet w, byte[] dealData, long feeSats) => Typed(w, TxType.Deal, dealData, feeSats);
+
     /// <summary>Read the protocol layer off a typed marker's carrier data: which type is this tx?</summary>
     public static (TxType type, byte version, byte[] payload)? ReadType(byte[] carrierData) => TxProtocol.Read(carrierData);
 
