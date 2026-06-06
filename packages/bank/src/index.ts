@@ -15,7 +15,7 @@
 import { createHash, createVerify, type KeyObject } from 'node:crypto';
 import { loadParams, type EstatesParams } from '@estates/params';
 import {
-  nftOutput, paymentOutput, push, op, OP, serializeScript, gameTag,
+  nftOutput, paymentOutput, push, op, OP, serializeScript, gameTag, titleBelongsToGame,
   type TxOutput, type TitleState, type Outpoint,
 } from '@estates/onchain';
 import { sighashPreimage, signInput, type Tx, type TxInput, type KeyPair } from '@estates/trade';
@@ -97,6 +97,21 @@ export function legalOutputs(a: BankAction): TxOutput[] {
 export function certify(tx: Tx, expected: readonly TxOutput[]): boolean {
   if (tx.outputs.length !== expected.length) return false;
   return tx.outputs.every((o, i) => o.satoshis === expected[i]!.satoshis && eq(o.script, expected[i]!.script));
+}
+
+/**
+ * ONE-GAME binding for a bank action. A bank action that MOVES an NFT (a
+ * `purchase` delivering the title to the buyer) must move an NFT that belongs to
+ * THIS game — its gameTag must be this game's domain-separated tag. Non-NFT actions
+ * (salary / payout / collect) move only reserve satoshis and are bound to the game
+ * by the reserve covenant itself (`rulesHash(gameId)`), so they are game-bound by
+ * construction. Returns false if a purchase delivers a foreign-game NFT, so the bank
+ * can never sell or hand out a deed from another game. Fail-closed on a bad gameId.
+ */
+export function bankActionBelongsToGame(action: BankAction, gameId: Uint8Array): boolean {
+  if (!(gameId instanceof Uint8Array) || gameId.length !== 32) return false;
+  if (action.kind === 'purchase') return titleBelongsToGame(action.nft, gameId);
+  return true; // salary / payout / collect: bound via the game's reserve covenant
 }
 
 // ---------------------------------------------------------------------------

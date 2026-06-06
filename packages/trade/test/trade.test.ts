@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { gameTag, paymentOutput, type TitleState, type Outpoint } from '@estates/onchain';
-import { genKeyPair, buildTrade, cosign, verifyTrade, valueConserved, verifyTradeValue, type Leg } from '../src/index.ts';
+import { genKeyPair, buildTrade, cosign, verifyTrade, verifyTradeForGame, valueConserved, verifyTradeValue, type Leg } from '../src/index.ts';
 
 const GAME = new Uint8Array(32).fill(9);
 const outpoint = (tag: string, vout = 0): Outpoint => ({ txid: tag.repeat(32).slice(0, 64), vout });
@@ -81,6 +81,43 @@ test('a wrong-key signature does not satisfy an input it does not own', () => {
   st = cosign(st, a.party);
   st = cosign(st, intruder); // intruder owns no inputs -> B's input still unsigned
   assert.equal(verifyTrade(st).valid, false);
+});
+
+// ---- one-game binding: a trade moves only THIS game's NFTs --------------------
+test('verifyTradeForGame accepts a co-signed trade whose NFTs all belong to the game', () => {
+  const { a, b } = legs();
+  let st = buildTrade(a, b); st = cosign(st, a.party); st = cosign(st, b.party);
+  const r = verifyTradeForGame(st, GAME);
+  assert.ok(r.valid, r.reason);
+});
+
+test('verifyTradeForGame REJECTS a cross-game trade (a foreign-game NFT)', () => {
+  const OTHER = new Uint8Array(32).fill(0xa5);
+  const A = genKeyPair(), B = genKeyPair();
+  // A offers a deed tagged for a DIFFERENT game
+  const foreign: { outpoint: Outpoint; state: TitleState } = {
+    outpoint: outpoint('a1'),
+    state: { kind: 'TITLE', gameTag: gameTag(OTHER, 'TITLE'), propertyId: 3, groupId: 0, buildLevel: 0, mortgaged: false, genesis: outpoint('a1') },
+  };
+  const a: Leg = { party: A, giveNfts: [foreign], giveSats: 0, satsFundingOutpoint: outpoint('af'), changePkh: A.pkh };
+  const b: Leg = { party: B, giveNfts: [], giveSats: 100, satsFundingOutpoint: outpoint('bf'), changePkh: B.pkh };
+  let st = buildTrade(a, b); st = cosign(st, a.party); st = cosign(st, b.party);
+  assert.ok(verifyTrade(st).valid, 'signatures are valid…');
+  const r = verifyTradeForGame(st, GAME);
+  assert.equal(r.valid, false, '…but it is not bound to THIS game');
+  assert.match(r.reason, /different game|cross-game/);
+});
+
+test('verifyTradeForGame rejects a no-NFT (sats-only) trade and a bad gameId', () => {
+  // a degenerate sats-only "trade": both legs give sats, no deeds move
+  const A = genKeyPair(), B = genKeyPair();
+  const a: Leg = { party: A, giveNfts: [], giveSats: 50, satsFundingOutpoint: outpoint('af'), changePkh: A.pkh };
+  const b: Leg = { party: B, giveNfts: [], giveSats: 50, satsFundingOutpoint: outpoint('bf'), changePkh: B.pkh };
+  let st = buildTrade(a, b); st = cosign(st, a.party); st = cosign(st, b.party);
+  assert.equal(verifyTradeForGame(st, GAME).valid, false);            // no NFT move
+  // fail closed on a malformed gameId
+  const ok = legs(); let st2 = buildTrade(ok.a, ok.b); st2 = cosign(st2, ok.a.party); st2 = cosign(st2, ok.b.party);
+  assert.equal(verifyTradeForGame(st2, new Uint8Array(31)).valid, false);
 });
 
 // ---- audit #7: real-value conservation against actual prev UTXO amounts -------

@@ -29,6 +29,7 @@ Tests live in `packages/bank/test/covenant.test.ts` and
 | G1 | A different gameId yields a DISTINCT reserve script (two games never share a covenant) | "the covenant is bound to one game: a different gameId yields a DISTINCT script" |
 | G2 | A payout assembled for one game does NOT validate against another game's reserve | "a payout assembled for one game does NOT validate against another game reserve" |
 | G3 | `rulesHash` rejects a non-32-byte gameId (fail closed) | "rulesHash rejects a non-32-byte gameId (fail closed)" |
+| G4 | A bank `purchase` must move THIS game's NFT; a foreign-game deed is rejected (non-NFT actions pass; bad gameId fails closed) | "bankActionBelongsToGame: a purchase must move THIS game’s NFT; a foreign-game deed is rejected" |
 
 ## Quorum mode (opt-in M-of-N fallback)
 

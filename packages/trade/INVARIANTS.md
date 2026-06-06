@@ -18,6 +18,14 @@ to break it.
 | T1 | Tampering with an output after signing invalidates the trade | "tampering with an output after signing invalidates the trade (anti-front-running)" |
 | T2 | A wrong-key signature does not satisfy an input it does not own | "a wrong-key signature does not satisfy an input it does not own" |
 
+## One-game binding (a trade moves only this game's NFTs)
+
+| # | Claim | Test |
+|---|---|---|
+| G1 | `verifyTradeForGame` accepts a co-signed trade whose NFTs all belong to the game | "verifyTradeForGame accepts a co-signed trade whose NFTs all belong to the game" |
+| G2 | `verifyTradeForGame` REJECTS a cross-game trade (a foreign-game NFT) | "verifyTradeForGame REJECTS a cross-game trade (a foreign-game NFT)" |
+| G3 | A no-NFT (sats-only) trade and a bad gameId are rejected (fail closed) | "verifyTradeForGame rejects a no-NFT (sats-only) trade and a bad gameId" |
+
 ## Value conservation
 
 | # | Claim | Test |

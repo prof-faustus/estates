@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   OP, op, push, serializeScript, containsOpReturn, scriptHex, p2pkh,
   encodeTitleState, decodeTitleState, nftLockingScript, nftOutput, paymentOutput,
-  gameTag, hasGenesis, NFT_SATS, validateTitleState, type TitleState,
+  gameTag, hasGenesis, NFT_SATS, validateTitleState, nftStateFromScript, titleBelongsToGame, type TitleState,
 } from '../src/index.ts';
 
 const pkh = (n: number): Uint8Array => { const b = new Uint8Array(20); b.fill(n); return b; };
@@ -117,4 +117,38 @@ test('decodeTitleState rejects a non-canonical mortgaged byte and impossible fie
 test('validateTitleState accepts every legal title and a canonical REPRIEVE', () => {
   for (let p = 0; p < 40; p++) for (const lvl of [0, 1, 5]) validateTitleState(title({ propertyId: p, buildLevel: lvl }));
   validateTitleState(title({ kind: 'REPRIEVE', propertyId: 0, groupId: 0, buildLevel: 0 }));
+});
+
+test('nftStateFromScript recovers the on-chain TitleState from an NFT output script', () => {
+  const s = title({ propertyId: 12, buildLevel: 3, mortgaged: true });
+  const decoded = nftStateFromScript(nftOutput(s, pkh(9)).script);
+  assert.ok(decoded, 'an NFT output decodes back to its state');
+  assert.equal(decoded!.propertyId, 12);
+  assert.equal(decoded!.buildLevel, 3);
+  assert.equal(decoded!.mortgaged, true);
+  assert.deepEqual([...decoded!.gameTag], [...s.gameTag]);
+  // a Reprieve NFT too
+  const r = title({ kind: 'REPRIEVE', propertyId: 0, gameTag: gameTag(GAME, 'REPRIEVE') });
+  assert.equal(nftStateFromScript(nftOutput(r, pkh(1)).script)!.kind, 'REPRIEVE');
+});
+
+test('nftStateFromScript is TOTAL: a payment / malformed / non-NFT script returns null (never throws)', () => {
+  assert.equal(nftStateFromScript(paymentOutput(500, pkh(2)).script), null);   // plain P2PKH
+  assert.equal(nftStateFromScript(new Uint8Array(0)), null);
+  assert.equal(nftStateFromScript(new Uint8Array([0x49])), null);              // push len but no body
+  assert.equal(nftStateFromScript(serializeScript([push(new Uint8Array(73))])), null); // 73-byte push, no OP_DROP/garbage state
+  // a 73-byte push followed by OP_DROP but garbage state → decode fails → null
+  assert.equal(nftStateFromScript(serializeScript([push(new Uint8Array(73).fill(0xff)), op(OP.OP_DROP)])), null);
+});
+
+test('titleBelongsToGame binds an NFT to one game (gameTag), rejects another game + bad gameId', () => {
+  const OTHER = new Uint8Array(32).fill(0xa5);
+  assert.equal(titleBelongsToGame(title(), GAME), true);
+  assert.equal(titleBelongsToGame(title({ kind: 'REPRIEVE', propertyId: 0, gameTag: gameTag(GAME, 'REPRIEVE') }), GAME), true);
+  // a deed tagged for another game does not belong to GAME
+  assert.equal(titleBelongsToGame(title({ gameTag: gameTag(OTHER, 'TITLE') }), GAME), false);
+  // a TITLE carrying the REPRIEVE tag (wrong kind binding) is rejected
+  assert.equal(titleBelongsToGame(title({ gameTag: gameTag(GAME, 'REPRIEVE') }), GAME), false);
+  // fail closed on a non-32-byte gameId
+  assert.equal(titleBelongsToGame(title(), new Uint8Array(31)), false);
 });

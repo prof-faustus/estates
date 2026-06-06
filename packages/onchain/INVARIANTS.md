@@ -34,6 +34,9 @@ try to break it.
 | V4 | `decodeTitleState` rejects a non-canonical mortgaged byte and impossible fields | "decodeTitleState rejects a non-canonical mortgaged byte and impossible fields" |
 | V5 | `validateTitleState` accepts every legal title and a canonical REPRIEVE | "validateTitleState accepts every legal title and a canonical REPRIEVE" |
 | V6 | Game tags are domain-separated by kind | "game tags are domain-separated by kind" |
+| V7 | `nftStateFromScript` recovers the on-chain TitleState from an NFT output script | "nftStateFromScript recovers the on-chain TitleState from an NFT output script" |
+| V8 | `nftStateFromScript` is TOTAL: a payment / malformed / non-NFT script returns null (never throws) | "nftStateFromScript is TOTAL: a payment / malformed / non-NFT script returns null (never throws)" |
+| V9 | `titleBelongsToGame` binds an NFT to one game (gameTag), rejects another game + bad gameId | "titleBelongsToGame binds an NFT to one game (gameTag), rejects another game + bad gameId" |
 
 ## Native-sat payments
 

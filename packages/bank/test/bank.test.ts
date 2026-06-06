@@ -5,7 +5,7 @@ import { gameTag, type TitleState } from '@estates/onchain';
 import { loadParams } from '@estates/params';
 import {
   pkhOf, signBankSpend, verifyBankSpend, legalOutputs, certify, buildGenesis,
-  verifyReserveSpend, reserveOutput, rulesHash, buildCovenantPayout,
+  verifyReserveSpend, reserveOutput, rulesHash, buildCovenantPayout, bankActionBelongsToGame,
   type BankPolicy, type Covenant,
 } from '../src/index.ts';
 
@@ -123,4 +123,19 @@ test('reserve enforcement choice: quorum (M-of-N) and covenant (trustless) both 
 
   // the reserve OUTPUT differs by chosen mode (P2PKH-to-bank vs covenant script)
   assert.notDeepEqual(reserveOutput('quorum', 40_000, seats[0]!.pkh).script, reserveOutput('covenant', 40_000, seats[0]!.pkh, rulesHash(GAME)).script);
+});
+
+test('bankActionBelongsToGame: a purchase must move THIS game’s NFT; a foreign-game deed is rejected', () => {
+  const OTHER = new Uint8Array(32).fill(0xa5);
+  const buyer = pkhOf(genKeyPair().publicKey); const bankPkh = pkhOf(genKeyPair().publicKey);
+  const op = { txid: 'cd'.repeat(32), vout: 0 };
+  const mine: TitleState = { kind: 'TITLE', gameTag: gameTag(GAME, 'TITLE'), propertyId: 3, groupId: 0, buildLevel: 0, mortgaged: false, genesis: op };
+  const foreign: TitleState = { ...mine, gameTag: gameTag(OTHER, 'TITLE') };
+  assert.equal(bankActionBelongsToGame({ kind: 'purchase', buyerPkh: buyer, bankPkh, price: 60, nft: mine }, GAME), true);
+  assert.equal(bankActionBelongsToGame({ kind: 'purchase', buyerPkh: buyer, bankPkh, price: 60, nft: foreign }, GAME), false);
+  // non-NFT actions are bound to the game by the reserve covenant, so they pass this check
+  assert.equal(bankActionBelongsToGame({ kind: 'salary', seatPkh: buyer, amount: 200 }, GAME), true);
+  assert.equal(bankActionBelongsToGame({ kind: 'collect', bankPkh, amount: 50 }, GAME), true);
+  // fail closed on a bad gameId
+  assert.equal(bankActionBelongsToGame({ kind: 'purchase', buyerPkh: buyer, bankPkh, price: 60, nft: mine }, new Uint8Array(31)), false);
 });

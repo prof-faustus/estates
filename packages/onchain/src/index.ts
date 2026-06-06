@@ -137,4 +137,45 @@ export function hasGenesis(state: TitleState, expected: Outpoint): boolean {
   return state.genesis.txid === expected.txid && state.genesis.vout === expected.vout;
 }
 
+const eqBytes = (a: Uint8Array, b: Uint8Array): boolean => {
+  if (a.length !== b.length) return false;
+  let d = 0; for (let i = 0; i < a.length; i++) d |= a[i]! ^ b[i]!; return d === 0;
+};
+
+/**
+ * Decode the TitleState carried in a 1-sat NFT locking script (`<state> OP_DROP
+ * <P2PKH>`), reading the LEADING state push directly from the bytes — so a
+ * verifier can recover an NFT's on-chain state (incl. its gameTag) from a tx
+ * output alone, without trusting any caller-supplied claim. TOTAL: returns null
+ * for any non-NFT / malformed / over-long-push script (never throws), so it is
+ * safe to run over every output of a hostile transaction.
+ */
+export function nftStateFromScript(script: Uint8Array): TitleState | null {
+  if (!(script instanceof Uint8Array) || script.length < 2) return null;
+  const first = script[0]!;
+  let blobStart: number;
+  let len: number;
+  // accept a direct push (len < OP_PUSHDATA1) or OP_PUSHDATA1; the state blob is
+  // a fixed 73 bytes, far below 0xff, so larger PUSHDATA forms are never an NFT.
+  if (first < OP.OP_PUSHDATA1) { len = first; blobStart = 1; }
+  else if (first === OP.OP_PUSHDATA1) { if (script.length < 2) return null; len = script[1]!; blobStart = 2; }
+  else return null;
+  if (len !== STATE_LEN) return null;                         // not the fixed NFT state push
+  const dropAt = blobStart + len;
+  if (script.length < dropAt + 1 || script[dropAt] !== OP.OP_DROP) return null; // must be <state> OP_DROP …
+  try { return decodeTitleState(script.slice(blobStart, dropAt)); } catch { return null; }
+}
+
+/**
+ * One-game binding for an NFT: true iff the NFT's gameTag is exactly this game's
+ * domain-separated tag for its kind. A title/Reprieve carrying another game's tag
+ * (or a forged tag) does NOT belong to `gameId` — so trades, bank actions, and
+ * settlements that move NFTs can reject any cross-game asset by construction.
+ */
+export function titleBelongsToGame(state: TitleState, gameId: Uint8Array): boolean {
+  if (!(gameId instanceof Uint8Array) || gameId.length !== 32) return false;
+  if (state.kind !== 'TITLE' && state.kind !== 'REPRIEVE') return false;
+  return eqBytes(state.gameTag, gameTag(gameId, state.kind));
+}
+
 export { scriptHex, containsOpReturn };

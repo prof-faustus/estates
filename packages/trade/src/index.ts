@@ -14,7 +14,7 @@
 import { createHash, createSign, createVerify, generateKeyPairSync, type KeyObject } from 'node:crypto';
 import {
   type Outpoint, type TitleState, type TxOutput,
-  nftOutput, paymentOutput, encodeTitleState,
+  nftOutput, paymentOutput, encodeTitleState, nftStateFromScript, titleBelongsToGame,
 } from '@estates/onchain';
 
 const SIGHASH_ALL = 0x41;
@@ -153,6 +153,33 @@ export function verifyTrade(st: SignedTrade): TradeCheck {
     if (!v.verify(pub, sig)) return { valid: false, reason: `input ${i} signature invalid (outputs tampered or wrong key)` };
   }
   return { valid: true, reason: 'all inputs signed; signatures commit to the full output set' };
+}
+
+/**
+ * ONE-GAME binding for a trade. A trade in ESTATES moves title/Reprieve NFTs, and
+ * each such NFT carries the 32-byte domain-separated gameTag of the game it belongs
+ * to. This verifies — from the tx OUTPUTS themselves, not any caller claim — that:
+ *   - the trade is fully co-signed (`verifyTrade`),
+ *   - it moves at least one NFT (a game trade transfers at least one deed), and
+ *   - EVERY NFT output belongs to `gameId` (`titleBelongsToGame`).
+ * So a deed from game A can never be moved inside a game-B trade/settlement, and two
+ * games' assets can never be mixed in one trade — the same one-game binding the seat
+ * keys (manifest) and the bank reserve (rulesHash(gameId)) carry. Returns the usual
+ * TradeCheck; fail-closed on a non-32-byte gameId.
+ */
+export function verifyTradeForGame(st: SignedTrade, gameId: Uint8Array): TradeCheck {
+  if (!(gameId instanceof Uint8Array) || gameId.length !== 32) return { valid: false, reason: 'gameId must be 32 bytes' };
+  const sig = verifyTrade(st);
+  if (!sig.valid) return sig;
+  let nftCount = 0;
+  for (let i = 0; i < st.tx.outputs.length; i++) {
+    const state = nftStateFromScript(st.tx.outputs[i]!.script);
+    if (!state) continue;                                  // a payment / non-NFT output
+    nftCount++;
+    if (!titleBelongsToGame(state, gameId)) return { valid: false, reason: `output ${i} NFT belongs to a different game (gameTag mismatch) — cross-game trade rejected` };
+  }
+  if (nftCount === 0) return { valid: false, reason: 'no NFT moves: not a game-bound trade' };
+  return { valid: true, reason: `trade is fully signed and all ${nftCount} NFT(s) belong to this game` };
 }
 
 /**
