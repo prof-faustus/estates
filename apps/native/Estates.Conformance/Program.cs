@@ -268,6 +268,28 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("key-wrap yields nothing with the wrong key", Cipher.Unwrap(RandomNumberGenerator.GetBytes(32), wrapped) is null);
 }
 
+// Standalone wallet: a real P2PKH spend built + signed entirely in-process — NO node, NO RPC,
+// NO network. Proves the exe can hold coins and produce spend-valid BSV transactions on its own.
+{
+    byte[] seed = SHA256.HashData("estates/standalone-wallet/selftest"u8.ToArray());
+    var w = new StandaloneWallet(seed, "regtest");
+    X("standalone wallet derives a base58check address", StandaloneWallet.AddressToPkh(w.AddressAt(0)).Length == 20);
+    X("balance is zero before any coin", w.Balance() == 0);
+    string coinTxid = Tx.ToHex(RandomNumberGenerator.GetBytes(32));
+    w.AddCoin(coinTxid, 0, 1_000_000, 0);            // a coin held by address 0 (faucet/P2P origin)
+    X("balance reflects the local UTXO (no node queried)", w.Balance() == 1_000_000);
+    var built = w.BuildSend(w.AddressAt(1), 600_000, 500, changeIndex: 2);
+    X("built spend pays recipient + change (2 outputs)", built.Tx.Outputs.Count == 2);
+    X("change is value - amount - fee", built.Change == 1_000_000 - 600_000 - 500);
+    X("every input is signed and verifies locally (no node)", w.VerifySpend(built));
+    // hostile: a tampered signature must fail local verification
+    var bad = built.Tx.Inputs[0].ScriptSig.ToArray(); bad[5] ^= 0xff;
+    var tamperedTx = built.Tx with { Inputs = new[] { built.Tx.Inputs[0] with { ScriptSig = bad } } };
+    X("a tampered input signature is rejected", !w.VerifySpend(built with { Tx = tamperedTx }));
+    bool refused; try { w.BuildSend(w.AddressAt(1), 5_000_000, 500); refused = false; } catch { refused = true; }
+    X("insufficient funds is refused, not silently underpaid", refused);
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
