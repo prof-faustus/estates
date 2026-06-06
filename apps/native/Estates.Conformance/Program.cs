@@ -398,6 +398,26 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("group chat: a non-member cannot read it", re is null);
 }
 
+// TRADE #13 — atomic NFT swap: one tx, both NFTs re-sealed to the other owner, each side signs its
+// own input. Valid only when BOTH have signed (atomicity); a tampered signature breaks the whole swap.
+{
+    byte[] aPriv = SHA256.HashData("swapA"u8.ToArray()), aPub = Secp256k1.PublicKey(aPriv);
+    byte[] bPriv = SHA256.HashData("swapB"u8.ToArray()), bPub = Secp256k1.PublicKey(bPriv);
+    byte[] aFace = "ACE-SPADES"u8.ToArray(), bFace = "KING-HEARTS"u8.ToArray();
+    byte[] aScript = OnChainActions.CarrierScript(TxProtocol.Stamp(TxType.NftMint, aFace), Recovery.Hash160(aPub));
+    byte[] bScript = OnChainActions.CarrierScript(TxProtocol.Stamp(TxType.NftMint, bFace), Recovery.Hash160(bPub));
+    var aNft = new Coin(Tx.ToHex(RandomNumberGenerator.GetBytes(32)), 0, 1, 0, aScript);
+    var bNft = new Coin(Tx.ToHex(RandomNumberGenerator.GetBytes(32)), 0, 1, 0, bScript);
+    var swap = Trade.BuildSwap(aNft, aFace, aPriv, bNft, bFace, bPriv);
+    X("atomic swap: one tx, two inputs + two outputs (both move or neither)", swap.Inputs.Count == 2 && swap.Outputs.Count == 2);
+    X("atomic swap: both inputs validly signed by their owners", Trade.VerifySwap(swap, aNft, aPub, bNft, bPub));
+    X("atomic swap: A's NFT goes to B", Tx.ToHex(swap.Outputs[0].Script).Contains(Tx.ToHex(Recovery.Hash160(bPub))));
+    X("atomic swap: B's NFT goes to A", Tx.ToHex(swap.Outputs[1].Script).Contains(Tx.ToHex(Recovery.Hash160(aPub))));
+    var bad = swap.Inputs[0].ScriptSig.ToArray(); bad[8] ^= 0xff;
+    var tampered = swap with { Inputs = new[] { swap.Inputs[0] with { ScriptSig = bad }, swap.Inputs[1] } };
+    X("atomic swap: a tampered signature breaks the whole swap", !Trade.VerifySwap(tampered, aNft, aPub, bNft, bPub));
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
