@@ -109,10 +109,13 @@ test('reserve enforcement choice: quorum (M-of-N) and covenant (trustless) both 
     { pub: seats[0]!.publicKey, sig: signBankSpend(qtx, seats[0]!) },
     { pub: seats[1]!.publicKey, sig: signBankSpend(qtx, seats[1]!) },
   ];
-  assert.ok(verifyReserveSpend({ mode: 'quorum', tx: qtx, sigs, policy, action }).valid, 'quorum spend verifies');
+  // quorum is a TRUST ASSUMPTION: refused by default (trustless covenant is the default).
+  assert.equal(verifyReserveSpend({ mode: 'quorum', tx: qtx, sigs, policy, action }).valid, false, 'quorum refused without explicit opt-in');
+  // with the explicit test/non-production opt-in it verifies the M-of-N signatures.
+  assert.ok(verifyReserveSpend({ mode: 'quorum', tx: qtx, sigs, policy, action }, { allowQuorum: true }).valid, 'quorum spend verifies when explicitly opted in');
   // quorum with outputs not matching the certified action → rejected
   const qbad = bankSpendTx(legalOutputs({ kind: 'salary', seatPkh: seats[0]!.pkh, amount: 999 }));
-  assert.equal(verifyReserveSpend({ mode: 'quorum', tx: qbad, sigs, policy, action }).valid, false);
+  assert.equal(verifyReserveSpend({ mode: 'quorum', tx: qbad, sigs, policy, action }, { allowQuorum: true }).valid, false);
 
   // COVENANT mode: trustless, ZERO signatures, bound to the spent outpoint+script
   const reserve: Covenant = { reserve: 40_000, rulesHash: rulesHash(GAME) };

@@ -17,9 +17,10 @@ Two enforcement modes for spending the reserve, plus the genesis/setup tx:
   `verifyCovenantSpend` are the equivalent pure predicates). Because validity is
   purely structural, **anyone** can assemble and broadcast a legal payout; the
   "banker" is merely whoever **funded** the reserve and holds **no** spend authority.
-- **`quorum` (opt-in):** an M-of-N threshold over the seat keys. Honest seats co-sign
-  only core-legal actions (`verifyBankSpend`, `certifyBankAction`). This carries an
-  honest-majority assumption and exists only as a fallback; the covenant removes it.
+- **`quorum` (opt-in, NON-trustless):** an M-of-N threshold over the seat keys. This
+  carries an honest-majority TRUST ASSUMPTION, so `verifyReserveSpend` **refuses it by
+  default** — a caller must pass `allowQuorum: true` (test / non-production only). A
+  production verifier that does not opt in therefore accepts only the trustless covenant.
 
 `reserveOutput(mode, …)` builds the reserve leg for the chosen mode; `buildGenesis`
 mints every 1-sat NFT and funds seats + reserve in one tx.

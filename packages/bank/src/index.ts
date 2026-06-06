@@ -143,9 +143,16 @@ export type ReserveSpend =
   | { readonly mode: 'quorum'; readonly tx: Tx; readonly sigs: readonly SeatSignature[]; readonly policy: BankPolicy; readonly action: BankAction }
   | { readonly mode: 'covenant'; readonly tx: Tx; readonly covenant: Covenant; readonly prevOutpoint: { txid: string; vout: number }; readonly prevScript: Uint8Array; readonly recipientPkh: Uint8Array; readonly amount: number };
 
-/** Verify a reserve spend under the chosen mode (the bank's enforcement choice). */
-export function verifyReserveSpend(s: ReserveSpend): BankCheck | CovenantCheck {
+/**
+ * Verify a reserve spend. The TRUSTLESS covenant is the default and is always
+ * allowed. The `quorum` (M-of-N honest-seat) mode is a TRUST ASSUMPTION, not
+ * trustless — so it is REFUSED by default and a caller must explicitly opt in with
+ * `allowQuorum: true` (test / non-production only). A production verifier that does
+ * not pass the flag therefore accepts only the trustless covenant path.
+ */
+export function verifyReserveSpend(s: ReserveSpend, opts?: { allowQuorum?: boolean }): BankCheck | CovenantCheck {
   if (s.mode === 'quorum') {
+    if (!opts?.allowQuorum) return { valid: false, count: 0, reason: 'quorum mode is a TRUST ASSUMPTION (honest M-of-N), not trustless — refused by default; opt in with allowQuorum:true for test/non-production only' };
     if (!certify(s.tx, legalOutputs(s.action))) return { valid: false, count: 0, reason: 'outputs do not match the certified legal action' };
     return verifyBankSpend(s.tx, s.sigs, s.policy);
   }

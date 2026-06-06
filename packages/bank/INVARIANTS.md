@@ -38,7 +38,7 @@ Tests live in `packages/bank/test/covenant.test.ts` and
 | Q1 | Fewer than threshold valid seat signatures is invalid; ≥ threshold is valid | "M-of-N: fewer than threshold signatures is invalid; threshold is valid" |
 | Q2 | A non-seat key and duplicate signers do not count toward the threshold | "a non-seat key and duplicate signers do not count toward the threshold" |
 | Q3 | A signature does not transfer across tampered outputs (sign one tx, alter it → invalid) | "signatures do not transfer across tampered outputs (sign one tx, alter it)" |
-| Q4 | Both enforcement modes verify a legal reserve spend (quorum and covenant) | "reserve enforcement choice: quorum (M-of-N) and covenant (trustless) both verify" |
+| Q4 | Quorum is a TRUST ASSUMPTION: refused by default, verifies only with the explicit `allowQuorum` opt-in; the trustless covenant is always allowed | "reserve enforcement choice: quorum (M-of-N) and covenant (trustless) both verify" |
 
 ## Genesis / setup
 
