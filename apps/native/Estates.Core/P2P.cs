@@ -146,7 +146,7 @@ public sealed class P2PNode : IDisposable
         Start(PruneLoop, "p2p-prune");
     }
 
-    private void Start(Action loop, string name)
+    private void Start(System.Action loop, string name)
     {
         var t = new Thread(() => { try { loop(); } catch { } }) { IsBackground = true, Name = name };
         t.Start();
