@@ -259,27 +259,55 @@ public partial class MainWindow : Window
             {
                 string path = WalletStore.DefaultPath();
                 bool exists = WalletStore.Exists(path);
-                sp.Children.Add(Head(exists ? "Unlock wallet" : "Create wallet"));
-                sp.Children.Add(new TextBlock { Text = exists ? "Enter your wallet password (leave blank if you didn't set one)." : "Create your wallet. A password is OPTIONAL — leave it blank for none. Your seed is saved to disk, so closing keeps your money.", Foreground = B("#9aa0a6"), FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) });
-                var pw = new PasswordBox { Background = B("#171819"), Foreground = B("#e6e6e6"), BorderThickness = new Thickness(0), Padding = new Thickness(8), FontSize = 13, Margin = new Thickness(0, 0, 0, 8) };
                 var msg = Out();
-                var go = new Button { Content = exists ? "Unlock" : "Create wallet", HorizontalAlignment = HorizontalAlignment.Left };
-                go.Click += (_, _) =>
+                TextBlock Note(string t) => new() { Text = t, Foreground = B("#9aa0a6"), FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) };
+                TextBlock Warn(string t) => new() { Text = t, Foreground = B("#f7a8c4"), FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) };
+                TextBlock Lab(string t) => new() { Text = t, Foreground = B("#9aa0a6"), FontSize = 11 };
+                TextBox FieldBox() => new() { Background = B("#171819"), Foreground = B("#e6e6e6"), BorderThickness = new Thickness(0), Padding = new Thickness(8), FontSize = 12, FontFamily = new FontFamily("Consolas"), Margin = new Thickness(0, 2, 0, 8), TextWrapping = TextWrapping.Wrap };
+                Button Btn2(string t) => new() { Content = t, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 8) };
+                var pw = new PasswordBox { Background = B("#171819"), Foreground = B("#e6e6e6"), BorderThickness = new Thickness(0), Padding = new Thickness(8), FontSize = 13, Margin = new Thickness(0, 0, 0, 8) };
+                void Unlocked(byte[] s) { _walletSeed = s; _wallet = null; Render(); }
+                void LoadFile()
                 {
-                    try
-                    {
-                        if (exists) { var s = WalletStore.Open(path, pw.Password); if (s is null) { msg.Text = "wrong password"; return; } _walletSeed = s; }
-                        else { _walletSeed = WalletStore.OpenOrCreate(path, pw.Password); }
-                        Render();
-                    }
+                    var dlg = new Microsoft.Win32.OpenFileDialog { Title = "Load wallet.dat", Filter = "wallet (*.dat)|*.dat|all files|*.*" };
+                    if (dlg.ShowDialog() != true) return;
+                    try { var s = WalletStore.Open(dlg.FileName, pw.Password); if (s is null) { msg.Text = "wrong password, or not a wallet file"; return; } Unlocked(s); }
                     catch (Exception ex) { msg.Text = ex.Message; }
-                };
-                sp.Children.Add(pw); sp.Children.Add(go);
+                }
+
                 if (exists)
                 {
-                    var fresh = new Button { Content = "Start a new wallet (replaces the file)", Background = B("#3a3d42"), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 8, 0, 0) };
-                    fresh.Click += (_, _) => { try { System.IO.File.Delete(path); _walletSeed = WalletStore.OpenOrCreate(path, pw.Password); Render(); } catch (Exception ex) { msg.Text = ex.Message; } };
-                    sp.Children.Add(fresh);
+                    sp.Children.Add(Head("Unlock wallet"));
+                    sp.Children.Add(Warn("This wallet holds your seed and your funds. BACK UP YOUR SEED — if you lose it, the money is gone forever."));
+                    sp.Children.Add(Lab("password (leave blank if you set none)")); sp.Children.Add(pw);
+                    var go = Btn2("Unlock");
+                    go.Click += (_, _) => { try { var s = WalletStore.Open(path, pw.Password); if (s is null) { msg.Text = "wrong password"; return; } Unlocked(s); } catch (Exception ex) { msg.Text = ex.Message; } };
+                    sp.Children.Add(go);
+                    var load = Btn2("Load a different wallet.dat file…"); load.Click += (_, _) => LoadFile(); sp.Children.Add(load);
+
+                    // DESTRUCTIVE replace — gated behind an explicit typed confirmation; never one click.
+                    var dz = new StackPanel();
+                    dz.Children.Add(Warn("Danger zone: replacing the wallet PERMANENTLY destroys the current seed and any funds it holds. Only proceed if you have backed up your seed. Type REPLACE to confirm."));
+                    var conf = FieldBox();
+                    var rep = Btn2("Replace wallet (destroys current funds)"); rep.Background = B("#5a2030"); rep.Foreground = B("#ffd54f");
+                    rep.Click += (_, _) => { if (conf.Text.Trim() != "REPLACE") { msg.Text = "type REPLACE to confirm the destructive replace"; return; } try { System.IO.File.Delete(path); Unlocked(WalletStore.OpenOrCreate(path, pw.Password)); } catch (Exception ex) { msg.Text = ex.Message; } };
+                    dz.Children.Add(conf); dz.Children.Add(rep);
+                    sp.Children.Add(new Border { Background = B("#2a1418"), CornerRadius = new CornerRadius(8), Padding = new Thickness(10), Margin = new Thickness(0, 12, 0, 0), Child = dz });
+                }
+                else
+                {
+                    sp.Children.Add(Head("Create or restore your wallet"));
+                    sp.Children.Add(Note("Real BSV. Your seed is saved to disk (encrypted with your password) so closing keeps your money. BACK UP YOUR SEED — losing it loses your funds, forever."));
+                    sp.Children.Add(Lab("password (optional)")); sp.Children.Add(pw);
+                    var create = Btn2("Create a new wallet");
+                    create.Click += (_, _) => { try { Unlocked(WalletStore.OpenOrCreate(path, pw.Password)); } catch (Exception ex) { msg.Text = ex.Message; } };
+                    sp.Children.Add(create);
+                    sp.Children.Add(Note("…or restore an existing wallet:"));
+                    sp.Children.Add(Lab("seed (64-hex backup)")); var seedBox = FieldBox(); sp.Children.Add(seedBox);
+                    var restore = Btn2("Restore from seed");
+                    restore.Click += (_, _) => { try { string h = seedBox.Text.Trim(); if (h.Length != 64) { msg.Text = "seed must be 64 hex characters"; return; } byte[] s = Tx.FromHex(h); WalletStore.Create(path, s, pw.Password); Unlocked(s); } catch (Exception ex) { msg.Text = ex.Message; } };
+                    sp.Children.Add(restore);
+                    var load = Btn2("Load a wallet.dat file…"); load.Click += (_, _) => LoadFile(); sp.Children.Add(load);
                 }
                 sp.Children.Add(msg);
                 host.Content = sp;
