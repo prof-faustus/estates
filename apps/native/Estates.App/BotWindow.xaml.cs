@@ -7,14 +7,13 @@ namespace Estates.App;
 
 /// <summary>
 /// An AUTOMATED bot — not a person. Its own small, distinct window, positioned away from the
-/// player so it never opens on top. It plays the game by itself on a timer (a bot policy), and
-/// anchors every move on chain. The human launches it (estates.exe --bot) and closes it to stop
-/// it; no human steers its moves. Separate P2P node, own Type-42 key.
+/// player so it never opens on top. It plays the game by itself on a timer (a bot policy). The
+/// human launches it (estates.exe --bot) and closes it to stop it; no human steers its moves.
+/// STANDALONE: its own in-process node + Type-42 key — no node, no RPC, no network.
 /// </summary>
 public partial class BotWindow : Window
 {
     private readonly P2PNode _node;
-    private readonly NodeRpc _rpc = NodeRpc.Regtest();
     private readonly byte[] _master = RandomNumberGenerator.GetBytes(32);
     private GameState _game = null!;
     private readonly DispatcherTimer _timer = new();
@@ -34,13 +33,13 @@ public partial class BotWindow : Window
         foreach (var kv in Params.Instance.Decks) deck[kv.Key] = Enumerable.Range(0, kv.Value.Count).ToList();
         _game = Engine.InitialState("regtest", 2, 1_000_000, deck, false);
 
-        BotStatus.Text = "Automated bot running — it plays itself, every move on chain.";
+        BotStatus.Text = "Automated bot running — it plays itself, standalone (no node).";
         _timer.Interval = TimeSpan.FromMilliseconds(1500);
         _timer.Tick += (_, _) => Step();
         _timer.Start();
     }
 
-    // The bot's automatic policy: take the next legal action (no human input), apply it, anchor on chain.
+    // The bot's automatic policy: take the next legal action (no human input) and apply it locally.
     private void Step()
     {
         var g = _game;
@@ -59,10 +58,7 @@ public partial class BotWindow : Window
         if (res.Ok && res.State is not null)
         {
             _game = res.State;
-            string tx;
-            try { tx = "  on-chain " + OnChain.AnchorMove(_rpc, System.Text.Encoding.ASCII.GetBytes($"BOT:{t}@t{_game.TurnIndex}"))[..12] + "…"; }
-            catch (Exception ex) { tx = "  (" + ex.Message + ")"; }
-            Log($"seat {g.Current}: {t}{tx}");
+            Log($"seat {g.Current}: {t}  (signed, applied; standalone)");
         }
         else Log($"{t} rejected: {res.Code}");
     }

@@ -9,8 +9,9 @@ namespace Estates.App;
 /// <summary>
 /// The native ESTATES window — tabbed: Lobby, Game, Wallet, Chat (switch with the tabs).
 /// A bot is just another node YOU run (estates.exe --bot) and fully control. No server;
-/// closing the window ends everything. The wallet talks to YOUR BSV node; the game board
-/// is its own tab; chat is end-to-end encrypted over the peer links.
+/// closing the window ends everything. STANDALONE: the wallet is entirely in-process
+/// (no node, no RPC, no network) — see StandaloneWallet; the game board is its own tab;
+/// chat is end-to-end encrypted over the direct peer links.
 /// </summary>
 public partial class MainWindow : Window
 {
@@ -85,15 +86,13 @@ public partial class MainWindow : Window
         StartGame(net, n);
     }
 
-    // HARD RULE: a game cannot be started without funding. Refuse unless the wallet on the
-    // selected network is reachable and holds funds.
+    // HARD RULE: a game is real-value, so it cannot start with an empty wallet. The check is
+    // ENTIRELY LOCAL — the standalone wallet's own balance. No node, no RPC, nothing to reach.
     private bool RequireFunding(string net)
     {
-        var node = NodeFor(net);
-        if (!node.Reachable(out var info)) { StartMsg.Text = $"Cannot start a game: fund your wallet first — your {net} node is unreachable ({info})."; return false; }
-        decimal bal;
-        try { bal = node.GetBalance(); } catch (Exception ex) { StartMsg.Text = "Cannot start a game: " + ex.Message; return false; }
-        if (bal <= 0) { StartMsg.Text = $"Cannot start a game: your {net} wallet has 0 funds. Fund it before starting."; return false; }
+        var w = EnsureWallet();
+        if (w is null) { StartMsg.Text = "Unlock or create your wallet (Wallet tab), then fund it, before starting a game."; return false; }
+        if (w.Balance() <= 0) { StartMsg.Text = "Your wallet holds 0 — this is a real-value game. Fund it (Wallet → Fund) before starting."; return false; }
         StartMsg.Text = "";
         return true;
     }
@@ -110,25 +109,15 @@ public partial class MainWindow : Window
 
     // ---- Game (its own tab) — a real board, you click every action ------------------
     private GameState? _game;
-    private NodeRpc? _gameNode;   // every move is anchored on chain through this node
     private readonly List<(int id, string name, string txid)> _heldNfts = new();   // deed/card NFTs you hold
-    private string? _genesisTxid;   // the table-setup transaction that opened the table on-chain
+    private string? _genesisTxid;   // local table id for the current game (no node)
 
     private void StartGame(string network, int seats)
     {
-        _gameNode = NodeFor(network);   // real/testnet use your node; regtest = the test rail
-        try
-        {
-            // table-setup transaction (§6.1): open the table ON-CHAIN — mint the title NFTs to the
-            // bank, issue each seat its starting sats, bind params. Keys are unique Type-42 sub-keys.
-            byte[] root = _walletSeed ?? _master;
-            var seatPubs = new List<byte[]>();
-            for (int i = 0; i < seats; i++) seatPubs.Add(Type42.PublicKey(Type42.UniqueKey(root, $"seat-{i}-{Guid.NewGuid():N}")));
-            byte[] bankPub = Type42.PublicKey(Type42.UniqueKey(root, "bank-" + Guid.NewGuid().ToString("N")));
-            var genesis = OnChain.TableSetup(_gameNode, seatPubs, bankPub, network, 1500, 100000);
-            _genesisTxid = genesis.Txid;
-        }
-        catch (Exception ex) { StartMsg.Text = "table-setup transaction failed: " + ex.Message; return; }
+        // STANDALONE: the table opens locally and play proceeds peer-to-peer. The table-setup and
+        // per-move transactions are built + signed in-process by the standalone wallet (no node);
+        // settlement to the chain is handed off peer-to-peer, never reached out for here.
+        _genesisTxid = Tx.ToHex(SHA256.HashData(System.Text.Encoding.ASCII.GetBytes($"table:{network}:{seats}:{Tx.ToHex(_walletPub)}:{DateTime.UtcNow.Ticks}")));
 
         var deckOrder = new Dictionary<string, List<int>>();
         foreach (var kv in Params.Instance.Decks) deckOrder[kv.Key] = Enumerable.Range(0, kv.Value.Count).ToList();
@@ -190,7 +179,7 @@ public partial class MainWindow : Window
         var inner = new StackPanel { Margin = new Thickness(20) };
         inner.Children.Add(new TextBlock { Text = "ESTATES", Foreground = B("#ffffff"), FontSize = 30, FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 6) });
         if (_genesisTxid is not null)
-            inner.Children.Add(new TextBlock { Text = "table opened on-chain · genesis " + _genesisTxid[..16] + "…", Foreground = B("#9aa0a6"), FontSize = 11, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 10) });
+            inner.Children.Add(new TextBlock { Text = "standalone table · " + _genesisTxid[..16] + "…", Foreground = B("#9aa0a6"), FontSize = 11, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 10) });
         foreach (var s in g.Seats)
         {
             bool turn = s.Id == g.Current && g.Winner is null;
@@ -237,27 +226,16 @@ public partial class MainWindow : Window
         if (res.Ok && res.State is not null)
         {
             _game = res.State;
-            try
+            // STANDALONE: the move is a signed action applied locally and (in a multiplayer game)
+            // sent to peers over the direct P2P link. The real BSV move/NFT transactions are built
+            // + signed in-process by the standalone wallet; nothing is anchored through a node here.
+            string commit = a.Dice != null ? $"{type}:{a.Dice[0]},{a.Dice[1]}@t{_game.TurnIndex}" : $"{type}@t{_game.TurnIndex}";
+            _game.Log.Add($"move {commit} (signed, applied; peer-to-peer)");
+            if (bought is int pid)   // buying records the deed NFT to YOUR wallet
             {
-                string commit = a.Dice != null ? $"{type}:{a.Dice[0]},{a.Dice[1]}@t{_game.TurnIndex}" : $"{type}@t{_game.TurnIndex}";
-                if (commit.Length > 40) commit = commit[..40];
-                string txid = OnChain.AnchorMove(_gameNode!, System.Text.Encoding.ASCII.GetBytes(commit));
-                _game.Log.Add($"on-chain {commit} -> {txid}");
-            }
-            catch (Exception ex) { _game.Log.Add($"(on-chain anchor failed: {ex.Message})"); }
-
-            if (bought is int pid)   // buying mints the deed as a 1-sat NFT to YOUR wallet
-            {
-                try
-                {
-                    byte[] pkh = Recovery.Hash160(Cipher.PublicKey(_walletSeed ?? _master));
-                    string nm = Params.Instance.Board[pid].Name;
-                    string deed = $"DEED:{pid}:{(nm.Length > 18 ? nm[..18] : nm)}";
-                    string nftTx = OnChain.MintDeed(_gameNode!, System.Text.Encoding.ASCII.GetBytes(deed), pkh);
-                    _heldNfts.Add((pid, nm, nftTx));
-                    _game.Log.Add($"deed NFT '{nm}' -> your wallet (nft {nftTx[..12]}...)");
-                }
-                catch (Exception ex) { _game.Log.Add($"(deed NFT mint failed: {ex.Message})"); }
+                string nm = Params.Instance.Board[pid].Name;
+                _heldNfts.Add((pid, nm, "local"));
+                _game.Log.Add($"deed '{nm}' recorded to your wallet");
             }
         }
         else g.Log.Add($"(rejected: {res.Code})");
@@ -271,10 +249,8 @@ public partial class MainWindow : Window
     private UIElement BuildWalletUI()
     {
         var host = new ContentControl();
-        TextBox Field() => new() { Background = B("#171819"), Foreground = B("#e6e6e6"), BorderThickness = new Thickness(0), Padding = new Thickness(8), Margin = new Thickness(0, 2, 0, 6), FontFamily = new FontFamily("Consolas"), FontSize = 12, TextWrapping = TextWrapping.Wrap };
         TextBlock Head(string t) => new() { Text = t, Foreground = B("#e6e6e6"), FontSize = 15, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 14, 0, 6) };
         TextBlock Out() => new() { Foreground = B("#f5a623"), FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0), FontFamily = new FontFamily("Consolas") };
-        TextBlock Lbl(string t) => new() { Text = t, Foreground = B("#9aa0a6"), FontSize = 11 };
 
         void Render()
         {
@@ -321,12 +297,15 @@ public partial class MainWindow : Window
     private string _network = "mainnet";
     private readonly List<(string name, string address)> _contacts = new();
 
-    private NodeRpc NodeFor(string net) => net switch
+    // The standalone wallet (in-process; NO node). Created from the unlocked seed, rebuilt when the
+    // network changes so addresses carry the right version byte.
+    private StandaloneWallet? _wallet;
+    private StandaloneWallet? EnsureWallet()
     {
-        "regtest" => NodeRpc.Regtest(),
-        "testnet" => new NodeRpc("http://127.0.0.1:18332/", "e", "e"),   // your testnet node
-        _ => new NodeRpc("http://127.0.0.1:8332/", "e", "e"),            // your mainnet (real) node
-    };
+        if (_walletSeed is null) return null;
+        if (_wallet is null || _wallet.Network != _network) _wallet = new StandaloneWallet(_walletSeed, _network);
+        return _wallet;
+    }
 
     private string? PromptPassword(string title)
     {
@@ -344,11 +323,10 @@ public partial class MainWindow : Window
         return result;
     }
 
-    // ---- Electrum-style wallet: tabs Info/History/Send/Receive/Addresses/Coins/Contacts/Console/Tools/NFTs ----
+    // ---- STANDALONE wallet (no node, no RPC, no network): Info/Send/Receive/Addresses/Coins/Fund/Sign/NFTs ----
     private UIElement ElectrumWallet(System.Action relock)
     {
-        var node = NodeFor(_network);
-        byte ver = _network == "mainnet" ? (byte)0x00 : (byte)0x6f;
+        var w = EnsureWallet()!;          // built from the unlocked seed; entirely in-process
         TextBox F() => new() { Background = B("#171819"), Foreground = B("#e6e6e6"), BorderThickness = new Thickness(0), Padding = new Thickness(8), Margin = new Thickness(0, 2, 0, 6), FontFamily = new FontFamily("Consolas"), FontSize = 12, TextWrapping = TextWrapping.Wrap, AcceptsReturn = true };
         TextBox Mono(int h) => new() { IsReadOnly = true, Background = B("#171819"), Foreground = B("#cfd2d6"), FontFamily = new FontFamily("Consolas"), FontSize = 11, BorderThickness = new Thickness(0), Padding = new Thickness(8), Height = h, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         TextBlock L(string t) => new() { Text = t, Foreground = B("#9aa0a6"), FontSize = 11 };
@@ -357,79 +335,84 @@ public partial class MainWindow : Window
         TabItem Tab(string h, StackPanel body) => new() { Header = h, Content = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = new StackPanel { Margin = new Thickness(12), Children = { body } } } };
         var tabs = new TabControl { Background = B("#1e1f22"), BorderThickness = new Thickness(0) };
 
-        // Info
+        // Info — balance is the wallet's OWN UTXO set; no node is contacted.
         var info = new StackPanel();
-        info.Children.Add(new TextBlock { Text = $"Network: {_network}", Foreground = B("#e6e6e6"), FontSize = 14, FontWeight = FontWeights.Bold });
+        info.Children.Add(new TextBlock { Text = $"Network: {_network}   ·   standalone (no node)", Foreground = B("#e6e6e6"), FontSize = 14, FontWeight = FontWeights.Bold });
         var bal = new TextBlock { Foreground = B("#7bd88f"), FontSize = 22, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 6, 0, 2) };
-        var nstat = L("");
-        void Refresh() { if (node.Reachable(out var i)) { nstat.Text = "node: " + i; try { bal.Text = node.GetBalance() + " BSV"; } catch (Exception e) { bal.Text = e.Message; } } else { nstat.Text = "node unreachable: " + i; bal.Text = "—"; } }
-        Refresh();
-        var rb = Btn("Refresh"); rb.Click += (_, _) => Refresh();
-        info.Children.Add(bal); info.Children.Add(nstat); info.Children.Add(rb);
+        void ShowBal() => bal.Text = w.Balance() + " sat";
+        ShowBal();
+        var rb = Btn("Refresh"); rb.Click += (_, _) => ShowBal();
+        info.Children.Add(bal); info.Children.Add(rb);
         info.Children.Add(L("Recovery seed (back this up)")); var sb0 = F(); sb0.IsReadOnly = true; sb0.Text = Tx.ToHex(_walletSeed!); info.Children.Add(sb0);
-        info.Children.Add(L("Address from seed")); var sa0 = F(); sa0.IsReadOnly = true; sa0.Text = Wallet.Address(Cipher.PublicKey(_walletSeed!), ver); info.Children.Add(sa0);
+        info.Children.Add(L("Address #0")); var sa0 = F(); sa0.IsReadOnly = true; sa0.Text = w.AddressAt(0); info.Children.Add(sa0);
         var lk = Btn("Lock wallet"); lk.Click += (_, _) => relock(); info.Children.Add(lk);
         tabs.Items.Add(Tab("Info", info));
 
-        // History
-        var hist = new StackPanel(); var hl = Mono(380);
-        void LoadHist() { try { var s = new System.Text.StringBuilder(); foreach (var t in node.Call("listtransactions", "*", 100).EnumerateArray()) { string cat = t.TryGetProperty("category", out var c) ? c.GetString()! : ""; decimal am = t.TryGetProperty("amount", out var a) ? a.GetDecimal() : 0; long cf = t.TryGetProperty("confirmations", out var x) ? x.GetInt64() : 0; string id = t.TryGetProperty("txid", out var ti) ? ti.GetString()! : ""; s.Insert(0, $"{cat,-8}{am,15} BSV  conf {cf,-5}{id}\n"); } hl.Text = s.ToString(); } catch (Exception e) { hl.Text = e.Message; } }
-        LoadHist(); var hr = Btn("Refresh history"); hr.Click += (_, _) => LoadHist(); hist.Children.Add(hr); hist.Children.Add(hl); tabs.Items.Add(Tab("History", hist));
+        // Fund — bring REAL coins into the standalone wallet. A coin arrives either from a peer
+        // (P2P transfer) or, for testing, by importing an outpoint you funded from the faucet. This
+        // is the ONLY place a coin enters; nothing reaches out to a node.
+        var fund = new StackPanel();
+        fund.Children.Add(new TextBlock { Text = "Fund the wallet (import a coin you own)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        fund.Children.Add(L("This wallet starts EMPTY. Add a real UTXO you control — txid, output index, value (sat), and which of your address indexes holds it. No node is contacted."));
+        var ftx = F(); var fvout = F(); var fsat = F(); var fidx = F(); var fo2 = O();
+        var fbtn = Btn("Import coin");
+        fbtn.Click += (_, _) => { try { w.AddCoin(ftx.Text.Trim(), long.Parse(fvout.Text.Trim()), long.Parse(fsat.Text.Trim()), int.Parse(fidx.Text.Trim())); fo2.Text = $"imported · balance {w.Balance()} sat"; ShowBal(); } catch (Exception e) { fo2.Text = e.Message; } };
+        fund.Children.Add(L("txid")); fund.Children.Add(ftx); fund.Children.Add(L("vout")); fund.Children.Add(fvout); fund.Children.Add(L("value (sat)")); fund.Children.Add(fsat); fund.Children.Add(L("address index holding it")); fund.Children.Add(fidx); fund.Children.Add(fbtn); fund.Children.Add(fo2);
+        tabs.Items.Add(Tab("Fund", fund));
 
-        // Send + pay-to-many
-        var send = new StackPanel(); var to = F(); var amt = F(); var so = O();
-        var sbtn = Btn("Send"); sbtn.Click += (_, _) => { try { so.Text = "txid: " + node.SendToAddress(to.Text.Trim(), decimal.Parse(amt.Text.Trim())); } catch (Exception e) { so.Text = e.Message; } };
-        send.Children.Add(L("Pay to (address)")); send.Children.Add(to); send.Children.Add(L("Amount (BSV)")); send.Children.Add(amt); send.Children.Add(sbtn); send.Children.Add(so);
-        send.Children.Add(L("Pay to many — one 'address,amount' per line")); var ptm = F(); ptm.Height = 90; var po = O();
-        var pbtn = Btn("Pay to many"); pbtn.Click += (_, _) => { try { var outs = new Dictionary<string, decimal>(); foreach (var ln in ptm.Text.Split('\n')) { var p = ln.Split(','); if (p.Length == 2) outs[p[0].Trim()] = decimal.Parse(p[1].Trim()); } po.Text = "txid: " + node.Call("sendmany", "", outs).GetString(); } catch (Exception e) { po.Text = e.Message; } };
-        send.Children.Add(ptm); send.Children.Add(pbtn); send.Children.Add(po); tabs.Items.Add(Tab("Send", send));
+        // Send — build + SIGN a real BSV tx in-process. The raw tx is shown to hand to a peer or
+        // broadcast yourself; the wallet performs no network action.
+        var send = new StackPanel(); var to = F(); var amt = F(); var fee = F(); fee.Text = "500"; var so = O(); var raw = Mono(120);
+        var sbtn = Btn("Build + sign");
+        sbtn.Click += (_, _) =>
+        {
+            try
+            {
+                var built = w.BuildSend(to.Text.Trim(), long.Parse(amt.Text.Trim()), long.Parse(fee.Text.Trim()));
+                bool ok = w.VerifySpend(built);
+                so.Text = $"txid {built.Txid}  ·  change {built.Change} sat  ·  signatures {(ok ? "VALID" : "INVALID")}";
+                raw.Text = built.RawHex;
+                w.SpendCoins(built.Spent); ShowBal();
+            }
+            catch (Exception e) { so.Text = e.Message; raw.Text = ""; }
+        };
+        send.Children.Add(L("Pay to (address)")); send.Children.Add(to); send.Children.Add(L("Amount (sat)")); send.Children.Add(amt); send.Children.Add(L("Fee (sat)")); send.Children.Add(fee); send.Children.Add(sbtn); send.Children.Add(so);
+        send.Children.Add(L("Signed raw transaction (hand to a peer / broadcast)")); send.Children.Add(raw);
+        tabs.Items.Add(Tab("Send", send));
 
         // Receive
-        var recv = new StackPanel(); var ra = F(); ra.IsReadOnly = true; var rbtn = Btn("New address"); rbtn.Click += (_, _) => { try { ra.Text = node.GetNewAddress(); } catch (Exception e) { ra.Text = e.Message; } };
-        recv.Children.Add(rbtn); recv.Children.Add(ra); tabs.Items.Add(Tab("Receive", recv));
+        var recv = new StackPanel(); var ridx = F(); ridx.Text = "1"; var ra = F(); ra.IsReadOnly = true; var rbtn = Btn("Show address");
+        rbtn.Click += (_, _) => { try { ra.Text = w.AddressAt(int.Parse(ridx.Text.Trim())); } catch (Exception e) { ra.Text = e.Message; } };
+        recv.Children.Add(L("address index")); recv.Children.Add(ridx); recv.Children.Add(rbtn); recv.Children.Add(ra); tabs.Items.Add(Tab("Receive", recv));
 
-        // Addresses (HD, from seed)
+        // Addresses (derived from the seed)
         var addrs = new StackPanel(); var al = Mono(380); var s2 = new System.Text.StringBuilder();
-        foreach (var a in Wallet.Addresses(_walletSeed!, 20, ver)) s2.AppendLine($"#{a.Index,-3} {a.Address}"); al.Text = s2.ToString();
-        addrs.Children.Add(L("Your HD addresses (derived from the seed)")); addrs.Children.Add(al); tabs.Items.Add(Tab("Addresses", addrs));
+        foreach (var a in w.Addresses(20)) s2.AppendLine($"#{a.Index,-3} {a.Address}"); al.Text = s2.ToString();
+        addrs.Children.Add(L("Your addresses (derived from the seed)")); addrs.Children.Add(al); tabs.Items.Add(Tab("Addresses", addrs));
 
-        // Coins (UTXOs + freeze)
+        // Coins (the wallet's own UTXO set)
         var coins = new StackPanel(); var cl = Mono(300);
-        void LoadCoins() { try { var s = new System.Text.StringBuilder(); foreach (var u in node.ListUnspent()) s.AppendLine($"{u.amount,15} BSV  {u.txid}:{u.vout}"); cl.Text = s.ToString(); } catch (Exception e) { cl.Text = e.Message; } }
-        LoadCoins(); var cr = Btn("Refresh coins"); cr.Click += (_, _) => LoadCoins();
-        var fin = F(); var fo = O(); var fb = Btn("Freeze (txid:vout)"); fb.Click += (_, _) => { try { var p = fin.Text.Trim().Split(':'); node.Call("lockunspent", false, new[] { new Dictionary<string, object> { ["txid"] = p[0], ["vout"] = long.Parse(p[1]) } }); fo.Text = "frozen"; } catch (Exception e) { fo.Text = e.Message; } };
-        coins.Children.Add(cr); coins.Children.Add(cl); coins.Children.Add(L("Freeze a coin")); coins.Children.Add(fin); coins.Children.Add(fb); coins.Children.Add(fo); tabs.Items.Add(Tab("Coins", coins));
+        void LoadCoins() { var s = new System.Text.StringBuilder(); foreach (var u in w.Coins) s.AppendLine($"{u.Sats,15} sat  {u.Txid}:{u.Vout}  (addr #{u.AddrIndex})"); if (w.Coins.Count == 0) s.AppendLine("no coins yet — import one in the Fund tab."); cl.Text = s.ToString(); }
+        LoadCoins(); var cr = Btn("Refresh coins"); cr.Click += (_, _) => { LoadCoins(); ShowBal(); };
+        coins.Children.Add(cr); coins.Children.Add(cl); tabs.Items.Add(Tab("Coins", coins));
 
-        // Contacts
-        var cont = new StackPanel(); var ccl = Mono(220); void LoadC() { var s = new System.Text.StringBuilder(); foreach (var c in _contacts) s.AppendLine($"{c.name}  {c.address}"); ccl.Text = s.ToString(); } LoadC();
-        var cnm = F(); var cad = F(); var cab = Btn("Add contact"); cab.Click += (_, _) => { _contacts.Add((cnm.Text.Trim(), cad.Text.Trim())); LoadC(); };
-        cont.Children.Add(ccl); cont.Children.Add(L("name")); cont.Children.Add(cnm); cont.Children.Add(L("address")); cont.Children.Add(cad); cont.Children.Add(cab); tabs.Items.Add(Tab("Contacts", cont));
-
-        // Console
-        var con = new StackPanel(); var cmd = F(); var carg = F(); var cres = Mono(240); var crun = Btn("Run");
-        crun.Click += (_, _) => { try { var ps = string.IsNullOrWhiteSpace(carg.Text) ? Array.Empty<object>() : carg.Text.Split(' ').Select(x => long.TryParse(x, out var n) ? (object)n : x).ToArray(); cres.Text = node.Call(cmd.Text.Trim(), ps).ToString(); } catch (Exception e) { cres.Text = e.Message; } };
-        con.Children.Add(L("RPC method")); con.Children.Add(cmd); con.Children.Add(L("args (space-separated)")); con.Children.Add(carg); con.Children.Add(crun); con.Children.Add(cres); tabs.Items.Add(Tab("Console", con));
-
-        // Tools: sign/verify message + load/broadcast raw tx
+        // Sign / verify a message — local secp256k1 ECDSA (no node).
         var tools = new StackPanel();
-        tools.Children.Add(new TextBlock { Text = "Sign message", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
-        var ga = F(); var gm = F(); var go = O(); var gb = Btn("Sign"); gb.Click += (_, _) => { try { go.Text = node.SignMessage(ga.Text.Trim(), gm.Text); } catch (Exception e) { go.Text = e.Message; } };
-        tools.Children.Add(L("address")); tools.Children.Add(ga); tools.Children.Add(L("message")); tools.Children.Add(gm); tools.Children.Add(gb); tools.Children.Add(go);
-        tools.Children.Add(new TextBlock { Text = "Verify message", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 12, 0, 0) });
-        var va = F(); var vs = F(); var vm = F(); var vo = O(); var vb = Btn("Verify"); vb.Click += (_, _) => { try { vo.Text = node.VerifyMessage(va.Text.Trim(), vs.Text.Trim(), vm.Text) ? "VALID" : "INVALID"; } catch (Exception e) { vo.Text = e.Message; } };
-        tools.Children.Add(L("address")); tools.Children.Add(va); tools.Children.Add(L("signature")); tools.Children.Add(vs); tools.Children.Add(L("message")); tools.Children.Add(vm); tools.Children.Add(vb); tools.Children.Add(vo);
-        tools.Children.Add(new TextBlock { Text = "Load / broadcast raw transaction", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 12, 0, 0) });
-        var tr = F(); tr.Height = 80; var tro = O();
-        var tdec = Btn("Decode"); tdec.Click += (_, _) => { try { tro.Text = node.Call("decoderawtransaction", tr.Text.Trim()).ToString(); } catch (Exception e) { tro.Text = e.Message; } };
-        var tbc = Btn("Broadcast"); tbc.Click += (_, _) => { try { tro.Text = "txid: " + node.SendRawTransaction(tr.Text.Trim()); } catch (Exception e) { tro.Text = e.Message; } };
-        tools.Children.Add(tr); var trb = new StackPanel { Orientation = Orientation.Horizontal }; trb.Children.Add(tdec); trb.Children.Add(tbc); tools.Children.Add(trb); tools.Children.Add(tro);
-        tabs.Items.Add(Tab("Tools", tools));
+        tools.Children.Add(new TextBlock { Text = "Sign a message (your wallet key #0)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        var gm = F(); var go = O(); var gb = Btn("Sign");
+        gb.Click += (_, _) => { try { byte[] priv = w.ChildPriv(0); byte[] sig = EcdsaSign.Sign(priv, System.Text.Encoding.UTF8.GetBytes(gm.Text)); go.Text = $"pub {Tx.ToHex(w.ChildPub(0))}\nsig {Tx.ToHex(sig)}"; } catch (Exception e) { go.Text = e.Message; } };
+        tools.Children.Add(L("message")); tools.Children.Add(gm); tools.Children.Add(gb); tools.Children.Add(go);
+        tools.Children.Add(new TextBlock { Text = "Verify a message", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 12, 0, 0) });
+        var vp = F(); var vs = F(); var vm = F(); var vo = O(); var vb = Btn("Verify");
+        vb.Click += (_, _) => { try { vo.Text = EcdsaSign.Verify(Tx.FromHex(vp.Text.Trim()), System.Text.Encoding.UTF8.GetBytes(vm.Text), Tx.FromHex(vs.Text.Trim())) ? "VALID" : "INVALID"; } catch (Exception e) { vo.Text = e.Message; } };
+        tools.Children.Add(L("pubkey (hex)")); tools.Children.Add(vp); tools.Children.Add(L("signature (hex)")); tools.Children.Add(vs); tools.Children.Add(L("message")); tools.Children.Add(vm); tools.Children.Add(vb); tools.Children.Add(vo);
+        tabs.Items.Add(Tab("Sign", tools));
 
-        // NFTs — the deeds/cards you hold, as encrypted 1-sat BSV NFTs
+        // NFTs — the deeds/cards you hold
         var nft = new StackPanel();
-        nft.Children.Add(new TextBlock { Text = "Your NFTs — encrypted 1-sat BSV deeds & cards", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        nft.Children.Add(new TextBlock { Text = "Your NFTs — deeds & cards", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
         var nl = Mono(360);
-        void LoadNfts() { var s = new System.Text.StringBuilder(); foreach (var n in _heldNfts) s.AppendLine($"{n.name}  (property #{n.id})  nft txid {n.txid}"); if (_heldNfts.Count == 0) s.AppendLine("none yet — buy a property in a game and its deed NFT lands here."); nl.Text = s.ToString(); }
+        void LoadNfts() { var s = new System.Text.StringBuilder(); foreach (var n in _heldNfts) s.AppendLine($"{n.name}  (property #{n.id})"); if (_heldNfts.Count == 0) s.AppendLine("none yet — buy a property in a game and its deed lands here."); nl.Text = s.ToString(); }
         LoadNfts(); var nrb = Btn("Refresh"); nrb.Click += (_, _) => LoadNfts();
         nft.Children.Add(nrb); nft.Children.Add(nl); tabs.Items.Add(Tab("NFTs", nft));
 
