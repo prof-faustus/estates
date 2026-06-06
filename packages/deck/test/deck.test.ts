@@ -1,12 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bytesToHex, randomBytes } from '@noble/hashes/utils';
+import { bytesToHex, randomBytes, sha256 } from '@estates/keys';
 import {
   genCardKey, sealTo, open, commit, verifyReveal, encodeFace, decodeFace,
   mintCard, openCard, transferCard, commitEntropy, verifyEntropy, combineSeed,
   permutation, mintDeck, verifyCardTranscript, type CardFace,
 } from '../src/index.ts';
-import { sha256 } from '@noble/hashes/sha256';
 
 const TABLE = '11'.repeat(32);          // 32-byte table id (hex)
 const OTHER = '22'.repeat(32);

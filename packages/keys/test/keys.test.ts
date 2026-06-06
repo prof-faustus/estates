@@ -1,10 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import * as secp from '@noble/secp256k1';
-import { bytesToHex } from '@noble/hashes/utils';
-import { genMaster, pubOf, deriveChildPriv, deriveChildPub, deriveSelf, KeyChain } from '../src/index.ts';
+import { genMaster, pubOf, deriveChildPriv, deriveChildPub, deriveSelf, KeyChain, walletChain, verifyChain, genesisLink } from '../src/index.ts';
+import { isValidScalar } from '../src/secp256k1.ts';
 
-const hex = (b: Uint8Array) => bytesToHex(b);
+const hex = (b: Uint8Array) => { let s = ''; for (const x of b) s += x.toString(16).padStart(2, '0'); return s; };
 
 // ---- Alice + Bob: sender derives pub, recipient derives priv, they MATCH ------
 test('BRC-42 shared derivation: sender pubkey == recipient privkey’s pubkey', () => {
@@ -68,12 +67,37 @@ test('KeyChain pay/receive round-trips between two parties', () => {
   assert.equal(hex(recv.pub), hex(payPub), 'Alice paid exactly the key Bob can spend');
 });
 
+// ---- MANDATORY hash chain (index‖ECDH‖HMAC) — TS twin of native KeyChain.cs ----
+test('walletChain verifies, every key is unique, root is never a sub-key', () => {
+  const root = genMaster();
+  const chain = walletChain(root.priv, 16);
+  assert.ok(verifyChain(root.pub, chain), 'the hash-chained Type-42 chain verifies');
+  const pubs = new Set(chain.map((c) => hex(c.pub)));
+  assert.equal(pubs.size, chain.length, 'every sub-key is unique (one-use)');
+  assert.equal(pubs.has(hex(root.pub)), false, 'root is never a sub-key');
+  for (const ck of chain) assert.equal(hex(pubOf(ck.priv)), hex(ck.pub), 'priv/pub consistent');
+});
+
+test('tampering ANY earlier link breaks chain verification', () => {
+  const root = genMaster();
+  const chain = walletChain(root.priv, 8);
+  const broken = chain.map((c) => ({ ...c }));
+  broken[3] = { ...broken[3], link: Uint8Array.from(broken[3].link).map((b, i) => (i === 0 ? b ^ 0xff : b)) };
+  assert.equal(verifyChain(root.pub, broken), false);
+});
+
+test('the genesis link binds the root pubkey (different roots ⇒ different chains)', () => {
+  const a = genMaster(); const b = genMaster();
+  assert.notEqual(hex(genesisLink(a.pub)), hex(genesisLink(b.pub)));
+  assert.notEqual(hex(walletChain(a.priv, 1)[0].pub), hex(walletChain(b.priv, 1)[0].pub));
+});
+
 // ---- child keys are valid scalars in [1, n) -----------------------------------
 test('derived private keys are valid secp256k1 scalars', () => {
   const a = genMaster(); const b = genMaster();
   for (let i = 0; i < 20; i++) {
     const k = deriveChildPriv(b.priv, a.pub, `inv/${i}`);
-    assert.doesNotThrow(() => secp.getPublicKey(k, true), 'valid private key');
+    assert.ok(isValidScalar(k), 'valid private key');
   }
 });
 

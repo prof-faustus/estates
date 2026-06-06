@@ -20,28 +20,28 @@
  *
  * Isomorphic (pure @noble), so it runs identically in Node and the desktop UI.
  */
-import * as secp from '@noble/secp256k1';
-import { sha256 } from '@noble/hashes/sha256';
-import { hkdf } from '@noble/hashes/hkdf';
-import { gcm } from '@noble/ciphers/aes';
-import { randomBytes, bytesToHex, hexToBytes, concatBytes } from '@noble/hashes/utils';
+import {
+  randomPrivateKey, pubFromPriv, ecdhCompressed, isValidPublicKey,
+  sha256, hkdfSha256, aesSeal, aesOpen,
+  randomBytes, bytesToHex, hexToBytes, concatBytes,
+} from '@estates/keys';
 
 // ---- one-use key per card (the card's own wallet) ---------------------------
 export interface CardKey { readonly priv: Uint8Array; readonly pub: Uint8Array; }
 export function genCardKey(): CardKey {
-  const priv = secp.utils.randomPrivateKey();
-  return { priv, pub: secp.getPublicKey(priv, true) };
+  const priv = randomPrivateKey();
+  return { priv, pub: pubFromPriv(priv) };
 }
 
 // ---- single-use ECIES (seal a card face to its holder) ----------------------
 export interface Envelope { readonly ephPub: string; readonly nonce: string; readonly ct: string }
 const INFO = new TextEncoder().encode('estates-card-v1');
 const EMPTY = new Uint8Array(0);
-const kek = (shared: Uint8Array): Uint8Array => hkdf(sha256, shared, EMPTY, INFO, 32);
+const kek = (shared: Uint8Array): Uint8Array => hkdfSha256(shared, EMPTY, INFO, 32);
 
 /** True iff `pub` is a valid compressed secp256k1 point (33 bytes, on curve). */
 export function isValidPub(pub: Uint8Array): boolean {
-  try { secp.ProjectivePoint.fromHex(bytesToHex(pub)); return pub.length === 33; } catch { return false; }
+  return pub.length === 33 && isValidPublicKey(pub);
 }
 
 /**
@@ -53,13 +53,13 @@ export function isValidPub(pub: Uint8Array): boolean {
  */
 export function sealTo(recipientPub: Uint8Array, plaintext: Uint8Array, aad: Uint8Array = EMPTY): Envelope {
   if (!isValidPub(recipientPub)) throw new Error('sealTo: recipient public key is not a valid compressed point');
-  const eph = secp.utils.randomPrivateKey();
-  const shared = secp.getSharedSecret(eph, recipientPub, true);
+  const eph = randomPrivateKey();
+  const shared = ecdhCompressed(eph, recipientPub);
   const nonce = randomBytes(12);
   return {
-    ephPub: bytesToHex(secp.getPublicKey(eph, true)),
+    ephPub: bytesToHex(pubFromPriv(eph)),
     nonce: bytesToHex(nonce),
-    ct: bytesToHex(gcm(kek(shared), nonce, aad).encrypt(plaintext)),
+    ct: bytesToHex(aesSeal(kek(shared), nonce, plaintext, aad)),
   };
 }
 /** Open a sealed envelope with a private key. null on wrong key, wrong aad, or
@@ -67,8 +67,8 @@ export function sealTo(recipientPub: Uint8Array, plaintext: Uint8Array, aad: Uin
 export function open(priv: Uint8Array, env: Envelope, aad: Uint8Array = EMPTY): Uint8Array | null {
   try {
     if (!env || typeof env !== 'object') return null;
-    const shared = secp.getSharedSecret(priv, hexToBytes(env.ephPub), true);
-    return gcm(kek(shared), hexToBytes(env.nonce), aad).decrypt(hexToBytes(env.ct));
+    const shared = ecdhCompressed(priv, hexToBytes(env.ephPub));
+    return aesOpen(kek(shared), hexToBytes(env.nonce), hexToBytes(env.ct), aad);
   } catch {
     return null;
   }
@@ -388,7 +388,7 @@ export function verifyCardTranscript(
     if (!isTableIdHex(c.tableId)) return { ok: false, reason: `card tableId is not 32-byte hex (${String(c.tableId).slice(0, 8)}…)` };
     if (c.tableId !== expectedTableId) return { ok: false, reason: `card bound to a different table (${c.tableId.slice(0, 8)}…)` };
     if (!/^[0-9a-f]{66}$/.test(c.cardPub)) return { ok: false, reason: `cardPub is not a 33-byte compressed point: ${c.cardPub.slice(0, 12)}…` };
-    try { secp.ProjectivePoint.fromHex(c.cardPub); } catch { return { ok: false, reason: `cardPub is not a valid curve point: ${c.cardPub.slice(0, 12)}…` }; }
+    if (!isValidPublicKey(hexToBytes(c.cardPub))) return { ok: false, reason: `cardPub is not a valid curve point: ${c.cardPub.slice(0, 12)}…` };
     if (prior?.has(c.cardPub)) return { ok: false, reason: `card key ${c.cardPub.slice(0, 12)}… was used in a prior game (keys serve at most ONE game)` };
     if (seen.has(c.cardPub)) return { ok: false, reason: `reused one-use card key ${c.cardPub.slice(0, 12)}… (keys must never repeat)` };
     seen.add(c.cardPub);

@@ -22,6 +22,13 @@ public partial class App : Application
         SessionEnding += (_, _) => HardExit();
         Exit += (_, _) => HardExit();
         base.OnStartup(e);
+
+        // A bot is a SEPARATE node the human started (estates.exe --bot) and FULLY controls
+        // — the same lobby and the same human controls as any player, never automated. The
+        // lobby spawns it ONLY when the human clicks "Run a bot".
+        bool bot = e.Args.Any(a => a == "--bot");
+        Window w = bot ? new BotWindow() : new MainWindow();   // a bot is NOT a person — its own small window
+        w.Show();
     }
 
     /// <summary>Owners of live resources (the P2P node) add a clean teardown here so a

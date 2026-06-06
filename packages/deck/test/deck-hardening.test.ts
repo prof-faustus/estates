@@ -2,7 +2,7 @@
 // combination, permutation size guard, AEAD/domain binding, transfer retirement.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bytesToHex } from '@noble/hashes/utils';
+import { bytesToHex } from '@estates/keys';
 import {
   validateFace, encodeFace, permutation, MAX_DECK_SIZE,
   combineSeedBound, commitEntropy, genCardKey, mintCard, openCard, transferCard,

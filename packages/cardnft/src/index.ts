@@ -24,8 +24,7 @@ import {
 } from '@estates/deck';
 import { OP, op, push, p2pkh, serializeScript, NFT_SATS, type TxOutput } from '@estates/onchain';
 import { txid, type Tx } from '@estates/tx';
-import { sha256 } from '@noble/hashes/sha256';
-import { bytesToHex, hexToBytes, concatBytes } from '@noble/hashes/utils';
+import { sha256, bytesToHex, hexToBytes, concatBytes } from '@estates/keys';
 
 export interface Outpoint { readonly txid: string; readonly vout: number }
 

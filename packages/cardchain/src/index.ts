@@ -24,8 +24,7 @@ import {
   cardNftOutput, mintCardNft, transferCardNft, deckToNfts, verifyDeckNfts, isLiveCard,
   type CardNft, type Outpoint, type CardTransfer, type DeckCheck,
 } from '@estates/cardnft';
-import { ripemd160 } from '@noble/hashes/ripemd160';
-import { sha256 } from '@noble/hashes/sha256';
+import { ripemd160, sha256 } from '@estates/keys';
 
 const P = loadParams();
 

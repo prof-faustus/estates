@@ -1,0 +1,17 @@
+<Window x:Class="Estates.App.BotWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="ESTATES — automated bot" Height="440" Width="520"
+        Background="#101814" WindowStartupLocation="Manual">
+    <!-- A BOT, not a person: it plays automatically, no human controls it. Its own small,
+         visually distinct window, positioned away from the player so it never opens on top. -->
+    <StackPanel Margin="18">
+        <TextBlock Text="🤖 ESTATES — AUTOMATED BOT" Foreground="#7bd88f" FontSize="18" FontWeight="Bold"/>
+        <TextBlock Text="A bot system — it plays itself, no human input. Separate node. Close to stop it."
+                   Foreground="#9aa0a6" FontSize="12" Margin="0,4,0,10" TextWrapping="Wrap"/>
+        <TextBlock x:Name="BotStatus" Foreground="#ffd54f" FontSize="13" Margin="0,0,0,8" TextWrapping="Wrap"/>
+        <TextBox x:Name="BotLog" IsReadOnly="True" Background="#0a120d" Foreground="#cfd2d6"
+                 FontFamily="Consolas" FontSize="11" Height="300" VerticalScrollBarVisibility="Auto"
+                 BorderThickness="0" Padding="8"/>
+    </StackPanel>
+</Window>

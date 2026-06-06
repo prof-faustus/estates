@@ -9,16 +9,10 @@
  *   - broadcast via your own node's JSON-RPC (regtest) or a testnet/mainnet
  *     endpoint (mainnet refused without an explicit money-guard confirmation).
  */
-import * as secp from '@noble/secp256k1';
-import { sha256 } from '@noble/hashes/sha256';
-import { ripemd160 } from '@noble/hashes/ripemd160';
-import { hmac } from '@noble/hashes/hmac';
+import { randomPrivateKey, pubFromPriv, signHash, derEncode, sha256, ripemd160 } from '@estates/keys';
 import { serializeTx, hash256, type Tx } from '@estates/tx';
 import { p2pkh, serializeScript, push } from '@estates/onchain';
 import { verifyTx } from '@estates/scriptvm';
-
-// @noble needs a sync HMAC hook to sign; set once at module load.
-secp.etc.hmacSha256Sync = (k, ...m) => hmac(sha256, k, secp.etc.concatBytes(...m));
 
 export type Network = 'mainnet' | 'testnet' | 'regtest';
 
@@ -59,7 +53,7 @@ const addrVersion = (n: Network): number => (n === 'mainnet' ? 0x00 : 0x6f); // 
 export class PrivateKey {
   readonly priv: Uint8Array;        // 32 bytes
   constructor(priv: Uint8Array) { if (priv.length !== 32) throw new Error('priv must be 32 bytes'); this.priv = priv; }
-  static fromRandom(): PrivateKey { return new PrivateKey(secp.utils.randomPrivateKey()); }
+  static fromRandom(): PrivateKey { return new PrivateKey(randomPrivateKey()); }
   static fromWif(wif: string): PrivateKey {
     const p = base58checkDecode(wif);                 // [version][32 priv]([0x01 compressed])
     const body = p.slice(1);
@@ -68,7 +62,7 @@ export class PrivateKey {
   toWif(): string { return base58check(concat(new Uint8Array([WIF_VERSION]), this.priv, new Uint8Array([0x01]))); }
   /** @bsv/sdk-compatible: the big-endian private-key bytes (used to derive the seat identity). */
   toArray(_fmt?: 'be', _len?: number): number[] { return Array.from(this.priv); }
-  pub(): Uint8Array { return secp.getPublicKey(this.priv, true); }   // compressed
+  pub(): Uint8Array { return pubFromPriv(this.priv); }   // compressed
   pkh(): Uint8Array { return hash160(this.pub()); }
 }
 
@@ -125,7 +119,7 @@ export class Wallet {
     let tx: Tx = { version: 1, inputs: ins.map((i) => ({ prevTxid: i.prevTxid, prevVout: i.prevVout, scriptSig: new Uint8Array(0), sequence: 0xffffffff })), outputs: txOuts, lockTime: 0 };
     const signed = tx.inputs.map((inp, i) => {
       const h = sighashAll(tx, i, myScript, ins[i]!.value);           // BIP-143, SIGHASH_ALL|FORKID
-      const sig = concat(compactToDer(secp.sign(h, this.key.priv).toCompactRawBytes()), new Uint8Array([0x41]));
+      const sig = concat(derEncode(signHash(this.key.priv, h)), new Uint8Array([0x41]));
       return { ...inp, scriptSig: serializeScript([push(sig), push(this.key.pub())]) };
     });
     tx = { ...tx, inputs: signed };
@@ -197,13 +191,6 @@ function sighashAll(tx: Tx, i: number, prevoutScript: Uint8Array, amount: number
     hashOutputs, u32le(tx.lockTime), u32le(0x41),
   ));
 }
-function compactToDer(c: Uint8Array): Uint8Array {
-  const enc = (x0: Uint8Array): Uint8Array => { let i = 0; while (i < x0.length - 1 && x0[i] === 0) i++; let x: Uint8Array = x0.slice(i); if ((x[0]! & 0x80) !== 0) x = concat(new Uint8Array([0]), x); return x; };
-  const r = enc(c.slice(0, 32)); const s = enc(c.slice(32, 64));
-  const body = concat(new Uint8Array([0x02, r.length]), r, new Uint8Array([0x02, s.length]), s);
-  return concat(new Uint8Array([0x30, body.length]), body);
-}
-
 /** Broadcast to a regtest/local BSV node via JSON-RPC sendrawtransaction. */
 export async function rpcBroadcast(hex: string, rpcUrl: string, user: string, pass: string): Promise<{ txid: string }> {
   const res = await fetch(rpcUrl, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Basic ' + b64(`${user}:${pass}`) }, body: JSON.stringify({ jsonrpc: '1.0', id: 'estates', method: 'sendrawtransaction', params: [hex] }) });

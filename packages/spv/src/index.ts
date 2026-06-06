@@ -9,7 +9,7 @@
  * Hashes are 32-byte internal (little-endian) byte order, as on the wire.
  * Isomorphic (@noble).
  */
-import { sha256 } from '@noble/hashes/sha256';
+import { sha256 } from '@estates/keys';
 
 /** Bitcoin double-SHA-256. */
 export function hash256(b: Uint8Array): Uint8Array { return sha256(sha256(b)); }

@@ -47,3 +47,13 @@ apps/native/nugetprobe/
 # native single-file exe (73MB binary) + publish output — build with: dotnet publish -c Release
 /estates.exe
 apps/native/**/publish/
+PLAN.md
+HANDOFF.md
+CLAUDE.md
+*.claude.md
+.claude/
+# Claude/agent session notes & transcript extractions — MUST NEVER be published (major breach)
+TRANSCRIPT-KNOWLEDGE.md
+*-KNOWLEDGE.md
+TRANSCRIPT*.md
+AGENTS.md

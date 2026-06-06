@@ -1,16 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import * as secp from '@noble/secp256k1';
-import { sha256 } from '@noble/hashes/sha256';
-import { ripemd160 } from '@noble/hashes/ripemd160';
-import { hmac } from '@noble/hashes/hmac';
+import { randomPrivateKey as randPriv, pubFromPriv, signHash, sha256, ripemd160 } from '@estates/keys';
 import { paymentOutput, push, OP, serializeScript } from '@estates/onchain';
 import { covenantOutput, rulesHash } from '@estates/bank';
 import type { Tx } from '@estates/tx';
 import { verifyInput, verifyTx, sighash, compactToDer, parseScript } from '../src/index.ts';
 
-// enable sync ECDSA signing in @noble
-secp.etc.hmacSha256Sync = (k, ...m) => hmac(sha256, k, secp.etc.concatBytes(...m));
+// in-tree secp256k1 shim (keeps the test body unchanged; signing is random-nonce + low-S, NOT RFC-6979)
+const secp = {
+  utils: { randomPrivateKey: randPriv },
+  getPublicKey: (priv: Uint8Array, _compressed?: boolean) => pubFromPriv(priv),
+  sign: (h: Uint8Array, priv: Uint8Array) => ({ toCompactRawBytes: () => signHash(priv, h) }),
+};
 const hash160 = (b: Uint8Array) => ripemd160(sha256(b));
 const HASHTYPE = 0x41; // SIGHASH_ALL | FORKID
 // a Tx output ({value,script}) paying a pkh

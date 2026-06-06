@@ -96,6 +96,14 @@ test('a REAL game (nonzero gameId) is MANDATORY-manifest: a log WITHOUT the mani
   assert.notEqual(C.view().phase, 'playing', 'WITHOUT the manifest, a real game is NOT live (mandatory, fail-closed)');
 });
 
+test('a malformed gameId is REJECTED (never silently downgraded to the zero id)', () => {
+  for (const bad of ['', 'xyz', 'a1'.repeat(31), 'a1'.repeat(33), 'gg'.repeat(32)]) {
+    assert.throws(() => new NetTable(new InMemoryRelay(), 'p', () => {}, { identity: genIdentity(), gameId: bad }), /gameId must be 64-hex/);
+  }
+  // omitting it entirely is the explicit offline path (no throw)
+  assert.doesNotThrow(() => new NetTable(new InMemoryRelay(), 'p', () => {}, { identity: genIdentity() }));
+});
+
 test('start() actually BROADCASTS exactly one valid manifest frame for a real game', () => {
   const relay = new InMemoryRelay();
   const A = new NetTable(relay, 'A', () => {}, { identity: genIdentity(), gameId: GID });

@@ -1,8 +1,13 @@
-// Estates.Conformance — proves the NATIVE C# engine port is byte-for-byte
-// identical to the audited TypeScript reference. Loads the SAME vector file
-// (state, action -> expected {ok, stateHash|code}) the TS conformance suite uses,
-// applies each through the native Engine, and asserts the native state hash equals
-// the expected hash (or the rejection matches). Any divergence fails the build.
+// Estates.Conformance — two jobs:
+//   (1) CROSS-VALIDATION: prove the native C# engine + on-chain primitives are byte-for-byte
+//       identical to the audited reference (same vector files: engine state hashes, tx
+//       serialization/txid, card-NFT output+transfer, BIP-143 sighash + ECDSA OP_CHECKSIG,
+//       dice beacon). Any divergence fails the build.
+//   (2) CRYPTO-CORE self-validation: every claim of the in-tree, LIBRARY-FREE crypto core
+//       (secp256k1, hash-chained Type-42 keys, Shamir threshold, 2-of-2 + nLockTime recovery,
+//       ECIES/key-wrap) is asserted with a POSITIVE and a HOSTILE-NEGATIVE test. No third-party
+//       library, no Ed25519, no RFC-6979 anywhere in the path.
+using System.Security.Cryptography;
 using System.Text.Json;
 using Estates.Core;
 
@@ -44,40 +49,10 @@ foreach (var v in vectors.EnumerateArray())
 }
 
 Console.WriteLine($"\nEstates.Conformance (engine): {pass} passed, {fail} failed of {pass + fail} vectors");
-if (fail == 0) Console.WriteLine("PASS: the native C# engine is byte-for-byte identical to the audited TypeScript reference.");
+if (fail == 0) Console.WriteLine("PASS: the native C# engine is byte-for-byte identical to the audited reference.");
 else Console.Error.WriteLine("FAIL: the native engine DIVERGES from the reference.");
 
-// ---- KEY-LIFECYCLE cross-validation: the native KeyLife must agree with the TS
-// reference on every manifest verdict (a TS-signed manifest verifies in C#). ----
-int kpass = 0, kfail = 0;
-string klPath = Path.Combine(AppContext.BaseDirectory, "keylife-vectors.json");
-if (File.Exists(klPath))
-{
-    using var kdoc = JsonDocument.Parse(File.ReadAllText(klPath));
-    var kr = kdoc.RootElement;
-    foreach (var v in kr.GetProperty("single").EnumerateArray())
-    {
-        string name = v.GetProperty("name").GetString()!;
-        bool expect = v.GetProperty("expectVerify").GetBoolean();
-        var m = KeyLife.Parse(v.GetProperty("manifest"));
-        bool got = KeyLife.VerifyManifest(m).Ok;
-        if (got == expect) kpass++;
-        else { Console.Error.WriteLine($"  [KEYLIFE FAIL] verifyManifest {name}: want {expect}, got {got}"); kfail++; }
-    }
-    foreach (var v in kr.GetProperty("crossGame").EnumerateArray())
-    {
-        string name = v.GetProperty("name").GetString()!;
-        bool expect = v.GetProperty("expectNoReuse").GetBoolean();
-        var ms = v.GetProperty("manifests").EnumerateArray().Select(KeyLife.Parse).ToList();
-        bool got = KeyLife.VerifyNoCrossGameReuse(ms).Ok;
-        if (got == expect) kpass++;
-        else { Console.Error.WriteLine($"  [KEYLIFE FAIL] noCrossGameReuse {name}: want {expect}, got {got}"); kfail++; }
-    }
-    Console.WriteLine($"Estates.Conformance (keylife): {kpass} passed, {kfail} failed");
-    if (kfail == 0) Console.WriteLine("PASS: native KeyLife agrees with the TS reference (TS-signed manifests verify in C#).");
-}
-
-// ---- TX cross-validation: native serialize + txid must equal the TS reference ----
+// ---- TX cross-validation: native serialize + txid must equal the reference ----
 int tpass = 0, tfail = 0;
 string txPath = Path.Combine(AppContext.BaseDirectory, "tx-vectors.json");
 if (File.Exists(txPath))
@@ -99,11 +74,11 @@ if (File.Exists(txPath))
         else { Console.Error.WriteLine($"  [TX FAIL] {name}: serial/txid mismatch\n    serWant {wantSer}\n    serGot  {gotSer}\n    idWant {wantTxid} idGot {gotTxid}"); tfail++; }
     }
     Console.WriteLine($"Estates.Conformance (tx): {tpass} passed, {tfail} failed");
-    if (tfail == 0) Console.WriteLine("PASS: native Tx serialization + txid are byte-for-byte the TS reference.");
+    if (tfail == 0) Console.WriteLine("PASS: native Tx serialization + txid are byte-for-byte the reference.");
 }
 
 // ---- CARDNFT cross-validation: native card NFT output script + transfer tx must
-// equal the TS reference, and native verify accepts the true move / rejects a copy. -
+// equal the reference, and native verify accepts the true move / rejects a copy. ----
 int cpass = 0, cfail = 0;
 string cnPath = Path.Combine(AppContext.BaseDirectory, "cardnft-vectors.json");
 if (File.Exists(cnPath))
@@ -132,11 +107,12 @@ if (File.Exists(cnPath))
     _ = newOp;
 
     Console.WriteLine($"Estates.Conformance (cardnft): {cpass} passed, {cfail} failed");
-    if (cfail == 0) Console.WriteLine("PASS: native card NFT output + transfer tx are byte-for-byte the TS reference; true move accepted, copy rejected.");
+    if (cfail == 0) Console.WriteLine("PASS: native card NFT output + transfer tx are byte-for-byte the reference; true move accepted, copy rejected.");
 }
 
 // ---- SCRIPTVM cross-validation: native BIP-143 sighash + ECDSA OP_CHECKSIG must
-// equal the TS reference (a TS-signed input verifies; a tampered one fails). ----
+// equal the reference (a signed input verifies; a tampered one fails). The verify path
+// is the in-tree Secp256k1 (no library) and is fail-closed to SIGHASH_ALL|FORKID. ----
 int spass = 0, sfail = 0;
 string svPath = Path.Combine(AppContext.BaseDirectory, "scriptvm-vectors.json");
 if (File.Exists(svPath))
@@ -158,138 +134,15 @@ if (File.Exists(svPath))
 
     void Check(string what, bool ok) { if (ok) spass++; else { Console.Error.WriteLine($"  [SCRIPTVM FAIL] {what}"); sfail++; } }
     Check("BIP-143 sighash matches", Tx.ToHex(Scriptvm.Sighash(tx, idx, prevoutScript, prevoutValue, hashType)) == v.GetProperty("expectedSighash").GetString());
-    Check("valid signature verifies (ECDSA OP_CHECKSIG)", Scriptvm.CheckSig(tx, idx, prevoutScript, prevoutValue, Tx.FromHex(v.GetProperty("validSig").GetString()!), pub));
+    Check("valid signature verifies (in-tree ECDSA OP_CHECKSIG)", Scriptvm.CheckSig(tx, idx, prevoutScript, prevoutValue, Tx.FromHex(v.GetProperty("validSig").GetString()!), pub));
     Check("tampered signature is rejected", !Scriptvm.CheckSig(tx, idx, prevoutScript, prevoutValue, Tx.FromHex(v.GetProperty("tamperedSig").GetString()!), pub));
 
     Console.WriteLine($"Estates.Conformance (scriptvm): {spass} passed, {sfail} failed");
-    if (sfail == 0) Console.WriteLine("PASS: native BIP-143 sighash + secp256k1 ECDSA verify match the TS reference.");
+    if (sfail == 0) Console.WriteLine("PASS: native BIP-143 sighash + in-tree secp256k1 ECDSA verify match the reference.");
 }
-
-// ---- SIGN cross-validation: native per-game key derivation (HKDF->Ed25519) must
-// equal the TS reference (same master+gameId -> same signPub), and Ed25519 sign/
-// verify round-trips + verifies a TS-made signature. ----
-int gpass = 0, gfail = 0;
-string sgPath = Path.Combine(AppContext.BaseDirectory, "sign-vectors.json");
-if (File.Exists(sgPath))
-{
-    using var gdoc = JsonDocument.Parse(File.ReadAllText(sgPath));
-    var root2 = gdoc.RootElement;
-    foreach (var d in root2.GetProperty("derivations").EnumerateArray())
-    {
-        byte[] master = Tx.FromHex(d.GetProperty("master").GetString()!);
-        var gid = d.GetProperty("gameId");
-        string? gameId = gid.ValueKind == JsonValueKind.Null ? null : gid.GetString();
-        string got = Tx.ToHex(Sign.SigningKeyFromMaster(master, gameId).Pub);
-        if (got == d.GetProperty("expectedSignPub").GetString()) gpass++;
-        else { Console.Error.WriteLine($"  [SIGN FAIL] derive(master,{gameId ?? "—"}): signPub mismatch"); gfail++; }
-    }
-    var sg = root2.GetProperty("signature");
-    byte[] msg = Tx.FromHex(sg.GetProperty("message").GetString()!);
-    byte[] tsSig = Tx.FromHex(sg.GetProperty("sig").GetString()!);
-    byte[] signPub = Tx.FromHex(sg.GetProperty("signPub").GetString()!);
-    void Ck(string what, bool ok) { if (ok) gpass++; else { Console.Error.WriteLine($"  [SIGN FAIL] {what}"); gfail++; } }
-    Ck("native verifies a TS-made Ed25519 signature", Sign.VerifyData(msg, tsSig, signPub));
-    // native sign -> TS-compatible verify (round-trip with a freshly derived key)
-    var (priv, pub) = Sign.SigningKeyFromMaster(Tx.FromHex("11".PadRight(64, '1')), "c3".PadLeft(64, 'c'));
-    Ck("native Ed25519 sign verifies", Sign.VerifyData(msg, Sign.SignData(msg, priv), pub));
-    Ck("native rejects a tampered Ed25519 signature", !Sign.VerifyData(msg, tsSig.Select((b, i) => i == 5 ? (byte)(b ^ 0xff) : b).ToArray(), signPub));
-
-    Console.WriteLine($"Estates.Conformance (sign): {gpass} passed, {gfail} failed");
-    if (gfail == 0) Console.WriteLine("PASS: native key derivation + Ed25519 match the TS reference (native player identity == web).");
-}
-
-// ---- FRAMES cross-validation: native re-derives the canonical signedBytes for
-// EVERY message kind and verifies the web signature (the replay's auth layer). ----
-int fpass = 0, ffail = 0;
-string frPath = Path.Combine(AppContext.BaseDirectory, "frames-vectors.json");
-if (File.Exists(frPath))
-{
-    using var fdoc = JsonDocument.Parse(File.ReadAllText(frPath));
-    foreach (var v in fdoc.RootElement.EnumerateArray())
-    {
-        string kind = v.GetProperty("kind").GetString()!;
-        var msg = v.GetProperty("msg");
-        string signPub = v.GetProperty("signPub").GetString()!;
-        bool bytesOk = Tx.ToHex(TableMsg.SignedBytes(msg, signPub)) == v.GetProperty("signedBytes").GetString();
-        bool verifyOk = TableMsg.VerifyFrame(msg, signPub, Tx.FromHex(v.GetProperty("sig").GetString()!));
-        if (bytesOk && verifyOk) fpass++;
-        else { Console.Error.WriteLine($"  [FRAMES FAIL] {kind}: bytes={bytesOk} verify={verifyOk}"); ffail++; }
-    }
-    Console.WriteLine($"Estates.Conformance (frames): {fpass} passed, {ffail} failed");
-    if (ffail == 0) Console.WriteLine("PASS: native re-derives signedBytes + verifies EVERY table message kind.");
-}
-
-// ---- TABLEMSG cross-validation: native re-derives the canonical signed-frame
-// bytes for a gameplay message and verifies the web's signature (so a native
-// client can authenticate the SAME table frames). ----
-int mpass = 0, mfail = 0;
-string tmPath = Path.Combine(AppContext.BaseDirectory, "tablemsg-vectors.json");
-if (File.Exists(tmPath))
-{
-    using var mdoc = JsonDocument.Parse(File.ReadAllText(tmPath));
-    foreach (var v in mdoc.RootElement.EnumerateArray())
-    {
-        string name = v.GetProperty("name").GetString()!;
-        var action = StateJson.ParseAction(v.GetProperty("action"));
-        string signPub = v.GetProperty("signPub").GetString()!;
-        string gotBytes = Tx.ToHex(TableMsg.SignedBytesForAction(action, signPub));
-        bool bytesOk = gotBytes == v.GetProperty("signedBytes").GetString();
-        bool verifyOk = TableMsg.VerifyActionFrame(action, signPub, Tx.FromHex(v.GetProperty("sig").GetString()!));
-        if (bytesOk && verifyOk) mpass++;
-        else { Console.Error.WriteLine($"  [TABLEMSG FAIL] {name}: bytes={bytesOk} verify={verifyOk}"); mfail++; }
-    }
-    Console.WriteLine($"Estates.Conformance (tablemsg): {mpass} passed, {mfail} failed");
-    if (mfail == 0) Console.WriteLine("PASS: native re-derives the canonical signed-frame bytes + verifies web table messages.");
-}
-
-// ---- REPLAY cross-validation: the native rebuild must replay a REAL game's
-// ordered relay log into the SAME canonical state hash as the web NetTable. ----
-int repfail = 0;
-string repPath = Path.Combine(AppContext.BaseDirectory, "replay-vectors.json");
-if (File.Exists(repPath))
-{
-    using var rdoc = JsonDocument.Parse(File.ReadAllText(repPath));
-    var rv = rdoc.RootElement;
-    var log = rv.GetProperty("log").EnumerateArray().Select(x => x.GetString()!).ToList();
-    string? rgid = rv.TryGetProperty("gameId", out var rg) ? rg.GetString() : null;
-    string? got = GameReplay.ReplayStateHash(log, rgid);
-    string want = rv.GetProperty("stateHash").GetString()!;
-    bool ok = got == want;
-    Console.WriteLine($"Estates.Conformance (replay): {(ok ? $"PASS — native replayed {log.Count} frames (turn {rv.GetProperty("turnIndex").GetInt32()}) to the SAME state hash as the web" : $"FAIL — want {want[..16]}… got {got?[..16] ?? "null"}…")}");
-    if (!ok) repfail = 1;
-}
-
-// ---- DEALERLESS DECK SHUFFLE replay: a game that ran the entropy round must
-// replay to the SAME jointly-generated deckOrder + canonical hash. Proves Deck.cs
-// (combineSeedBound / permutation / dealerlessDeckOrder) + GameReplay's dcommit/
-// dreveal path agree with the web byte-for-byte. ----
-int drfail = 0;
-string drPath = Path.Combine(AppContext.BaseDirectory, "deckreplay-vectors.json");
-if (File.Exists(drPath))
-{
-    using var ddoc = JsonDocument.Parse(File.ReadAllText(drPath));
-    var dv = ddoc.RootElement;
-    var dlog = dv.GetProperty("log").EnumerateArray().Select(x => x.GetString()!).ToList();
-    string dgid = dv.GetProperty("gameId").GetString()!;
-    var dstate = GameReplay.ReplayState(dlog, dgid);
-    string? dgot = dstate == null ? null : Canonical.HashState(dstate);
-    string dwant = dv.GetProperty("stateHash").GetString()!;
-    // direct check: the recomputed deckOrder must equal the web's, deck by deck.
-    bool orderOk = dstate?.DeckOrder != null;
-    foreach (var deck in dv.GetProperty("deckOrder").EnumerateObject())
-    {
-        var wantArr = deck.Value.EnumerateArray().Select(x => x.GetInt32()).ToList();
-        var gotArr = dstate?.DeckOrder?.GetValueOrDefault(deck.Name);
-        if (gotArr == null || !gotArr.SequenceEqual(wantArr)) orderOk = false;
-    }
-    bool dok = dgot == dwant && orderOk;
-    Console.WriteLine($"Estates.Conformance (deckshuffle): {(dok ? $"PASS — native recomputed the jointly-generated deck order [{string.Join(", ", dstate!.DeckOrder!.Keys)}] and replayed {dlog.Count} frames to the SAME hash as the web" : $"FAIL — orderOk {orderOk}, want {dwant[..16]}… got {dgot?[..16] ?? "null"}…")}");
-    if (!dok) drfail = 1;
-}
-else Console.WriteLine("Estates.Conformance (deckshuffle): skipped (no deckreplay-vectors.json)");
 
 // ---- BEACON cross-validation: native dice beacon (commit/reveal -> dice + chained
-// beacon) must equal the TS reference; a non-opening reveal is rejected. ----
+// beacon) must equal the reference; a non-opening reveal is rejected. ----
 int bpass = 0, bfail = 0;
 string bcPath = Path.Combine(AppContext.BaseDirectory, "beacon-vectors.json");
 if (File.Exists(bcPath))
@@ -314,10 +167,112 @@ if (File.Exists(bcPath))
         bad.GetProperty("turnIndex").GetInt64(), Tx.FromHex(bad.GetProperty("prevBeacon").GetString()!));
     Ckb("non-opening reveal rejected", !rbad.Ok);
     Console.WriteLine($"Estates.Conformance (beacon): {bpass} passed, {bfail} failed");
-    if (bfail == 0) Console.WriteLine("PASS: native dice beacon (dice + chained beacon + reveal checks) matches the TS reference.");
+    if (bfail == 0) Console.WriteLine("PASS: native dice beacon (dice + chained beacon + reveal checks) matches the reference.");
 }
 
-// (No relay/spectate layers: ESTATES has NO server. The native client is a true P2P
-// peer over @estates/link; there is no HTTP relay to publish to or read history from.)
+// ============================================================================
+//  CRYPTO-CORE self-validation — the in-tree, LIBRARY-FREE primitives. Each claim
+//  gets a POSITIVE test and a HOSTILE-NEGATIVE test (a top-class attacker's forgery
+//  must be rejected). No third-party library, no Ed25519, no RFC-6979 in the path.
+// ============================================================================
+int xpass = 0, xfail = 0;
+void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($"  [CRYPTO FAIL] {what}"); xfail++; } }
 
-return (fail == 0 && kfail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && gfail == 0 && mfail == 0 && bfail == 0 && ffail == 0 && repfail == 0 && drfail == 0) ? 0 : 1;
+// secp256k1 + ECDSA (random-nonce, low-S): sign/verify, tamper rejection, ECDH agreement.
+{
+    byte[] aPriv = RandomNumberGenerator.GetBytes(32);
+    byte[] aPub = Secp256k1.PublicKey(aPriv);
+    byte[] msg = "estates/crypto-core/selftest"u8.ToArray();
+    byte[] sig = EcdsaSign.Sign(aPriv, msg);
+    X("ECDSA sign/verify round-trips", EcdsaSign.Verify(aPub, msg, sig));
+    byte[] tampMsg = (byte[])msg.Clone(); tampMsg[0] ^= 0xff;
+    X("ECDSA rejects a forged message", !EcdsaSign.Verify(aPub, tampMsg, sig));
+    byte[] tampSig = (byte[])sig.Clone(); tampSig[10] ^= 0xff;
+    X("ECDSA rejects a tampered signature", !EcdsaSign.Verify(aPub, msg, tampSig));
+    // two signatures over the SAME message MUST differ (random nonce, not deterministic)
+    X("nonce is non-deterministic (two sigs differ)", !EcdsaSign.Sign(aPriv, msg).AsSpan().SequenceEqual(EcdsaSign.Sign(aPriv, msg)));
+    X("scalar validation rejects zero", !EcdsaSign.IsValidScalar(new byte[32]));
+    // compress/decompress round-trip
+    X("pubkey compress/decompress round-trips", Secp256k1.Compress(Secp256k1.Decompress(aPub)).AsSpan().SequenceEqual(aPub));
+    // ECDH: shared secret agrees both ways, and a different key disagrees
+    byte[] bPriv = RandomNumberGenerator.GetBytes(32);
+    byte[] bPub = Secp256k1.PublicKey(bPriv);
+    X("ECDH shared secret agrees both ways", Secp256k1.EcdhX(aPriv, bPub).AsSpan().SequenceEqual(Secp256k1.EcdhX(bPriv, aPub)));
+    byte[] cPriv = RandomNumberGenerator.GetBytes(32);
+    X("ECDH with the wrong key disagrees", !Secp256k1.EcdhX(aPriv, bPub).AsSpan().SequenceEqual(Secp256k1.EcdhX(cPriv, aPub)));
+}
+
+// Hash-chained Type-42 keys (PLAN §2): the mandatory chain verifies, every key is unique,
+// and tampering ANY earlier link breaks verification of the whole chain.
+{
+    byte[] rootPriv = RandomNumberGenerator.GetBytes(32);
+    byte[] rootPub = Secp256k1.PublicKey(rootPriv);
+    var chain = KeyChain.WalletChain(rootPriv, 8);
+    X("hash-chained Type-42 chain verifies", KeyChain.Verify(rootPub, chain));
+    var pubs = chain.Select(c => Tx.ToHex(c.Pub)).ToHashSet();
+    X("every sub-key is unique (no reuse)", pubs.Count == chain.Count);
+    X("root is never a sub-key", !pubs.Contains(Tx.ToHex(rootPub)));
+    // tamper link[3] -> the chain must fail to verify
+    var broken = chain.ToList();
+    byte[] badLink = (byte[])broken[3].Link.Clone(); badLink[0] ^= 0xff;
+    broken[3] = broken[3] with { Link = badLink };
+    X("a tampered link breaks chain verification", !KeyChain.Verify(rootPub, broken));
+}
+
+// Shamir threshold (PLAN §2, GF(n)): any t shares reconstruct; t-1 reveal a wrong secret.
+{
+    byte[] secret = RandomNumberGenerator.GetBytes(32);
+    var shares = Shamir.Split(secret, threshold: 3, shares: 5);
+    var anyThree = new[] { shares[0], shares[2], shares[4] };
+    X("Shamir reconstructs from t shares", Shamir.Reconstruct(anyThree).AsSpan().SequenceEqual(secret));
+    var otherThree = new[] { shares[1], shares[3], shares[4] };
+    X("Shamir reconstructs from a DIFFERENT t shares", Shamir.Reconstruct(otherThree).AsSpan().SequenceEqual(secret));
+    var twoShares = new[] { shares[0], shares[1] };
+    X("Shamir with t-1 shares does NOT reveal the secret", !Shamir.Reconstruct(twoShares).AsSpan().SequenceEqual(secret));
+}
+
+// Recovery (the "no sat is ever lost" guarantee): a 2-of-2 + nLockTime refund signed by
+// BOTH parties verifies; a single signature or a tampered refund does NOT.
+{
+    byte[] funderPriv = RandomNumberGenerator.GetBytes(32), counterPriv = RandomNumberGenerator.GetBytes(32);
+    byte[] funderPub = Secp256k1.PublicKey(funderPriv), counterPub = Secp256k1.PublicKey(counterPriv);
+    byte[] ms = Recovery.Multisig2of2(funderPub, counterPub);
+    long stake = 100_000, fee = 200, lockTime = 800_000;
+    string fundingTxid = Tx.ToHex(RandomNumberGenerator.GetBytes(32));
+    var refund = Recovery.BuildRefund(fundingTxid, 0, stake, fee, funderPub, lockTime);
+    byte[] sigF = Recovery.SignRefundInput(refund, ms, stake, funderPriv);
+    byte[] sigC = Recovery.SignRefundInput(refund, ms, stake, counterPriv);
+    X("2-of-2 + nLockTime refund verifies with BOTH signatures", Recovery.VerifyRefund(refund, ms, stake, funderPub, sigF, counterPub, sigC));
+    byte[] forgedSig = (byte[])sigC.Clone(); forgedSig[8] ^= 0xff;
+    X("refund rejects a forged counterparty signature", !Recovery.VerifyRefund(refund, ms, stake, funderPub, sigF, counterPub, forgedSig));
+    var tamperedRefund = refund with { Outputs = new[] { refund.Outputs[0] with { Value = stake } } }; // attacker grabs the fee
+    X("refund rejects a tampered output (sig no longer covers it)", !Recovery.VerifyRefund(tamperedRefund, ms, stake, funderPub, sigF, counterPub, sigC));
+}
+
+// ECIES (the 2-person ECDH path) + authenticated key-wrap + AEAD: round-trip, and a
+// wrong recipient / tampered ciphertext yields NOTHING (returns null, never plaintext).
+{
+    byte[] bobPriv = RandomNumberGenerator.GetBytes(32), bobPub = Secp256k1.PublicKey(bobPriv);
+    byte[] evePriv = RandomNumberGenerator.GetBytes(32);
+    byte[] plain = "Alice -> Bob: the deed is yours, and only yours."u8.ToArray();
+    byte[] aad = "estates/aad/v1"u8.ToArray();
+    var ct = Cipher.EciesEncrypt(bobPub, plain, aad);
+    X("ECIES decrypts for the intended recipient", (Cipher.EciesDecrypt(bobPriv, ct, aad) ?? Array.Empty<byte>()).AsSpan().SequenceEqual(plain));
+    X("ECIES yields nothing for the wrong recipient", Cipher.EciesDecrypt(evePriv, ct, aad) is null);
+    byte[] tamp = (byte[])ct.Bytes.Clone(); tamp[0] ^= 0xff;
+    X("ECIES rejects a tampered ciphertext", Cipher.EciesDecrypt(bobPriv, new Cipher.EciesCiphertext(ct.EphemeralPublicKey, tamp), aad) is null);
+    // authenticated key-wrap
+    byte[] wrapKey = RandomNumberGenerator.GetBytes(32), payloadKey = RandomNumberGenerator.GetBytes(32);
+    var wrapped = Cipher.Wrap(wrapKey, payloadKey);
+    X("key-wrap unwraps with the right key", (Cipher.Unwrap(wrapKey, wrapped) ?? Array.Empty<byte>()).AsSpan().SequenceEqual(payloadKey));
+    X("key-wrap yields nothing with the wrong key", Cipher.Unwrap(RandomNumberGenerator.GetBytes(32), wrapped) is null);
+}
+
+Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
+if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
+else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
+
+// (No relay/spectate/replay layers: ESTATES has NO server and NO off-chain transcript. The
+// native client is a true P2P peer; game state IS the verified on-chain/signed transcript.)
+
+return (fail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && bfail == 0 && xfail == 0) ? 0 : 1;

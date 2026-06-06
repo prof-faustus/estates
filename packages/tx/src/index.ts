@@ -37,7 +37,7 @@
  *   MUST NEVER ASSUME: that serialized input came from us, that counts/lengths fit
  *   memory, or that the buffer is long enough — all are checked.
  */
-import { sha256 } from '@noble/hashes/sha256';
+import { sha256 } from '@estates/keys';
 
 export interface TxInput {
   readonly prevTxid: string;     // 64-hex, DISPLAY byte order (as users see it)

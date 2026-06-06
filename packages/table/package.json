@@ -15,7 +15,7 @@
     "@estates/channel": "workspace:*",
     "@estates/beacon": "workspace:*",
     "@estates/keylife": "workspace:*",
-    "@noble/hashes": "1.5.0",
+    "@estates/keys": "workspace:*",
     "@estates/deck": "workspace:*"
   },
   "scripts": {

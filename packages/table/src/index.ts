@@ -4,16 +4,18 @@
  * Waiting room first. The human host picks the player count + network, then
  * WAITS for real people to claim seats or OPTIONALLY adds a simulated player
  * (test only) to fill a seat. THE GAME STARTS ONLY WHEN THE HUMAN HOST CALLS
- * start() — never automatically, never by a bot. After start, every action is
- * broadcast and applied by ALL peers in the relay's global order, so the pure
- * engine keeps every client in lockstep. Bots only auto-play their OWN seat and
- * never start a game.
+ * start() — never automatically, never by a bot. After start, every action is a
+ * signed frame in ONE ordered transcript that ALL peers replay deterministically
+ * (NO SERVER: the transport is the in-process InMemoryRelay for local/web play, or
+ * direct IP-to-IP peers over @estates/link for cross-machine play — never a central
+ * relay/ordering authority). The pure engine keeps every client in lockstep. Bots
+ * only auto-play their OWN seat and never start a game.
  */
 import { initialState, apply, netWorth, type GameState, type Action, type EngineConfig } from '@estates/engine';
 import { loadParams } from '@estates/params';
 import { InMemoryRelay, type Relay } from '@estates/chat';
 import { genIdentity, identityFrom, gameIdentityFrom, signData, verifyData, signingKeyFromMaster, type Identity } from '@estates/channel';
-import { sha256 } from '@noble/hashes/sha256';
+import { sha256 } from '@estates/keys';
 import { commit as beaconCommit, verifyRollEntry, ZERO_BEACON } from '@estates/beacon';
 import { dealerlessDeckOrder, commitEntropy, type SeedParty } from '@estates/deck';
 import { buildManifest, hashHex, verifyManifest, type GameKeyManifest, type KeyEntry } from '@estates/keylife';
@@ -127,7 +129,7 @@ export class LobbyClient {
       if (t.host !== signPub) return;
       let signer: Uint8Array, signature: Uint8Array;
       try { signer = fromHex(signPub); signature = fromHex(sig); } catch { return; }
-      if (signer.length !== 32 || !verifyData(encJSON(t), signature, signer)) return;
+      if (signer.length !== 33 || !verifyData(encJSON(t), signature, signer)) return;
       this.tables.set(t.addr, t); this.onUpdate();
     });
   }
@@ -150,7 +152,7 @@ type Msg =
   | { kind: 'commit'; roll: number; seat: number; c: string }   // beacon commitment for roll #roll (audit #3)
   | { kind: 'reveal'; roll: number; seat: number; s: string }   // beacon reveal
   | { kind: 'action'; action: Action };
-/** A published, SIGNED message: the player's Ed25519 signing pub + signature over
+/** A published, SIGNED message: the player's secp256k1 signing pub + signature over
  *  the canonical message bind the author to the protocol (audit #1/#2). */
 type Signed = Msg & { id: string; signPub: string; sig: string };
 
@@ -172,8 +174,8 @@ const MAX_SEATS = 8;             // the game supports 2..6 seats; hard cap bound
 const MAX_NAME = 256;            // display-name ceiling (bounds memory)
 const MAX_ROLL_SEQ = 1_000_000;  // far more rolls than any real game; bounds the per-roll maps
 const PROP_MAX = 39;             // board spaces 0..39
-const ED_PUB_HEX = 64;           // Ed25519 public key = 32 bytes
-const ED_SIG_HEX = 128;          // Ed25519 signature = 64 bytes
+const SIGN_PUB_HEX = 66;           // secp256k1 compressed signing pub = 33 bytes
+const SIGN_SIG_HEX = 128;          // secp256k1 ECDSA compact signature = 64 bytes
 const SHA256_HEX = 64;           // beacon commitment / secret = 32 bytes
 const MAX_MSG_BYTES = 1 << 20;   // 1 MiB per frame (the relay also caps; defense in depth)
 const HEX_RE = /^[0-9a-f]*$/i;
@@ -226,7 +228,7 @@ export function decodeSigned(payload: Uint8Array): { msg: Msg; id: string; signP
   try { raw = JSON.parse(new TextDecoder().decode(payload)); } catch { return null; }
   if (!isObj(raw)) return null;
   const o = raw;
-  if (!isStr(o.id, 128) || !isHexLen(o.signPub, ED_PUB_HEX) || !isHexLen(o.sig, ED_SIG_HEX)) return null;
+  if (!isStr(o.id, 128) || !isHexLen(o.signPub, SIGN_PUB_HEX) || !isHexLen(o.sig, SIGN_SIG_HEX)) return null;
   const meta = { id: o.id, signPub: o.signPub, sig: o.sig };
   switch (o.kind) {
     case 'table':
@@ -269,7 +271,7 @@ export function decodeSigned(payload: Uint8Array): { msg: Msg; id: string; signP
 /**
  * ONE-GAME-KEY ENFORCEMENT. Accept a signed gameplay frame ONLY if:
  *   1. it decodes + validates (decodeSigned), AND
- *   2. its Ed25519 signature is authentic over the canonical bytes, AND
+ *   2. its secp256k1 ECDSA signature is authentic over the canonical bytes, AND
  *   3. its author key is a SEAT key bound by THIS game's signed key manifest
  *      (a one-game key — see @estates/keylife), AND
  *   4. for a `seat` claim, the seat number matches the seat its key is bound to.
@@ -299,8 +301,8 @@ export function decodeAnnounce(payload: Uint8Array): { table: OpenTable; signPub
   try { raw = JSON.parse(new TextDecoder().decode(payload)); } catch { return null; }
   if (!isObj(raw) || raw.kind !== 'announce') return null;
   if (!isStr(raw.addr, 128) || !isStr(raw.name, MAX_NAME) || !isInt(raw.maxSeats, 2, MAX_SEATS)
-    || !NETWORKS.has(raw.network as string) || !isHexLen(raw.host, ED_PUB_HEX)
-    || !isInt(raw.ts, 0, Number.MAX_SAFE_INTEGER) || !isHexLen(raw.signPub, ED_PUB_HEX) || !isHexLen(raw.sig, ED_SIG_HEX)) return null;
+    || !NETWORKS.has(raw.network as string) || !isHexLen(raw.host, SIGN_PUB_HEX)
+    || !isInt(raw.ts, 0, Number.MAX_SAFE_INTEGER) || !isHexLen(raw.signPub, SIGN_PUB_HEX) || !isHexLen(raw.sig, SIGN_SIG_HEX)) return null;
   return {
     table: { addr: raw.addr, name: raw.name, maxSeats: raw.maxSeats, network: raw.network as NetworkMode, host: raw.host, ts: raw.ts },
     signPub: raw.signPub, sig: raw.sig,
@@ -380,7 +382,18 @@ export class NetTable {
     this.autoPlay = opts?.autoPlay ?? false;
     this.botTimer = opts?.scheduleBot ?? null;
     this.manifest = opts?.manifest ?? null;
-    this.gameId = (typeof opts?.gameId === 'string' && /^[0-9a-fA-F]{64}$/.test(opts.gameId)) ? opts.gameId.toLowerCase() : '00'.repeat(32);
+    // A real game id is MANDATORY for live play (it binds the one-game key manifest +
+    // dealerless shuffle). A malformed gameId is REJECTED outright (never silently
+    // downgraded to the zero id); omitting it entirely selects explicit OFFLINE/local
+    // play (the zero id), which has no manifest gate and cannot be a real-value game.
+    if (opts?.gameId !== undefined) {
+      if (typeof opts.gameId !== 'string' || !/^[0-9a-fA-F]{64}$/.test(opts.gameId)) {
+        throw new Error('NetTable: gameId must be 64-hex (32 bytes); omit it only for offline/local play');
+      }
+      this.gameId = opts.gameId.toLowerCase();
+    } else {
+      this.gameId = '00'.repeat(32); // explicit offline/local — no real-value multiplayer
+    }
   }
 
   /**
@@ -404,9 +417,9 @@ export class NetTable {
     // so the host can be both authority and a player without reusing a key.
     const gkey = signingKeyFromMaster(this.id.priv, `${this.gameId}:genesis`);
     const authorityPub = toHex(gkey.pub);
-    const entries: KeyEntry[] = [{ purpose: 'genesis', pub: authorityPub, keyType: 'ed25519' }];
+    const entries: KeyEntry[] = [{ purpose: 'genesis', pub: authorityPub, keyType: 'secp256k1' }];
     for (const [seat, v] of [...this.seats.entries()].sort((a, b) => a[0] - b[0])) {
-      entries.push({ purpose: 'seat', pub: v.who, keyType: 'ed25519', seat });
+      entries.push({ purpose: 'seat', pub: v.who, keyType: 'secp256k1', seat });
     }
     const paramsHash = hashHex(new TextEncoder().encode(`estates-params:${P.params_version}`));
     return buildManifest(this.gameId, 'estates-table-v1', paramsHash, entries, gkey.priv, authorityPub);
@@ -572,7 +585,7 @@ export class NetTable {
       if (!this.verified.has(raw)) {
         let signer: Uint8Array, signature: Uint8Array;
         try { signer = fromHex(signPub); signature = fromHex(sig); } catch { continue; }
-        if (signer.length !== 32 || !verifyData(signedBytes(m, signPub), signature, signer)) continue;
+        if (signer.length !== 33 || !verifyData(signedBytes(m, signPub), signature, signer)) continue;
         this.verified.add(raw);
       }
       switch (m.kind) {

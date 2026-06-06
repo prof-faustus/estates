@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sha256 } from '@noble/hashes/sha256';
+import { sha256 } from '@estates/keys';
 import { merkleRoot, buildProof, verifyInclusion, bytesEqual } from '@estates/spv';
 import { buildPartialMerkleTree, parsePartialMerkleTree } from '../src/index.ts';
 

@@ -13,24 +13,16 @@
  * Identity signatures bind each party's identity key to its ephemeral key (no
  * MITM); the Ack binds to the initiator's ephemeral key (no cross-session replay).
  */
-import * as secp from '@noble/secp256k1';
-import * as ed from '@noble/ed25519';
-import { sha256 } from '@noble/hashes/sha256';
-import { sha512 } from '@noble/hashes/sha512';
-import { hmac } from '@noble/hashes/hmac';
-import { hkdf } from '@noble/hashes/hkdf';
-import { gcm } from '@noble/ciphers/aes';
-import { randomBytes, bytesToHex, hexToBytes, concatBytes } from '@noble/hashes/utils';
+import {
+  randomPrivateKey, pubFromPriv, ecdhX, isValidPublicKey, isValidScalar, signHash, verifyHash,
+  sha256, hkdfSha256, aesSeal, aesOpen,
+  randomBytes, bytesToHex, hexToBytes, concatBytes,
+} from '@estates/keys';
 
-// @noble/secp256k1 v2 needs an HMAC-SHA256 hook for RFC-6979 deterministic ECDSA.
-secp.etc.hmacSha256Sync = (k: Uint8Array, ...m: Uint8Array[]): Uint8Array => hmac(sha256, k, secp.etc.concatBytes(...m));
-// @noble/ed25519 v2 needs a SHA-512 hook for synchronous signing.
-ed.etc.sha512Sync = (...m: Uint8Array[]): Uint8Array => sha512(ed.etc.concatBytes(...m));
-
-/** The Ed25519 protocol-signing key DERIVED from the player's master secret. The
- *  master (secp256k1) is the wallet key that makes single-use address/payment
- *  keys; the SAME master deterministically yields this Ed25519 key for signing
- *  protocol messages (the wallet does not expose raw ECDSA message signing).
+/** The secp256k1 protocol-signing key DERIVED from the player's master secret. The
+ *  master (secp256k1) is the wallet key that makes single-use address/payment keys;
+ *  the SAME master deterministically yields this secp256k1 signing key for protocol
+ *  messages (the wallet does not expose raw master-key message signing).
  *
  *  ONE-GAME KEYS: pass a `gameId` (32-byte hex) to derive a key that is UNIQUE TO
  *  THAT GAME — same master, fresh signing key per game, so a seat key from game A
@@ -39,25 +31,28 @@ ed.etc.sha512Sync = (...m: Uint8Array[]): Uint8Array => sha512(ed.etc.concatByte
  *  game-independent key (handshake/identity contexts that are not per-game). */
 export function signingKeyFromMaster(masterPriv: Uint8Array, gameId?: string): { priv: Uint8Array; pub: Uint8Array } {
   const info = gameId === undefined
-    ? new TextEncoder().encode('estates-ed25519-sign-v1')
-    : new TextEncoder().encode(`estates-ed25519-sign-v1|game:${gameId}`);
-  const seed = hkdf(sha256, masterPriv, new Uint8Array(0), info, 32);
-  return { priv: seed, pub: ed.getPublicKey(seed) };
+    ? new TextEncoder().encode('estates-secp256k1-sign-v1')
+    : new TextEncoder().encode(`estates-secp256k1-sign-v1|game:${gameId}`);
+  // HKDF to 32 bytes, then ensure a valid secp256k1 scalar (re-hash on the astronomically
+  // unlikely out-of-range draw — uniform, no modulo bias).
+  let seed = hkdfSha256(masterPriv, new Uint8Array(0), info, 32);
+  while (!isValidScalar(seed)) seed = sha256(seed);
+  return { priv: seed, pub: pubFromPriv(seed) };
 }
 
 export interface Identity {
   readonly priv: Uint8Array;     // secp256k1 master (wallet key): ECDH + single-use derivation
   readonly pub: Uint8Array;      // secp256k1 compressed pub (handshake identity + chat address)
-  readonly signPriv: Uint8Array; // Ed25519 signing seed, DERIVED from the master
-  readonly signPub: Uint8Array;  // Ed25519 signing pub (registered as the seat's signing key)
+  readonly signPriv: Uint8Array; // secp256k1 signing key, DERIVED from the master
+  readonly signPub: Uint8Array;  // secp256k1 compressed signing pub (registered as the seat's signing key)
 }
 function identityOf(priv: Uint8Array): Identity {
   const sk = signingKeyFromMaster(priv);
-  return { priv, pub: secp.getPublicKey(priv, true), signPriv: sk.priv, signPub: sk.pub };
+  return { priv, pub: pubFromPriv(priv), signPriv: sk.priv, signPub: sk.pub };
 }
-export function genIdentity(): Identity { return identityOf(secp.utils.randomPrivateKey()); }
+export function genIdentity(): Identity { return identityOf(randomPrivateKey()); }
 /** Use a PLAYER'S existing non-custodial master key as the identity. The same key
- *  does ECDH (handshake) + single-use payment derivation, and DERIVES the Ed25519
+ *  does ECDH (handshake) + single-use payment derivation, and DERIVES the secp256k1
  *  key that signs moves; chat is addressed by the master pub. No throwaway keys. */
 export function identityFrom(priv: Uint8Array): Identity {
   if (priv.length !== 32) throw new Error('identity private key must be 32 bytes');
@@ -76,7 +71,7 @@ export function gameIdentityFrom(priv: Uint8Array, gameId: string): Identity {
   if (priv.length !== 32) throw new Error('identity private key must be 32 bytes');
   if (typeof gameId !== 'string' || gameId.length !== 64 || !/^[0-9a-fA-F]{64}$/.test(gameId)) throw new Error('gameId must be 32-byte hex');
   const sk = signingKeyFromMaster(priv, gameId);
-  return { priv, pub: secp.getPublicKey(priv, true), signPriv: sk.priv, signPub: sk.pub };
+  return { priv, pub: pubFromPriv(priv), signPriv: sk.priv, signPub: sk.pub };
 }
 
 export interface Hello { readonly idPub: string; readonly ephPub: string; readonly nonce: string; readonly signPub: string; readonly sig: string }
@@ -86,25 +81,25 @@ interface Pending { readonly id: Identity; readonly ephPriv: Uint8Array; readonl
 
 const enc = new TextEncoder();
 const H = (...parts: Uint8Array[]): Uint8Array => sha256(concatBytes(...parts));
-const sign = (msg: Uint8Array, priv: Uint8Array): Uint8Array => secp.sign(msg, priv).toCompactRawBytes();
-const verify = (sig: Uint8Array, msg: Uint8Array, pub: Uint8Array): boolean => { try { return secp.verify(sig, msg, pub); } catch { return false; } };
+const sign = (msg: Uint8Array, priv: Uint8Array): Uint8Array => signHash(priv, msg);
+const verify = (sig: Uint8Array, msg: Uint8Array, pub: Uint8Array): boolean => verifyHash(pub, msg, sig);
 
-/** Sign protocol data with the player's DERIVED Ed25519 signing key (not ECDSA). */
-export function signData(data: Uint8Array, signPriv: Uint8Array): Uint8Array { return ed.sign(data, signPriv); }
-/** Verify an Ed25519 signature over `data` by an Ed25519 signing pub. Safe. */
-export function verifyData(data: Uint8Array, sig: Uint8Array, signPub: Uint8Array): boolean { try { return ed.verify(sig, data, signPub); } catch { return false; } }
+/** Sign protocol data with the player's DERIVED secp256k1 signing key (ECDSA over SHA-256(data)). */
+export function signData(data: Uint8Array, signPriv: Uint8Array): Uint8Array { return signHash(signPriv, sha256(data)); }
+/** Verify a secp256k1 ECDSA signature over `data` by a secp256k1 signing pub. Safe (never throws). */
+export function verifyData(data: Uint8Array, sig: Uint8Array, signPub: Uint8Array): boolean { return verifyHash(signPub, sha256(data), sig); }
 
 function sessionKey(myEphPriv: Uint8Array, theirEphPub: Uint8Array): Uint8Array {
-  const shared = secp.getSharedSecret(myEphPriv, theirEphPub, true).slice(1); // x-coord
-  return hkdf(sha256, shared, new Uint8Array(0), enc.encode('estates-channel-v1'), 32);
+  const shared = ecdhX(myEphPriv, theirEphPub); // x-coord of the ephemeral ECDH
+  return hkdfSha256(shared, new Uint8Array(0), enc.encode('estates-channel-v1'), 32);
 }
 
 /** Initiator step 1: produce the Hello and keep pending state. */
 export function initiate(id: Identity): { hello: Hello; pending: Pending } {
-  const ephPriv = secp.utils.randomPrivateKey();
-  const ephPub = secp.getPublicKey(ephPriv, true);
+  const ephPriv = randomPrivateKey();
+  const ephPub = pubFromPriv(ephPriv);
   const nonce = randomBytes(32);
-  // the secp identity sig vouches for BOTH the ephemeral key AND the Ed25519 signing key
+  // the secp identity sig vouches for BOTH the ephemeral key AND the secp256k1 signing key
   const sig = sign(H(enc.encode('hello'), ephPub, nonce, id.signPub), id.priv);
   return {
     hello: { idPub: bytesToHex(id.pub), ephPub: bytesToHex(ephPub), nonce: bytesToHex(nonce), signPub: bytesToHex(id.signPub), sig: bytesToHex(sig) },
@@ -118,14 +113,14 @@ export function initiate(id: Identity): { hello: Hello; pending: Pending } {
 //
 // The subtle trap: a valid identity signature does NOT prove `ephPub` is a valid
 // curve point — the attacker signs the *hash* with their own honest idPub and can
-// embed arbitrary (off-curve) ephPub bytes. The ephemeral key is only used as a
-// curve point at `sessionKey` (ECDH), where @noble throws on a bad point. So the
-// ECDH and every other crypto op must sit INSIDE the guard, not just hexToBytes.
+// embed arbitrary (off-curve) ephPub bytes. The in-tree ECDH does NOT throw on an
+// off-curve point, so `respond`/`complete` EXPLICITLY validate `ephPub` with
+// isValidPublicKey (on-curve) before any ECDH — fail-closed, never a crash.
 function asBytes(h: Hello): { idPub: Uint8Array; ephPub: Uint8Array; nonce: Uint8Array; signPub: Uint8Array; sig: Uint8Array } | null {
   if (!h || typeof h !== 'object') return null;
   try {
     const idPub = hexToBytes(h.idPub), ephPub = hexToBytes(h.ephPub), nonce = hexToBytes(h.nonce), signPub = hexToBytes(h.signPub), sig = hexToBytes(h.sig);
-    if (signPub.length !== 32) return null;
+    if (signPub.length !== 33) return null;   // secp256k1 compressed signing pub
     return { idPub, ephPub, nonce, signPub, sig };
   } catch { return null; }
 }
@@ -136,11 +131,10 @@ export function respond(id: Identity, hello: Hello): { ack: Ack; session: Sessio
   if (!f) return null;
   try {
     if (!verify(f.sig, H(enc.encode('hello'), f.ephPub, f.nonce, f.signPub), f.idPub)) return null; // identity + signing key not proven
-    const ephPriv = secp.utils.randomPrivateKey();
-    const myEphPub = secp.getPublicKey(ephPriv, true);
+    if (!isValidPublicKey(f.ephPub)) return null;   // reject an off-curve ephemeral before ECDH
+    const ephPriv = randomPrivateKey();
+    const myEphPub = pubFromPriv(ephPriv);
     const myNonce = randomBytes(32);
-    // sessionKey() runs ECDH against the peer's ephPub — throws on an off-curve
-    // point; caught here so a forged-but-signed Hello returns null, not a crash.
     const session: Session = { key: sessionKey(ephPriv, f.ephPub), peerIdPub: f.idPub, peerSignPub: f.signPub };
     const ackSig = sign(H(enc.encode('ack'), myEphPub, myNonce, f.ephPub, id.signPub), id.priv);
     return {
@@ -156,6 +150,7 @@ export function complete(pending: Pending, ack: Ack): Session | null {
   if (!f) return null;
   try {
     if (!verify(f.sig, H(enc.encode('ack'), f.ephPub, f.nonce, pending.ephPub, f.signPub), f.idPub)) return null;
+    if (!isValidPublicKey(f.ephPub)) return null;   // reject an off-curve ephemeral before ECDH
     return { key: sessionKey(pending.ephPriv, f.ephPub), peerIdPub: f.idPub, peerSignPub: f.signPub };
   } catch { return null; }
 }
@@ -164,8 +159,8 @@ export function complete(pending: Pending, ack: Ack): Session | null {
 export interface Frame { readonly nonce: string; readonly ct: string }
 export function seal(session: Session, plaintext: Uint8Array): Frame {
   const nonce = randomBytes(12);
-  return { nonce: bytesToHex(nonce), ct: bytesToHex(gcm(session.key, nonce).encrypt(plaintext)) };
+  return { nonce: bytesToHex(nonce), ct: bytesToHex(aesSeal(session.key, nonce, plaintext)) };
 }
 export function openFrame(session: Session, frame: Frame): Uint8Array | null {
-  try { return gcm(session.key, hexToBytes(frame.nonce)).decrypt(hexToBytes(frame.ct)); } catch { return null; }
+  try { return aesOpen(session.key, hexToBytes(frame.nonce), hexToBytes(frame.ct)); } catch { return null; }
 }

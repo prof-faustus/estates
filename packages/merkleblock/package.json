@@ -9,7 +9,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@noble/hashes": "1.5.0",
+    "@estates/keys": "workspace:*",
     "@estates/spv": "workspace:*"
   },
   "scripts": {

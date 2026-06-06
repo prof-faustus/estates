@@ -329,7 +329,7 @@ test('lobby announcements are signed; forged/unsigned announces are rejected', (
   announcer.announce({ addr: 'aa'.repeat(20), name: 'Real Table', maxSeats: 2, network: 'regtest', host: 'ignored', ts: 1 });
   assert.equal(viewer.list().length, 1, 'a signed announce is listed');
   assert.equal(viewer.list()[0]!.name, 'Real Table');
-  assert.match(viewer.list()[0]!.host, /^[0-9a-f]{64}$/, 'host is the announcer’s signing key');
+  assert.match(viewer.list()[0]!.host, /^[0-9a-f]{66}$/, 'host is the announcer’s signing key');
 
   // a forged announce (random key, host != signer, bad sig) straight onto the relay
   relay.publish(new TextEncoder().encode(JSON.stringify({
@@ -345,8 +345,8 @@ test('lobby announcements are signed; forged/unsigned announces are rejected', (
 // loop. A signature proves authorship, NOT well-formedness — decodeSigned proves
 // the latter, fail-closed, before anything else.
 const teJSON = (o: unknown): Uint8Array => new TextEncoder().encode(JSON.stringify(o));
-const HEXPUB = 'aa'.repeat(32);   // 64-hex (Ed25519 pub shape)
-const HEXSIG = 'bb'.repeat(64);   // 128-hex (Ed25519 sig shape)
+const HEXPUB = 'aa'.repeat(33);   // 66-hex (secp256k1 compressed pub shape)
+const HEXSIG = 'bb'.repeat(64);   // 128-hex (secp256k1 ECDSA compact sig shape)
 const meta = { id: 'x', signPub: HEXPUB, sig: HEXSIG };
 
 test('isAction validates every action type + per-type fields; rejects hostile shapes', () => {

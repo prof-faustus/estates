@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bytesToHex } from '@noble/hashes/utils';
+import { bytesToHex } from '@estates/keys';
 import { genIdentity } from '@estates/channel';
 import {
   buildManifest, verifyManifest, verifyNoCrossGameReuse, assertFreshForGame,
@@ -11,8 +11,8 @@ const GID_A = 'a1'.repeat(32);
 const GID_B = 'b2'.repeat(32);
 const PARAMS = hashHex(new TextEncoder().encode('estates.v1'));
 
-// Build a realistic per-game manifest: a genesis authority + seat keys (ed25519)
-// + card keys (secp256k1) + a chat key. Every key is bound to ONE gameId.
+// Build a realistic per-game manifest: a genesis authority + seat keys + card keys
+// + a chat key, ALL secp256k1 (NO Ed25519). Every key is bound to ONE gameId.
 function makeManifest(gameId: string, seed: number): { manifest: GameKeyManifest; authority: ReturnType<typeof genIdentity>; seatPubs: string[]; cardPubs: string[] } {
   const authority = genIdentity();
   const seat0 = genIdentity(), seat1 = genIdentity();
@@ -20,9 +20,9 @@ function makeManifest(gameId: string, seed: number): { manifest: GameKeyManifest
   const chat = genIdentity();
   void seed;
   const entries: KeyEntry[] = [
-    { purpose: 'genesis', pub: bytesToHex(authority.signPub), keyType: 'ed25519' },
-    { purpose: 'seat', pub: bytesToHex(seat0.signPub), keyType: 'ed25519', seat: 0 },
-    { purpose: 'seat', pub: bytesToHex(seat1.signPub), keyType: 'ed25519', seat: 1 },
+    { purpose: 'genesis', pub: bytesToHex(authority.signPub), keyType: 'secp256k1' },
+    { purpose: 'seat', pub: bytesToHex(seat0.signPub), keyType: 'secp256k1', seat: 0 },
+    { purpose: 'seat', pub: bytesToHex(seat1.signPub), keyType: 'secp256k1', seat: 1 },
     { purpose: 'card', pub: bytesToHex(card0.pub), keyType: 'secp256k1' },
     { purpose: 'card', pub: bytesToHex(card1.pub), keyType: 'secp256k1' },
     { purpose: 'chat', pub: bytesToHex(chat.pub), keyType: 'secp256k1' },
@@ -52,9 +52,9 @@ test('a TAMPERED manifest (added/changed key) is rejected — the authority sig 
 test('a key reused for two purposes/seats INSIDE one game is rejected', () => {
   const authority = genIdentity(); const seat0 = genIdentity();
   const dupEntries: KeyEntry[] = [
-    { purpose: 'genesis', pub: bytesToHex(authority.signPub), keyType: 'ed25519' },
-    { purpose: 'seat', pub: bytesToHex(seat0.signPub), keyType: 'ed25519', seat: 0 },
-    { purpose: 'seat', pub: bytesToHex(seat0.signPub), keyType: 'ed25519', seat: 1 }, // SAME key, two seats
+    { purpose: 'genesis', pub: bytesToHex(authority.signPub), keyType: 'secp256k1' },
+    { purpose: 'seat', pub: bytesToHex(seat0.signPub), keyType: 'secp256k1', seat: 0 },
+    { purpose: 'seat', pub: bytesToHex(seat0.signPub), keyType: 'secp256k1', seat: 1 }, // SAME key, two seats
   ];
   const m = buildManifest(GID_A, 'estates-1', PARAMS, dupEntries, authority.signPriv, bytesToHex(authority.signPub));
   assert.equal(verifyManifest(m).ok, false);
@@ -63,8 +63,8 @@ test('a key reused for two purposes/seats INSIDE one game is rejected', () => {
 test('a manifest without exactly one genesis authority is rejected', () => {
   const authority = genIdentity(); const a2 = genIdentity();
   const two: KeyEntry[] = [
-    { purpose: 'genesis', pub: bytesToHex(authority.signPub), keyType: 'ed25519' },
-    { purpose: 'genesis', pub: bytesToHex(a2.signPub), keyType: 'ed25519' },
+    { purpose: 'genesis', pub: bytesToHex(authority.signPub), keyType: 'secp256k1' },
+    { purpose: 'genesis', pub: bytesToHex(a2.signPub), keyType: 'secp256k1' },
   ];
   const m = buildManifest(GID_A, 'estates-1', PARAMS, two, authority.signPriv, bytesToHex(authority.signPub));
   assert.equal(verifyManifest(m).ok, false);
@@ -80,8 +80,8 @@ test('CROSS-GAME REUSE is rejected: the same key under two different game ids fa
   const bAuthority = genIdentity();
   const reusedSeatPub = a.seatPubs[0]!;
   const entriesB: KeyEntry[] = [
-    { purpose: 'genesis', pub: bytesToHex(bAuthority.signPub), keyType: 'ed25519' },
-    { purpose: 'seat', pub: reusedSeatPub, keyType: 'ed25519', seat: 0 }, // REUSED from game A
+    { purpose: 'genesis', pub: bytesToHex(bAuthority.signPub), keyType: 'secp256k1' },
+    { purpose: 'seat', pub: reusedSeatPub, keyType: 'secp256k1', seat: 0 }, // REUSED from game A
   ];
   const bReuse = buildManifest(GID_B, 'estates-1', PARAMS, entriesB, bAuthority.signPriv, bytesToHex(bAuthority.signPub));
   assert.ok(verifyManifest(bReuse).ok, 'the reuse manifest is internally valid (signed) — only cross-game check catches it');
@@ -97,8 +97,8 @@ test('ONE-GAME EXPIRY: a key valid in game N is rejected in game N+1', () => {
   // build a B that reuses A's key, then assert it is NOT fresh for B (used in prior game A)
   const bAuth = genIdentity();
   const bReuse = buildManifest(GID_B, 'estates-1', PARAMS, [
-    { purpose: 'genesis', pub: bytesToHex(bAuth.signPub), keyType: 'ed25519' },
-    { purpose: 'seat', pub: seatPubA, keyType: 'ed25519', seat: 0 },
+    { purpose: 'genesis', pub: bytesToHex(bAuth.signPub), keyType: 'secp256k1' },
+    { purpose: 'seat', pub: seatPubA, keyType: 'secp256k1', seat: 0 },
   ], bAuth.signPriv, bytesToHex(bAuth.signPub));
   assert.equal(assertFreshForGame(seatPubA, GID_B, bReuse, [a.manifest]).ok, false, 'key from game A expired, rejected in game B');
 });

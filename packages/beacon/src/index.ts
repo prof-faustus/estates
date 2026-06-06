@@ -15,8 +15,7 @@
  * permutationFromEntropy). PROTOCOL-BINDING.md records the intent to swap to a
  * direct import once cross-repo workspace linking is wired.
  */
-import { sha256 as nobleSha256 } from '@noble/hashes/sha256';
-import { hmac } from '@noble/hashes/hmac';
+import { sha256 as inTreeSha256, hmacSha256 } from '@estates/keys';
 
 export const ZERO_BEACON: Uint8Array = new Uint8Array(32);
 
@@ -39,7 +38,7 @@ export interface BeaconResult {
 }
 
 function sha256(...parts: Uint8Array[]): Uint8Array {
-  return nobleSha256(concatBytes(...parts));
+  return inTreeSha256(concatBytes(...parts));
 }
 
 /** Commitment to a secret: c = SHA-256(secret). Mirrors entropyCommitSync. */
@@ -81,7 +80,7 @@ export function beaconSeed(reveals: readonly PartyReveal[], turnIndex: number, p
  */
 function drawDie(seed: Uint8Array, label: number): number {
   for (let counter = 0; counter < 1 << 20; counter++) {
-    const mac = hmac(nobleSha256, seed, concatBytes(u32be(label), u32be(counter)));
+    const mac = hmacSha256(seed, concatBytes(u32be(label), u32be(counter)));
     for (const b of mac) {
       if (b < 252) return (b % 6) + 1;
     }

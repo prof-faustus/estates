@@ -1,19 +1,18 @@
 /**
  * Broadcast encryption for ESTATES — multi-recipient ECIES, ISOMORPHIC.
  *
- * Uses @noble/* (pure JS) so it runs identically in Node and the browser
- * (SubtleCrypto has no secp256k1, hence noble). A message is encrypted once
- * under a random content key (AES-256-GCM) and that key is wrapped to each
- * recipient via secp256k1 ECDH → HKDF-SHA256 → AES-256-GCM. Only a holder of a
- * recipient private key can read it. Revocation = recipient-set change; fresh
- * content + ephemeral key per message (per-message forward access control).
+ * Uses the in-tree, DEPENDENCY-FREE crypto core (@estates/keys) so it runs identically in Node
+ * and the browser with NO third-party library (SubtleCrypto has no secp256k1 and is async). A
+ * message is encrypted once under a random content key (AES-256-GCM) and that key is wrapped to
+ * each recipient via secp256k1 ECDH → HKDF-SHA256 → AES-256-GCM. Only a holder of a recipient
+ * private key can read it. Revocation = recipient-set change; fresh content + ephemeral key per
+ * message (per-message forward access control).
  */
-import * as secp from '@noble/secp256k1';
-import { sha256 } from '@noble/hashes/sha256';
-import { ripemd160 } from '@noble/hashes/ripemd160';
-import { hkdf } from '@noble/hashes/hkdf';
-import { gcm } from '@noble/ciphers/aes';
-import { randomBytes, bytesToHex, hexToBytes } from '@noble/hashes/utils';
+import {
+  randomPrivateKey, pubFromPriv, ecdhCompressed,
+  sha256, ripemd160, hkdfSha256, aesSeal, aesOpen,
+  randomBytes, bytesToHex, hexToBytes,
+} from '@estates/keys';
 
 export interface Peer {
   readonly priv: Uint8Array;   // 32-byte secp256k1 secret key
@@ -31,8 +30,8 @@ export function addressOf(pub: Uint8Array): string {
 
 /** Generate a secp256k1 peer identity. */
 export function genPeer(): Peer {
-  const priv = secp.utils.randomPrivateKey();
-  const pub = secp.getPublicKey(priv, true);
+  const priv = randomPrivateKey();
+  const pub = pubFromPriv(priv);
   return { priv, pub, address: addressOf(pub) };
 }
 
@@ -40,7 +39,7 @@ export function genPeer(): Peer {
  *  wallet key (its Bitmessage address is derived from the same key that signs
  *  moves), never a throwaway. */
 export function peerFrom(priv: Uint8Array): Peer {
-  const pub = secp.getPublicKey(priv, true);
+  const pub = pubFromPriv(priv);
   return { priv, pub, address: addressOf(pub) };
 }
 
@@ -94,7 +93,7 @@ export function isEnvelope(x: unknown): x is Envelope {
 }
 
 function wrapKey(shared: Uint8Array): Uint8Array {
-  return hkdf(sha256, shared, EMPTY, HKDF_INFO, 32);
+  return hkdfSha256(shared, EMPTY, HKDF_INFO, 32);
 }
 
 /** Encrypt `plaintext` so exactly `recipients` (compressed pubkeys) can read it. */
@@ -102,15 +101,15 @@ export function encryptBroadcast(recipients: readonly Uint8Array[], plaintext: U
   if (recipients.length === 0) throw new Error('encryptBroadcast: need at least one recipient');
   const contentKey = randomBytes(32);
   const pnonce = randomBytes(12);
-  const ct = gcm(contentKey, pnonce).encrypt(plaintext); // ct includes the GCM tag
+  const ct = aesSeal(contentKey, pnonce, plaintext); // ct includes the GCM tag
 
-  const ephPriv = secp.utils.randomPrivateKey();
-  const ephPub = secp.getPublicKey(ephPriv, true);
+  const ephPriv = randomPrivateKey();
+  const ephPub = pubFromPriv(ephPriv);
   const wrapped: WrappedKey[] = recipients.map((rpub) => {
-    const shared = secp.getSharedSecret(ephPriv, rpub, true);
+    const shared = ecdhCompressed(ephPriv, rpub);
     const wk = wrapKey(shared);
     const wnonce = randomBytes(12);
-    return { address: addressOf(rpub), nonce: bytesToHex(wnonce), ct: bytesToHex(gcm(wk, wnonce).encrypt(contentKey)) };
+    return { address: addressOf(rpub), nonce: bytesToHex(wnonce), ct: bytesToHex(aesSeal(wk, wnonce, contentKey)) };
   });
 
   return { ephPub: bytesToHex(ephPub), nonce: bytesToHex(pnonce), ct: bytesToHex(ct), recipients: wrapped };
@@ -131,10 +130,11 @@ export function decryptBroadcast(env: unknown, me: Peer): Uint8Array | null {
   try {
     const slot = env.recipients.find((r) => r.address === me.address);
     if (!slot) return null;                           // not addressed to this peer
-    const shared = secp.getSharedSecret(me.priv, hexToBytes(env.ephPub), true);
+    const shared = ecdhCompressed(me.priv, hexToBytes(env.ephPub));
     const wk = wrapKey(shared);
-    const contentKey = gcm(wk, hexToBytes(slot.nonce)).decrypt(hexToBytes(slot.ct)); // AEAD: throws on tamper
-    return gcm(contentKey, hexToBytes(env.nonce)).decrypt(hexToBytes(env.ct));        // AEAD: throws on tamper
+    const contentKey = aesOpen(wk, hexToBytes(slot.nonce), hexToBytes(slot.ct)); // AEAD: null on tamper
+    if (!contentKey) return null;
+    return aesOpen(contentKey, hexToBytes(env.nonce), hexToBytes(env.ct));        // AEAD: null on tamper
   } catch {
     return null;                                      // wrong key / tampered ciphertext → fail closed
   }

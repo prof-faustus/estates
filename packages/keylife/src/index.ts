@@ -16,7 +16,7 @@
  * WHAT / HOW / WHY:
  *  - WHAT: a self-describing, authority-signed list of (purpose, pubkey) bound to
  *    one gameId + protocolVersion + paramsHash.
- *  - HOW: the genesis authority (an Ed25519 key, itself entry purpose 'genesis')
+ *  - HOW: the genesis authority (a secp256k1 key, itself entry purpose 'genesis')
  *    signs the canonical manifest bytes; verifiers re-validate every field and the
  *    signature, then cross-check pubkeys across manifests for reuse.
  *  - WHY: without a manifest, "one-use keys" is only a convention; a verifier that
@@ -27,26 +27,25 @@
  * hostile input — each returns a typed {ok,reason} result (fail-closed).
  */
 import { signData, verifyData } from '@estates/channel';
-import { sha256 } from '@noble/hashes/sha256';
-import { bytesToHex } from '@noble/hashes/utils';
+import { sha256, bytesToHex } from '@estates/keys';
 
 export type KeyPurpose =
-  | 'genesis'     // the manifest authority (Ed25519)
-  | 'seat'        // a player's per-game seat signing key (Ed25519)
+  | 'genesis'     // the manifest authority (secp256k1)
+  | 'seat'        // a player's per-game seat signing key (secp256k1)
   | 'card'        // a concealed card's one-use custody key (secp256k1)
   | 'holder'      // a card holder's key (secp256k1)
   | 'chat'        // a chat/session epoch key (secp256k1)
-  | 'bank'        // a bank-policy key (secp256k1/Ed25519)
+  | 'bank'        // a bank-policy key (secp256k1)
   | 'settlement'  // a settlement key (secp256k1)
   | 'trade';      // a trade input key (secp256k1)
 
-export type KeyType = 'ed25519' | 'secp256k1';
+export type KeyType = 'secp256k1';   // secp256k1 ONLY — NO Ed25519
 const PURPOSES = new Set<string>(['genesis', 'seat', 'card', 'holder', 'chat', 'bank', 'settlement', 'trade']);
-const KEYTYPES = new Set<string>(['ed25519', 'secp256k1']);
+const KEYTYPES = new Set<string>(['secp256k1']);
 
 export interface KeyEntry {
   readonly purpose: KeyPurpose;
-  readonly pub: string;        // hex (33-byte compressed secp256k1, or 32-byte Ed25519)
+  readonly pub: string;        // hex (33-byte compressed secp256k1)
   readonly keyType: KeyType;
   readonly seat?: number;      // for purpose 'seat'
 }
@@ -56,8 +55,8 @@ export interface GameKeyManifest {
   readonly protocolVersion: string;
   readonly paramsHash: string;      // 32-byte hex — the ruleset these keys are bound to
   readonly entries: readonly KeyEntry[];
-  readonly authorityPub: string;    // 32-byte hex Ed25519 (the 'genesis' entry's pub)
-  readonly sig: string;             // 128-hex Ed25519 over the canonical manifest bytes
+  readonly authorityPub: string;    // 33-byte hex secp256k1 (the 'genesis' entry's pub)
+  readonly sig: string;             // 128-hex secp256k1 ECDSA (compact r‖s) over the canonical manifest bytes
 }
 
 export interface ManifestCheck { readonly ok: boolean; readonly reason: string }
@@ -65,8 +64,7 @@ export interface ManifestCheck { readonly ok: boolean; readonly reason: string }
 // ---- bounds (no attacker-controlled allocation) ----------------------------
 const MAX_ENTRIES = 4096;           // generous: seats + a full concealed deck + epochs
 const HEX32 = 64;                   // 32-byte hex
-const ED_PUB = 64;                  // Ed25519 pub = 32 bytes
-const ED_SIG = 128;                 // Ed25519 sig = 64 bytes
+const SIG_HEX = 128;                // secp256k1 ECDSA compact sig (r‖s) = 64 bytes
 const SECP_PUB = 66;                // compressed secp256k1 pub = 33 bytes
 const MAX_SEAT = 7;
 
@@ -97,7 +95,7 @@ function manifestBody(m: Pick<GameKeyManifest, 'gameId' | 'protocolVersion' | 'p
   }));
 }
 
-/** Build + sign a manifest. `authorityPriv/Pub` is an Ed25519 keypair, and MUST
+/** Build + sign a manifest. `authorityPriv/Pub` is a secp256k1 keypair, and MUST
  *  also appear in `entries` as the single purpose:'genesis' entry. */
 export function buildManifest(
   gameId: string, protocolVersion: string, paramsHash: string,
@@ -118,8 +116,8 @@ export function verifyManifest(m: unknown): ManifestCheck {
   if (!isHexLen(o.gameId, HEX32)) return fail('gameId must be 32-byte hex');
   if (typeof o.protocolVersion !== 'string' || o.protocolVersion.length === 0 || o.protocolVersion.length > 64) return fail('bad protocolVersion');
   if (!isHexLen(o.paramsHash, HEX32)) return fail('paramsHash must be 32-byte hex');
-  if (!isHexLen(o.authorityPub, ED_PUB)) return fail('authorityPub must be 32-byte hex');
-  if (!isHexLen(o.sig, ED_SIG)) return fail('sig must be 64-byte hex');
+  if (!isHexLen(o.authorityPub, SECP_PUB)) return fail('authorityPub must be 33-byte hex (secp256k1)');
+  if (!isHexLen(o.sig, SIG_HEX)) return fail('sig must be 64-byte hex');
   if (!Array.isArray(o.entries) || o.entries.length === 0 || o.entries.length > MAX_ENTRIES) return fail('entries out of range');
 
   const seenPub = new Set<string>();
@@ -131,8 +129,7 @@ export function verifyManifest(m: unknown): ManifestCheck {
     if (!e || typeof e !== 'object') return fail(`entry ${i} is not an object`);
     if (typeof e.purpose !== 'string' || !PURPOSES.has(e.purpose)) return fail(`entry ${i} bad purpose`);
     if (typeof e.keyType !== 'string' || !KEYTYPES.has(e.keyType)) return fail(`entry ${i} bad keyType`);
-    const expectLen = e.keyType === 'ed25519' ? ED_PUB : SECP_PUB;
-    if (!isHexLen(e.pub, expectLen)) return fail(`entry ${i} pub wrong length for ${e.keyType}`);
+    if (!isHexLen(e.pub, SECP_PUB)) return fail(`entry ${i} pub must be 33-byte hex (secp256k1)`);
     if (seenPub.has(e.pub as string)) return fail(`entry ${i} reuses key ${(e.pub as string).slice(0, 12)}… inside one game`);
     seenPub.add(e.pub as string);
     let seat: number | undefined;
@@ -146,7 +143,7 @@ export function verifyManifest(m: unknown): ManifestCheck {
     }
     if (e.purpose === 'genesis') {
       genesisCount++;
-      if (e.keyType !== 'ed25519') return fail('genesis key must be ed25519');
+      if (e.keyType !== 'secp256k1') return fail('genesis key must be secp256k1');
       if (e.pub !== o.authorityPub) return fail('genesis entry pub must equal authorityPub');
     }
     cleanEntries.push(seat === undefined ? { purpose: e.purpose as KeyPurpose, pub: e.pub as string, keyType: e.keyType as KeyType } : { purpose: e.purpose as KeyPurpose, pub: e.pub as string, keyType: e.keyType as KeyType, seat });

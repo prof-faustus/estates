@@ -25,7 +25,7 @@ using System.Collections.Concurrent;
 namespace Estates.Core;
 
 /// <summary>A peer seen alive on the network right now (from its multicast announce).</summary>
-public sealed record PeerInfo(string NodeId, string Name, string Host, int Port, string? TableId, string? TableInfo, DateTime LastSeen);
+public sealed record PeerInfo(string NodeId, string Name, string Host, int Port, string? TableId, string? TableInfo, string WalletPub, DateTime LastSeen);
 
 /// <summary>One direct TCP link to another peer (length-prefixed frames).</summary>
 public sealed class PeerLink : IDisposable
@@ -33,6 +33,7 @@ public sealed class PeerLink : IDisposable
     private readonly TcpClient _tcp;
     private readonly NetworkStream _stream;
     private readonly CancellationTokenSource _cts = new();
+    public bool IsLive { get; private set; } = true;
     public string RemoteId { get; internal set; } = "";
     public event Action<PeerLink, byte[]>? OnFrame;
     public event Action<PeerLink>? OnClosed;
@@ -91,6 +92,7 @@ public sealed class PeerLink : IDisposable
     public void Dispose()
     {
         if (_cts.IsCancellationRequested) return;
+        IsLive = false;
         _cts.Cancel();
         try { _stream.Dispose(); } catch { }
         try { _tcp.Close(); } catch { }
@@ -111,6 +113,7 @@ public sealed class P2PNode : IDisposable
 
     public string NodeId { get; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; }
+    private readonly string _walletPub;   // this node's compressed secp256k1 wallet pub (hex) — chat recipient key
     /// <summary>The table this node is hosting/advertising, or null. Set by the lobby.</summary>
     public (string id, string info)? Advertised { get; set; }
 
@@ -126,9 +129,10 @@ public sealed class P2PNode : IDisposable
     public event Action<string>? OnPeerLost;
     public event Action<PeerLink>? OnLink;             // a peer connected to us OR we connected to a peer
 
-    public P2PNode(string name)
+    public P2PNode(string name, string walletPub)
     {
         Name = name;
+        _walletPub = walletPub;
         // bind a TCP listener on an ephemeral loopback-or-LAN port for direct peer links
         _listener = new TcpListener(IPAddress.Any, 0);
         _listener.Start();
@@ -161,7 +165,7 @@ public sealed class P2PNode : IDisposable
         {
             try
             {
-                var msg = JsonSerializer.Serialize(new AnnounceMsg(NodeId, Name, _tcpPort, Advertised?.id, Advertised?.info));
+                var msg = JsonSerializer.Serialize(new AnnounceMsg(NodeId, Name, _tcpPort, Advertised?.id, Advertised?.info, _walletPub));
                 var b = Encoding.UTF8.GetBytes("ESTATES-P2P\n" + msg);
                 _udp.Send(b, b.Length, ep);
             }
@@ -184,7 +188,7 @@ public sealed class P2PNode : IDisposable
                 var a = JsonSerializer.Deserialize<AnnounceMsg>(s["ESTATES-P2P\n".Length..]);
                 if (a is null || a.NodeId == NodeId) continue;     // ignore our own announce
                 var host = from.Address.ToString();
-                var info = new PeerInfo(a.NodeId, a.Name ?? "player", host, a.TcpPort, a.TableId, a.TableInfo, DateTime.UtcNow);
+                var info = new PeerInfo(a.NodeId, a.Name ?? "player", host, a.TcpPort, a.TableId, a.TableInfo, a.WalletPub ?? "", DateTime.UtcNow);
                 bool isNew = !_peers.ContainsKey(a.NodeId);
                 _peers[a.NodeId] = info;
                 if (isNew) OnPeerDiscovered?.Invoke(info);
@@ -209,6 +213,23 @@ public sealed class P2PNode : IDisposable
 
     /// <summary>Peers alive on the network right now (closed peers have already aged out).</summary>
     public IReadOnlyList<PeerInfo> Peers() => _peers.Values.OrderBy(p => p.Name).ToList();
+
+    /// <summary>The live direct links to peers (dead links already dropped).</summary>
+    public IReadOnlyList<PeerLink> LiveLinks() => _links.Where(l => l.IsLive).ToList();
+
+    /// <summary>The compressed wallet pubkeys (bytes) of peers alive right now — the chat
+    /// recipient set for a broadcast-encrypted message.</summary>
+    public IReadOnlyList<byte[]> PeerWalletPubs()
+    {
+        var seen = new HashSet<string>();
+        var outp = new List<byte[]>();
+        foreach (var p in _peers.Values)
+        {
+            if (p.WalletPub.Length == 0 || !seen.Add(p.WalletPub)) continue;
+            try { outp.Add(Tx.FromHex(p.WalletPub)); } catch { }
+        }
+        return outp;
+    }
 
     // ---- direct peer links (TCP) ----
 
@@ -250,5 +271,5 @@ public sealed class P2PNode : IDisposable
         try { _listener.Stop(); } catch { }
     }
 
-    private sealed record AnnounceMsg(string NodeId, string? Name, int TcpPort, string? TableId, string? TableInfo);
+    private sealed record AnnounceMsg(string NodeId, string? Name, int TcpPort, string? TableId, string? TableInfo, string? WalletPub);
 }

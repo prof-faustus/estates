@@ -3,14 +3,13 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "ESTATES deterministic one-use ECDH key derivation (BRC-42 hash chain): no address ever reused; Alice-only and Alice+Bob shared one-time keys, indexed and deterministic. Isomorphic (@noble).",
+  "description": "ESTATES in-tree, dependency-free key foundation: Type-42 one-use ECDH key derivation with the mandatory index‖ECDH‖HMAC hash chain, plus the in-tree crypto core (secp256k1, SHA-256/512, RIPEMD-160, HMAC, HKDF, AES-256-GCM). NO third-party library, NO Ed25519, NO RFC-6979.",
   "license": "MIT",
   "exports": {
-    ".": "./src/index.ts"
-  },
-  "dependencies": {
-    "@noble/hashes": "1.5.0",
-    "@noble/secp256k1": "2.1.0"
+    ".": "./src/index.ts",
+    "./secp256k1": "./src/secp256k1.ts",
+    "./hashes": "./src/hashes.ts",
+    "./aesgcm": "./src/aesgcm.ts"
   },
   "scripts": {
     "test": "node --test --experimental-strip-types \"test/**/*.test.ts\""

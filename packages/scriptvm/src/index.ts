@@ -7,9 +7,7 @@
  * `<state> OP_DROP <P2PKH>` NFT/commit output, and the `<rh> <tag> OP_2DROP
  * OP_TRUE` bank covenant — so a produced move/genesis tx can be proven spend-valid.
  */
-import * as secp from '@noble/secp256k1';
-import { sha256 } from '@noble/hashes/sha256';
-import { ripemd160 } from '@noble/hashes/ripemd160';
+import { verifyHash, sha256, ripemd160 } from '@estates/keys';
 import { hash256, varint, type Tx } from '@estates/tx';
 import { OP, BANNED_OPCODES, type ScriptItem } from '@estates/onchain';
 
@@ -23,13 +21,20 @@ function u64le(v: number): Uint8Array {
   for (let i = 0; i < 8; i++) { out[i] = Number(x & 0xffn); x >>= 8n; }
   return out;
 }
-function fromHex(h: string): Uint8Array { const b = new Uint8Array(h.length / 2); for (let i = 0; i < b.length; i++) b[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16); return b; }
+// STRICT hex parser (audit 4.5): even length + hex-only, else throw. A malformed txid/script
+// hex must never silently become a zero/NaN byte array in a sighash-critical path.
+function fromHex(h: string): Uint8Array {
+  if (typeof h !== 'string' || h.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(h)) throw new Error('scriptvm: invalid hex');
+  const b = new Uint8Array(h.length / 2);
+  for (let i = 0; i < b.length; i++) b[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
+  return b;
+}
 const reversed = (b: Uint8Array): Uint8Array => b.slice().reverse();
 function concat(...parts: Uint8Array[]): Uint8Array { let n = 0; for (const p of parts) n += p.length; const o = new Uint8Array(n); let i = 0; for (const p of parts) { o.set(p, i); i += p.length; } return o; }
 const eq = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && a.every((x, i) => x === b[i]);
 const hash160 = (b: Uint8Array): Uint8Array => ripemd160(sha256(b));
 
-// @noble/secp256k1 v2 is compact-only; Bitcoin scriptSigs carry DER. Convert.
+// The in-tree verifyHash takes a compact (r‖s) signature; Bitcoin scriptSigs carry DER. Convert.
 function derToCompact(der: Uint8Array): Uint8Array {
   if (der[0] !== 0x30) throw new Error('bad DER');
   let o = 2;
@@ -121,7 +126,7 @@ function run(items: ScriptItem[], stack: Uint8Array[], ctx: EvalCtx | null): voi
         const hashType = sig[sig.length - 1]!;
         const der = sig.slice(0, -1);
         let ok = false;
-        try { ok = secp.verify(derToCompact(der), sighash(ctx.tx, ctx.i, ctx.prevout, hashType), pub); } catch { ok = false; }
+        try { ok = verifyHash(pub, sighash(ctx.tx, ctx.i, ctx.prevout, hashType), derToCompact(der)); } catch { ok = false; }
         stack.push(ok ? new Uint8Array([1]) : new Uint8Array(0));
         break;
       }

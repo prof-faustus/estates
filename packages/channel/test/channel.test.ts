@@ -1,12 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import * as secp from '@noble/secp256k1';
-import { sha256 } from '@noble/hashes/sha256';
-import { hmac } from '@noble/hashes/hmac';
-import { bytesToHex, hexToBytes, concatBytes } from '@noble/hashes/utils';
+import { signHash, sha256, bytesToHex, hexToBytes, concatBytes } from '@estates/keys';
 import { genIdentity, initiate, respond, complete, seal, openFrame, type Session } from '../src/index.ts';
-
-secp.etc.hmacSha256Sync = (k: Uint8Array, ...m: Uint8Array[]): Uint8Array => hmac(sha256, k, secp.etc.concatBytes(...m));
+void hexToBytes;
 
 const td = (b: Uint8Array | null) => (b ? new TextDecoder().decode(b) : null);
 const te = (s: string) => new TextEncoder().encode(s);
@@ -79,7 +75,7 @@ test('a frame cannot be opened with the wrong session key', () => {
 // must now return null, not throw.
 const enc = new TextEncoder();
 const H = (...p: Uint8Array[]) => sha256(concatBytes(...p));
-const proSign = (msg: Uint8Array, priv: Uint8Array) => secp.sign(msg, priv).toCompactRawBytes();
+const proSign = (msg: Uint8Array, priv: Uint8Array) => signHash(priv, msg);
 
 test('a VALIDLY-SIGNED hello carrying an OFF-CURVE ephemeral key returns null, never throws (remote-DoS #1)', () => {
   const eve = genIdentity(); const bob = genIdentity();

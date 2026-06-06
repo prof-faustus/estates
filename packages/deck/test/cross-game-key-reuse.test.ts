@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mintCard, verifyCardTranscript, type ConcealedCard, type CardFace } from '../src/index.ts';
 import { genCardKey } from '../src/index.ts';
-import { bytesToHex } from '@noble/hashes/utils';
+import { bytesToHex } from '@estates/keys';
 
 const TABLE_A = 'a1'.repeat(32);
 const TABLE_B = 'b2'.repeat(32);

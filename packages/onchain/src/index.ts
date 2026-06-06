@@ -8,7 +8,7 @@
  * satoshis (ordinary P2PKH outputs) — never a token. No data-output opcode, no
  * locktime-verify opcodes; state is pushdata in live script, timing is tx-level.
  */
-import { sha256 } from '@noble/hashes/sha256';
+import { sha256 } from '@estates/keys';
 import { OP, op, push, p2pkh, serializeScript, scriptHex, containsOpReturn, type ScriptItem } from './script.ts';
 
 export * from './script.ts';

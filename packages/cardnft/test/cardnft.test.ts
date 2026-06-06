@@ -4,9 +4,7 @@
 // resurrection rejected, UTXO successor continuity, TEE quote).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sha256 } from '@noble/hashes/sha256';
-import { ripemd160 } from '@noble/hashes/ripemd160';
-import { bytesToHex } from '@noble/hashes/utils';
+import { sha256, ripemd160, bytesToHex } from '@estates/keys';
 import { genCardKey, mintCard, type CardFace } from '@estates/deck';
 import { txid } from '@estates/tx';
 import {

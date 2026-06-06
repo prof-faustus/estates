@@ -3,7 +3,7 @@
 // serves two games — while the player still fully controls it (no throwaway).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bytesToHex } from '@noble/hashes/utils';
+import { bytesToHex } from '@estates/keys';
 import { gameIdentityFrom, identityFrom, signingKeyFromMaster } from '../src/index.ts';
 
 const master = new Uint8Array(32).fill(7);

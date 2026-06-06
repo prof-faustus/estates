@@ -12,7 +12,7 @@
  *
  * Hashes are 32-byte internal byte order. Isomorphic (@noble).
  */
-import { sha256 } from '@noble/hashes/sha256';
+import { sha256 } from '@estates/keys';
 import type { MerkleProof } from '@estates/spv';
 
 function hash256(b: Uint8Array): Uint8Array { return sha256(sha256(b)); }

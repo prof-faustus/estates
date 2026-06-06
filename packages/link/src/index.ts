@@ -46,7 +46,7 @@ function framedReader(sock: Socket, onMsg: (obj: any) => void): void {
 /** An authenticated, encrypted link to one peer. */
 export class PeerLink {
   readonly peerIdPub: Uint8Array;     // the peer's secp256k1 identity (ECDH / wallet) pub
-  readonly peerSignPub: Uint8Array;   // the peer's Ed25519 signing pub (vouched for in the handshake)
+  readonly peerSignPub: Uint8Array;   // the peer's secp256k1 signing pub (vouched for in the handshake)
   private sock: Socket;
   private session: Session;
   private handlers: ((m: Uint8Array) => void)[] = [];
