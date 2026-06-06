@@ -31,6 +31,9 @@ public sealed class BsvPeer : IDisposable
     public event Action<IReadOnlyList<byte[]>>? OnHeaders;
     /// <summary>Raised when the peer announces inventory (txids/blocks) to us.</summary>
     public event Action<IReadOnlyList<(uint type, byte[] hash)>>? OnInv;
+    /// <summary>Raised after we hand a broadcast tx to the peer (it sent getdata and we sent the tx) —
+    /// the confirmation that the broadcast reached the network. Carries the txid.</summary>
+    public event Action<string>? OnTxSent;
     public event Action<string>? OnLog;
 
     public BsvPeer(BsvNet net, string host, int port) { _net = net; Host = host; Port = port; }
@@ -147,7 +150,7 @@ public sealed class BsvPeer : IDisposable
             if (type != 1) continue;                                  // MSG_TX only
             string txid = Tx.ToHex(ReverseTxid(hash));
             byte[]? raw; lock (_gate) _txPool.TryGetValue(txid, out raw);
-            if (raw is not null) { await SendAsync("tx", raw).ConfigureAwait(false); OnLog?.Invoke($"sent tx {txid[..16]}… to {Host}"); }
+            if (raw is not null) { await SendAsync("tx", raw).ConfigureAwait(false); OnLog?.Invoke($"sent tx {txid[..16]}… to {Host}"); OnTxSent?.Invoke(txid); }
         }
     }
 
