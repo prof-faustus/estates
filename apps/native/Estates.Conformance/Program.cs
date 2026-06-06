@@ -425,4 +425,34 @@ else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
 // (No relay/spectate/replay layers: ESTATES has NO server and NO off-chain transcript. The
 // native client is a true P2P peer; game state IS the verified on-chain/signed transcript.)
 
+// LIVE end-to-end broadcast: fund a wallet from the regtest FAUCET node (RPC is TEST-ONLY scaffolding,
+// never the product path), build+sign a spend, BROADCAST it over P2P via the in-client node, and
+// confirm the node accepted it into its mempool. The same path serves testnet/mainnet (different magic
+// + peer). Informational — skips cleanly if no node.
+try
+{
+    using var http = new System.Net.Http.HttpClient();
+    http.DefaultRequestHeaders.Authorization = new("Basic", Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes("e:e")));
+    async Task<System.Text.Json.JsonElement> Rpc(string m, params object[] ps)
+    {
+        string body = System.Text.Json.JsonSerializer.Serialize(new { jsonrpc = "1.0", id = "t", method = m, @params = ps });
+        var resp = await http.PostAsync("http://127.0.0.1:18443/", new System.Net.Http.StringContent(body));
+        using var jd = System.Text.Json.JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        return jd.RootElement.GetProperty("result").Clone();
+    }
+    var lw = new StandaloneWallet(SHA256.HashData("live-bcast"u8.ToArray()), "regtest");
+    var hashes = await Rpc("generatetoaddress", 101, lw.AddressAt(0));   // mine coins TO the wallet's address
+    string b1 = hashes[0].GetString()!;
+    string cbTxid = (await Rpc("getblock", b1)).GetProperty("tx")[0].GetString()!;   // block 1 coinbase (now mature)
+    lw.AddCoin(cbTxid, 0, 5_000_000_000, 0);
+    var built = lw.BuildSend(lw.AddressAt(1), 1_000_000, 500);
+    bool sent = await Broadcaster.BroadcastAsync(BsvNet.Regtest, "127.0.0.1", 18444, Tx.FromHex(built.RawHex), 12000);
+    var mp = await Rpc("getrawmempool");
+    bool inMempool = mp.EnumerateArray().Any(x => x.GetString() == built.Txid);
+    Console.WriteLine(sent && inMempool
+        ? $"LIVE: BROADCAST a real BSV tx {built.Txid[..16]}… over P2P — node ACCEPTED it into mempool ✓"
+        : $"LIVE: broadcast sent={sent} inMempool={inMempool} txid={built.Txid[..16]}…");
+}
+catch (Exception ex) { Console.WriteLine($"LIVE: broadcast test skipped/failed ({ex.Message})"); }
+
 return (fail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && bfail == 0 && xfail == 0) ? 0 : 1;
