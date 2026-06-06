@@ -16,12 +16,7 @@
     "lint:bans": "node --experimental-strip-types tools/lint-bans.ts",
     "ci": "pnpm install --frozen-lockfile && node --experimental-strip-types tools/ci.ts",
     "reproduce": "pnpm install --frozen-lockfile && node --experimental-strip-types tools/ci.ts && pnpm --filter @estates/conformance generate",
-    "redteam": "node --experimental-strip-types tools/redteam.mjs",
-    "proof:render": "node tools/render-check.mjs",
-    "proof:flow": "node tools/cdp-flow.mjs",
-    "proof:native": "node tools/native-proof.mjs",
-    "spectate:relay": "node --experimental-strip-types tools/live-spectate.ts",
-    "web": "node tools/serve-web.mjs"
+    "redteam": "node --experimental-strip-types tools/redteam.mjs"
   },
   "devDependencies": {
     "@types/node": "22.19.19",

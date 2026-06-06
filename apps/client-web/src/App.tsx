@@ -8,7 +8,7 @@ import {
   P, SEAT_COLORS, GROUP_COLOR, NetTable, LobbyClient, makeRelay, newAddress, identityFrom,
   gameIdentityFrom, gameIdFromChannel,
   rollDice, ownedBy, buildable, mortgageable, unmortgageable, lastCard,
-  LOBBY_CHANNEL, DEFAULT_RELAY, type NetworkMode, type TableView, type OpenTable, type Identity,
+  LOBBY_CHANNEL, type NetworkMode, type TableView, type OpenTable, type Identity,
 } from './game';
 
 /** The player's LOBBY identity DERIVED from their wallet master key (lobby is not
@@ -338,21 +338,8 @@ function Shell({ children }: { children: React.ReactNode }) {
 // 2s and shows whether THIS window can reach it. If this is red, no window can
 // sync — so you see the real transport state, not a claim.
 function RelayStatus() {
-  const [ok, setOk] = useState<boolean | null>(null);
-  const [ms, setMs] = useState<number | null>(null);
-  useEffect(() => {
-    let alive = true;
-    const ping = async () => {
-      const t0 = performance.now();
-      try {
-        const r = await fetch(`${DEFAULT_RELAY}/history/__ping__`, { cache: 'no-store' });
-        if (alive) { setOk(r.ok); setMs(Math.round(performance.now() - t0)); }
-      } catch { if (alive) { setOk(false); setMs(null); } }
-    };
-    void ping();
-    const iv = setInterval(ping, 2000);
-    return () => { alive = false; clearInterval(iv); };
-  }, []);
-  const label = ok === null ? 'relay: checking…' : ok ? `relay: connected${ms !== null ? ` (${ms}ms)` : ''}` : 'relay: NOT REACHABLE';
-  return <span className={`relaystatus ${ok === null ? 'pending' : ok ? 'up' : 'down'}`}><span className="dot" /> {label}</span>;
+  // The web app is a LOCAL, STANDALONE P2P system — NO server, no backend, nothing to
+  // ping. It runs entirely in the browser, fresh each load. There is deliberately no
+  // network status because there is deliberately no server.
+  return <span className="relaystatus up"><span className="dot" /> local · P2P · no server</span>;
 }

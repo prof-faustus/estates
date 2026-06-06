@@ -6,7 +6,7 @@ import type { GameState } from '@estates/engine';
 export {
   P, NetTable, makeRelay, rollDice, botAction, identityFrom, gameIdentityFrom, gameIdFromChannel,
   LobbyClient, newAddress, buildable, mortgageable, unmortgageable, lastCard,
-  DEFAULT_RELAY, LOBBY_CHANNEL,
+  LOBBY_CHANNEL,
 } from '@estates/table';
 export type { NetworkMode, TableView, SeatInfo, OpenTable, Identity } from '@estates/table';
 import { P } from '@estates/table';

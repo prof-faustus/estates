@@ -11,7 +11,7 @@
  */
 import { initialState, apply, netWorth, type GameState, type Action, type EngineConfig } from '@estates/engine';
 import { loadParams } from '@estates/params';
-import { HttpRelay, InMemoryRelay, type Relay } from '@estates/chat';
+import { InMemoryRelay, type Relay } from '@estates/chat';
 import { genIdentity, identityFrom, gameIdentityFrom, signData, verifyData, signingKeyFromMaster, type Identity } from '@estates/channel';
 import { sha256 } from '@noble/hashes/sha256';
 import { commit as beaconCommit, verifyRollEntry, ZERO_BEACON } from '@estates/beacon';
@@ -58,11 +58,17 @@ export function rollDice(): [number, number] {
   };
   return [die(), die()];
 }
-/** Built-in transport — NO url is ever typed by a user (Bitmessage-style). */
-export const DEFAULT_RELAY = 'http://127.0.0.1:8788';
 export const LOBBY_CHANNEL = 'estates-lobby-v1';
-export function makeRelay(channel: string, url: string = DEFAULT_RELAY): Relay {
-  return new HttpRelay(url, channel);
+/**
+ * The web transport. NO SERVER: the web app is a LOCAL, standalone system — each
+ * load is its own in-process world (`InMemoryRelay`), so a tab runs entirely in the
+ * browser with no backend, no relay, no fetch. Real cross-machine play is the NATIVE
+ * app's job over TRUE peer-to-peer `@estates/link` (direct IP-to-IP sockets). The
+ * `channel` is kept only so callers' signatures are stable; an in-process world
+ * needs no address.
+ */
+export function makeRelay(_channel: string): Relay {
+  return new InMemoryRelay();
 }
 
 /** A Bitmessage-style address (hex) for an identity or a table. */

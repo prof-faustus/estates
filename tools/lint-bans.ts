@@ -34,6 +34,24 @@ const ALLOW = [
   /[/]bans\.test\.ts$/,
 ];
 
+// NO-SERVER bans (ABSOLUTE): ESTATES is a TRUE peer-to-peer system in BOTH web and
+// exe. A server of ANY kind — a relay, a store-and-forward, an HTTP/SSE endpoint, an
+// RPC proxy — is forbidden and FAILS THE BUILD. The only networking allowed is direct
+// peer-to-peer over `node:net` sockets (`@estates/link`, IP-to-IP, no relay) and the
+// browser's own `fetch` straight to a player's OWN node/network (never our proxy).
+// These bans are enforced in EVERY code file (incl. tests) — only this lint is exempt.
+const SERVER_BANS: { name: string; re: RegExp }[] = [
+  { name: "HTTP server module (node:http/https)", re: /\bnode:https?\b/ },
+  { name: "HTTP server (createServer from node:http)", re: /from\s+['"]https?['"]/ },
+  { name: "relay server entrypoint (startRelayServer)", re: /\bstartRelayServer\b/ },
+  { name: "HTTP relay client/server (HttpRelay)", re: /\bHttpRelay\b/ },
+  { name: "relay endpoint /publish", re: /\/publish\// },
+  { name: "relay endpoint /subscribe", re: /\/subscribe\// },
+  { name: "relay endpoint /history", re: /\/history\// },
+  { name: "relay RPC proxy endpoint /rpc", re: /\/rpc\b/ },
+];
+const SERVER_BAN_EXEMPT = /tools[/\\]lint-bans\.ts$/;
+
 // Opcode bans: textual opcode identifiers in produced source.
 // Match the actual opcode identifiers that could appear in produced script
 // (not the CLTV/CSV abbreviations, which legitimately appear in prose/docs).
@@ -87,14 +105,27 @@ function walk(dir: string): void {
 
 function scan(full: string): void {
   const rel = relative(ROOT, full);
-  if (allowed(rel)) return;
   const dot = full.lastIndexOf('.');
   const ext = dot >= 0 ? full.slice(dot) : '';
   const isCode = CODE_EXT.has(ext);
   const isContent = CONTENT_EXT.has(ext);
   if (!isCode && !isContent) return;
 
-  const lines = readFileSync(full, 'utf8').split(/\r?\n/);
+  const allLines = readFileSync(full, 'utf8').split(/\r?\n/);
+
+  // NO-SERVER gate: enforced in EVERY code file (including tests) — only this lint is
+  // exempt. A server of any kind anywhere is a fatal, build-failing violation.
+  if (isCode && !SERVER_BAN_EXEMPT.test(rel)) {
+    allLines.forEach((text, i) => {
+      for (const b of SERVER_BANS) {
+        if (b.re.test(text)) hits.push({ file: rel, line: i + 1, ban: `NO SERVER — ${b.name}`, text: text.trim() });
+      }
+    });
+  }
+
+  if (allowed(rel)) return;
+
+  const lines = allLines;
   lines.forEach((text, i) => {
     if (isCode) {
       for (const b of OPCODE_BANS) {

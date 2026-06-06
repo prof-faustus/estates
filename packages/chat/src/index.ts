@@ -1,16 +1,18 @@
 /**
- * @estates/chat — multiparty join + end-to-end-encrypted chat over an untrusted
- * relay. Peers join a table channel by announcing their Bitmessage-style address
- * + public key; messages are broadcast-encrypted to the current member set, so
- * the relay (and non-members) only ever see ciphertext. Fully isomorphic
- * (Node + browser) — the crypto is @noble/* and the relay is fetch/SSE.
+ * @estates/chat — multiparty join + end-to-end-encrypted chat over a peer transport.
+ * Peers join a table channel by announcing their Bitmessage-style address + public
+ * key; messages are broadcast-encrypted to the current member set, so non-members
+ * only ever see ciphertext. NO SERVER: the only transport is the in-process
+ * `InMemoryRelay` (tests/same-process) or, for real cross-machine play, TRUE
+ * peer-to-peer over `@estates/link` (direct IP-to-IP sockets). Fully isomorphic
+ * (Node + browser) — the crypto is @noble/*.
  */
-import { type Relay, InMemoryRelay, HttpRelay } from './relay.ts';
+import { type Relay, InMemoryRelay } from './relay.ts';
 import {
   genPeer, peerFrom, addressOf, encryptBroadcast, decryptBroadcast, isHex, isEnvelope, type Peer, type Envelope,
 } from './broadcast.ts';
 
-export { genPeer, peerFrom, addressOf, encryptBroadcast, decryptBroadcast, isHex, isEnvelope, InMemoryRelay, HttpRelay };
+export { genPeer, peerFrom, addressOf, encryptBroadcast, decryptBroadcast, isHex, isEnvelope, InMemoryRelay };
 export type { Peer, Envelope, Relay };
 
 type NetMsg =

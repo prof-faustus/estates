@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react';
 import { Wallet, type Network } from '@estates/wallet';
-import { DEFAULT_RELAY } from './game';
 
 /**
  * Your full wallet — shown at ALL times. It's a wallet as much as a game: a
@@ -28,20 +27,20 @@ export function WalletPanel({ wif, network }: { wif: string; network: Network })
   const isReg = network === 'regtest';
   const canSend = !isReg || rpcUrl.trim() !== '';
 
-  // regtest RPC goes through the local relay's loopback PROXY, never straight to
-  // bitcoind: a webview can't fetch the node directly (no CORS on bitcoind → the
-  // call dies as "Failed to fetch"). The relay (same loopback origin we already
-  // reach) forwards to YOUR node and returns the result.
+  // NO SERVER: the web app is local + standalone. regtest RPC goes DIRECTLY to YOUR
+  // OWN node (your infrastructure), never through any project server/proxy. If the
+  // browser can't reach your node (its RPC has no CORS header), enable RPC CORS on
+  // your node or use the native app — we will never stand up a proxy server for you.
   async function rpc(method: string, params: unknown[]): Promise<any> {
     let r: Response;
     try {
-      r = await fetch(`${DEFAULT_RELAY}/rpc`, {
+      r = await fetch(rpcUrl.trim(), {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ url: rpcUrl.trim(), user: rpcUser, pass: rpcPass, method, params }),
+        headers: { 'content-type': 'application/json', authorization: 'Basic ' + btoa(`${rpcUser}:${rpcPass}`) },
+        body: JSON.stringify({ jsonrpc: '1.0', id: 'estates', method, params }),
       });
     } catch {
-      throw new Error('relay not reachable — is the ESTATES relay running on ' + DEFAULT_RELAY + '?');
+      throw new Error('your node was not reachable directly from the browser (no server is used) — enable RPC CORS on your node, or use the native app.');
     }
     const j = (await r.json()) as { result?: any; error?: { message: string } };
     if (j.error) throw new Error(`${method}: ${j.error.message}`);

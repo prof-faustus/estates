@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
-import { ChatRoom, HttpRelay, genPeer, peerFrom, type ChatMessage, type Peer } from '@estates/chat';
+import { ChatRoom, genPeer, peerFrom, type ChatMessage, type Peer } from '@estates/chat';
 import { Wallet, type Network } from '@estates/wallet';
 import { makeRelay } from './game';
 
@@ -11,8 +11,8 @@ import { makeRelay } from './game';
  *  - it AUTO-JOINS the table channel on mount, so every window discovers every
  *    other member immediately — you just type and send.
  *  - mode: broadcast to everyone, or 2-party ECDH to one member you pick.
- *  - transport: built-in Bitmessage-style relay, or a direct IP/URL you enter.
- * The relay only ever sees ciphertext; keys never leave this client.
+ *  - transport: LOCAL, in-process, NO SERVER (the web app is standalone). Ciphertext
+ *    only ever lives in this client; keys never leave it.
  */
 type Mode = 'broadcast' | '2party';
 
@@ -34,7 +34,7 @@ export function ChatPanel({ channel = 'estates-table', wif, network = 'regtest',
   // Auto-join the channel on mount (and re-join if the channel changes). No
   // button: members must discover each other for a broadcast to reach anyone.
   useEffect(() => {
-    const relay = directUrl.trim() ? new HttpRelay(directUrl.trim(), channel) : makeRelay(channel);
+    const relay = makeRelay(channel);   // LOCAL in-process transport — no server
     const room = new ChatRoom(relay, peer, `seat-${peer.address.slice(0, 6)}`);
     room.onMessage((m) => setMsgs((prev) => [...prev, m]));
     room.connect();

@@ -3,27 +3,18 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "ESTATES bot policies (cautious/balanced/aggressive) as turn-driver Deciders with an independent secp256k1 signing identity. The daemon runs a bot as a SEPARATE remote player (own wallet) connected over the relay socket — never inside another player's app.",
+  "description": "ESTATES bot policies (cautious/balanced/aggressive) as turn-driver Deciders. TEST-ONLY: these policies exist to drive the engine in the test suite. NO bot ever runs in the live game — a human selects every action. There is no daemon and no networked bot (that would be both a running bot AND a server).",
   "license": "MIT",
   "exports": {
-    ".": "./src/index.ts",
-    "./daemon": "./src/daemon.ts"
-  },
-  "bin": {
-    "estates-bot": "./src/daemon.ts"
+    ".": "./src/index.ts"
   },
   "dependencies": {
     "@estates/params": "workspace:*",
     "@estates/engine": "workspace:*",
     "@estates/turn": "workspace:*",
-    "@estates/trade": "workspace:*",
-    "@estates/table": "workspace:*",
-    "@estates/chat": "workspace:*",
-    "@estates/wallet": "workspace:*"
+    "@estates/trade": "workspace:*"
   },
   "scripts": {
-    "test": "node --test --experimental-strip-types \"test/**/*.test.ts\"",
-    "daemon": "node --experimental-strip-types src/daemon.ts",
-    "smoke": "node --experimental-strip-types smoke-daemon.ts"
+    "test": "node --test --experimental-strip-types \"test/**/*.test.ts\""
   }
 }
