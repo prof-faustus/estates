@@ -388,12 +388,17 @@ export class NetTable {
    * genesis authority): binds every seated player's signing key to this game's id,
    * as `seat` entries. This is the auditable artifact that ties the running game
    * to @estates/keylife, so cross-game key reuse can be rejected by the audit
-   * (verifyNoCrossGameReuse / auditKeyLifecycle). Returns null if not started, not
-   * the host, or no real game id. The published manifest lets every peer + auditor
-   * verify the seat keys are this game's keys only.
+   * (verifyNoCrossGameReuse / auditKeyLifecycle). Returns null if not the host, or no
+   * real game id. The published manifest lets every peer + auditor verify the seat keys
+   * are this game's keys only.
+   *
+   * NB: NOT gated on `this.started` — `start()` builds + broadcasts this from the
+   * committed seat map at the moment it sends the `start` (before the local rebuild has
+   * set `started`); a `!this.started` guard here meant the manifest was NEVER broadcast
+   * in the normal start path (audit finding). The seat map is already final at start.
    */
   gameKeyManifest(): GameKeyManifest | null {
-    if (!this.started || !this.iAmHost() || this.gameId === '00'.repeat(32) || this.seats.size === 0) return null;
+    if (!this.iAmHost() || this.gameId === '00'.repeat(32) || this.seats.size === 0) return null;
     // The genesis-authority key is DISTINCT from the host's seat key (one key, one
     // purpose): derived from the host's own master with a separate per-game context,
     // so the host can be both authority and a player without reusing a key.
