@@ -73,8 +73,16 @@ export class PeerLink {
   close(): void { this.sock.destroy(); }
 }
 
-/** Listen for inbound peers; each authenticated connection yields a PeerLink. */
-export function listen(port: number, identity: Identity, onPeer: (link: PeerLink) => void): Promise<Server> {
+/**
+ * Listen for inbound peers; each authenticated connection yields a PeerLink. Binds to
+ * ALL interfaces by default (`0.0.0.0`) so a peer on ANOTHER machine can dial in for
+ * real cross-machine P2P — this is a DIRECT peer listener on the participant's own
+ * machine, NOT a central relay/ordering/game server (it stores and forwards nothing;
+ * it only accepts a direct, mutually-authenticated, encrypted link). Pass `host =
+ * '127.0.0.1'` to restrict to same-machine peers. Every inbound socket must complete
+ * the @estates/channel mutual-auth handshake or it is destroyed.
+ */
+export function listen(port: number, identity: Identity, onPeer: (link: PeerLink) => void, host = '0.0.0.0'): Promise<Server> {
   return new Promise((resolve) => {
     const server = createServer((sock) => {
       // first message must be the Hello; respond with Ack, then bind frames.
@@ -108,7 +116,7 @@ export function listen(port: number, identity: Identity, onPeer: (link: PeerLink
       };
       sock.on('data', onData);
     });
-    server.listen(port, '127.0.0.1', () => resolve(server));
+    server.listen(port, host, () => resolve(server));
   });
 }
 

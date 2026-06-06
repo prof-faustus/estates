@@ -122,15 +122,21 @@ function validGenesis(g: unknown): g is EngineConfig {
 
 /** Independently reconstruct + verify a transcript. Total: any malformed /
  *  hostile transcript is a clean {ok:false}, never a throw or an OOM. */
-export function audit(t: GameTranscript, opts?: { manifests?: readonly GameKeyManifest[] }): AuditResult {
+export function audit(t: GameTranscript, opts?: { manifests?: readonly GameKeyManifest[]; requireManifests?: boolean }): AuditResult {
   const fail = (reason: string, steps = 0, rollsVerified = 0, finalHash = ''): AuditResult => ({ ok: false, steps, rollsVerified, finalHash, reason });
   if (!t || typeof t !== 'object') return fail('transcript is not an object');
   if (t.params_version !== loadParams().params_version) return fail(`params version mismatch: ${t.params_version}`);
   if (!validGenesis(t.genesis)) return fail('genesis is malformed or out of range (seatCount/bankReserve/network)');
   if (!Array.isArray(t.entries)) return fail('entries is not an array');
-  // KEY-LIFECYCLE GATE: if the game's signed key manifest(s) are supplied, the
-  // whole game audit FAILS unless every key is valid (manifest signed + no
-  // cross-game reuse). A game whose keys outlive their one game is not auditable.
+  // KEY-LIFECYCLE GATE — MANDATORY by default. A production audit REQUIRES the game's
+  // signed one-game key manifest(s): the audit FAILS unless every key is valid
+  // (manifest signed + no cross-game reuse). A game whose keys are unaccounted for, or
+  // that outlive their one game, is not auditable. Only reconstruction-only unit tests
+  // opt out with requireManifests:false.
+  const requireManifests = opts?.requireManifests ?? true;
+  if (requireManifests && (!opts?.manifests || opts.manifests.length === 0)) {
+    return fail('key lifecycle: a signed one-game key manifest is MANDATORY for a production audit (none supplied)');
+  }
   if (opts?.manifests) {
     const kl = auditKeyLifecycle(opts.manifests);
     if (!kl.ok) return fail(`key lifecycle: ${kl.reason}`);

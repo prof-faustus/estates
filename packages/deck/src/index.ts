@@ -1,8 +1,13 @@
 /**
- * @estates/deck — every property AND every card is an ENCRYPTED, TABLE-BOUND,
- * individually-keyed 1-sat NFT, CONCEALED via mental poker and issued per rules.
+ * @estates/deck — the CONCEALMENT layer for cards (mental poker). NOT the on-chain
+ * NFT itself: a `ConcealedCard` here is the table-bound, individually-keyed, sealed
+ * face + commitment — it has NO outpoint/satoshi/script and is NOT a UTXO by itself.
+ * The FULL 1-sat BSV NFT (the UTXO, and the Alice→Bob transfer that SPENDS Alice's
+ * outpoint so her card is on-chain dead) is `@estates/cardnft`, which wraps a
+ * `ConcealedCard` in its real on-chain UTXO. Use `@estates/cardnft` for the NFT;
+ * this module only conceals the identity.
  *
- * - Own wallet per card: each NFT has its OWN one-use secp256k1 key (no reused
+ * - Own one-use key per card: each card has its OWN one-use secp256k1 key (no reused
  *   static addresses). A card is held by whoever holds its key.
  * - Encrypted face: the card's identity (which deed / which Fate card) is sealed
  *   to the current holder with single-use ECIES (ephemeral secp256k1 ECDH →
