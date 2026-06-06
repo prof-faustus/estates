@@ -63,11 +63,51 @@ test('with a manifest, a STRANGER key cannot claim a seat; only the bound per-ga
   assert.equal(v.seats.find((s) => s.seat === 1)?.who, toHex(bob.signPub), 'Bob’s manifest key holds seat 1');
 });
 
-test('without a manifest, the legacy seat-claim binding still works (backward compatible)', () => {
+test('without a manifest, the legacy seat-claim binding still works (offline, zero game id)', () => {
   const relay = new InMemoryRelay();
-  const alice = new NetTable(relay, 'alice', () => {}, { identity: genIdentity() }); // no manifest
+  const alice = new NetTable(relay, 'alice', () => {}, { identity: genIdentity() }); // no manifest, no game id
   alice.connect();
   alice.createTable(2, 'regtest' as NetworkMode);
   alice.joinSeat();
-  assert.equal(alice.view().seats.length, 1, 'seat claimed without a manifest (legacy path)');
+  assert.equal(alice.view().seats.length, 1, 'seat claimed without a manifest (offline path)');
+});
+
+test('a REAL game (nonzero gameId) is MANDATORY-manifest: a log WITHOUT the manifest refuses to run', () => {
+  const relay = new InMemoryRelay();
+  const A = new NetTable(relay, 'A', () => {}, { identity: genIdentity(), gameId: GID });
+  const B = new NetTable(relay, 'B', () => {}, { identity: genIdentity(), gameId: GID });
+  A.connect(); B.connect();
+  A.createTable(2, 'regtest' as NetworkMode);
+  A.joinSeat(); B.joinSeat();
+  A.start();   // broadcasts the start AND the one-game key manifest
+  // WITH its manifest, a real game is live.
+  assert.equal(A.view().phase, 'playing', 'a real game that carries its manifest runs');
+
+  // strip the manifest frame from the SAME ordered log → a peer rebuilding it must
+  // refuse to run the game (the manifest is mandatory for a real gameId).
+  const stripped = relay.history().filter((f) => {
+    try { return (JSON.parse(new TextDecoder().decode(f)) as { kind?: string }).kind !== 'manifest'; } catch { return true; }
+  });
+  assert.equal(stripped.length, relay.history().length - 1, 'exactly one manifest frame was present and removed');
+  const relay2 = new InMemoryRelay();
+  for (const f of stripped) relay2.publish(f);
+  const C = new NetTable(relay2, 'C', () => {}, { identity: genIdentity(), gameId: GID });
+  C.connect();
+  assert.notEqual(C.view().phase, 'playing', 'WITHOUT the manifest, a real game is NOT live (mandatory, fail-closed)');
+});
+
+test('start() actually BROADCASTS exactly one valid manifest frame for a real game', () => {
+  const relay = new InMemoryRelay();
+  const A = new NetTable(relay, 'A', () => {}, { identity: genIdentity(), gameId: GID });
+  const B = new NetTable(relay, 'B', () => {}, { identity: genIdentity(), gameId: GID });
+  A.connect(); B.connect();
+  A.createTable(2, 'regtest' as NetworkMode);
+  A.joinSeat(); B.joinSeat();
+  A.start();
+  const manifests = relay.history().filter((f) => {
+    try { return (JSON.parse(new TextDecoder().decode(f)) as { kind?: string }).kind === 'manifest'; } catch { return false; }
+  });
+  assert.equal(manifests.length, 1, 'the host broadcast exactly one manifest at start');
+  const m = (JSON.parse(new TextDecoder().decode(manifests[0]!)) as { m: GameKeyManifest }).m;
+  assert.equal(m.gameId, GID, 'the broadcast manifest is bound to this game id');
 });
