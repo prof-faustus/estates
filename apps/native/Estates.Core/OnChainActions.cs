@@ -41,13 +41,26 @@ public static class OnChainActions
         return o.ToArray();
     }
 
-    /// <summary>A game/system action (move, deal, keep-alive, …) as a real signed tx carrying its
-    /// commitment bytes on-chain (1-sat carrier to ourselves, plus change). Funded by the wallet.</summary>
-    public static StandaloneWallet.BuiltTx Action(StandaloneWallet w, byte[] commitment, long feeSats)
+    /// <summary>Build a TYPED transaction (TxProtocol): a 1-sat marker output carrying the type's
+    /// self-identifying header ‖ payload, funded by the wallet. The header makes the protocol number
+    /// extractable as a layer; each TYPE is a distinct template via its own payload + smart contract.</summary>
+    public static StandaloneWallet.BuiltTx Typed(StandaloneWallet w, TxType type, byte[] payload, long feeSats)
     {
         byte[] selfPkh = Recovery.Hash160(w.ChildPub(0));
-        return w.BuildAndSign(new[] { new TxOutputN(1, CarrierScript(commitment, selfPkh)) }, feeSats, 0);
+        return w.BuildAndSign(new[] { new TxOutputN(1, CarrierScript(TxProtocol.Stamp(type, payload), selfPkh)) }, feeSats, 0);
     }
+
+    /// <summary>KEEPALIVE (#8) — a presence heartbeat, itself a real transaction.</summary>
+    public static StandaloneWallet.BuiltTx KeepAlive(StandaloneWallet w, long feeSats) => Typed(w, TxType.KeepAlive, Array.Empty<byte>(), feeSats);
+    /// <summary>MOVE (#9) — a game move.</summary>
+    public static StandaloneWallet.BuiltTx Move(StandaloneWallet w, byte[] commitment, long feeSats) => Typed(w, TxType.Move, commitment, feeSats);
+    /// <summary>COMMITMENT (#6) — a mental-poker shuffle / dice beacon commit.</summary>
+    public static StandaloneWallet.BuiltTx Commit(StandaloneWallet w, byte[] commitHash, long feeSats) => Typed(w, TxType.Commitment, commitHash, feeSats);
+    /// <summary>REVEAL (#7) — opening a prior commitment.</summary>
+    public static StandaloneWallet.BuiltTx Reveal(StandaloneWallet w, byte[] secret, long feeSats) => Typed(w, TxType.Reveal, secret, feeSats);
+
+    /// <summary>Read the protocol layer off a typed marker's carrier data: which type is this tx?</summary>
+    public static (TxType type, byte version, byte[] payload)? ReadType(byte[] carrierData) => TxProtocol.Read(carrierData);
 
     public sealed record CardMint(StandaloneWallet.BuiltTx Tx, byte[] NftData);
 
@@ -56,7 +69,8 @@ public static class OnChainActions
     public static CardMint MintCard(StandaloneWallet w, byte[] face, byte[] recipientPub, long feeSats)
     {
         byte[] data = SealFace(w.ChildPriv(0), recipientPub, face);
-        var tx = w.BuildAndSign(new[] { new TxOutputN(1, CarrierScript(data, Recovery.Hash160(recipientPub))) }, feeSats, 0);
+        byte[] marker = TxProtocol.Stamp(TxType.NftMint, data);
+        var tx = w.BuildAndSign(new[] { new TxOutputN(1, CarrierScript(marker, Recovery.Hash160(recipientPub))) }, feeSats, 0);
         return new CardMint(tx, data);
     }
 
@@ -66,7 +80,8 @@ public static class OnChainActions
     public static CardMint TransferCard(StandaloneWallet w, Coin nftCoin, byte[] face, byte[] newOwnerPub, long feeSats)
     {
         byte[] data = SealFace(w.ChildPriv(nftCoin.AddrIndex), newOwnerPub, face);
-        var tx = w.BuildWithForcedInput(nftCoin, new[] { new TxOutputN(1, CarrierScript(data, Recovery.Hash160(newOwnerPub))) }, feeSats, 0);
+        byte[] marker = TxProtocol.Stamp(TxType.NftTransfer, data);
+        var tx = w.BuildWithForcedInput(nftCoin, new[] { new TxOutputN(1, CarrierScript(marker, Recovery.Hash160(newOwnerPub))) }, feeSats, 0);
         return new CardMint(tx, data);
     }
 
@@ -84,7 +99,7 @@ public static class OnChainActions
     {
         byte[] senderPriv = w.ChildPriv(0); byte[] senderPub = Secp256k1.PublicKey(senderPriv);
         var ct = Cipher.EcdhSeal(senderPriv, recipientPub, System.Text.Encoding.UTF8.GetBytes(message), ChatAad);
-        byte[] data = Concat(Concat(senderPub, ct.Nonce), ct.Bytes);
+        byte[] data = TxProtocol.Stamp(TxType.Chat2P, Concat(Concat(senderPub, ct.Nonce), ct.Bytes));
         byte[] selfPkh = Recovery.Hash160(w.ChildPub(0));
         return w.BuildAndSign(new[] { new TxOutputN(1, CarrierScript(data, selfPkh)) }, feeSats, 0);
     }
@@ -92,8 +107,11 @@ public static class OnChainActions
     /// <summary>Read an encrypted on-chain chat message addressed to you (null if not yours).</summary>
     public static string? OpenChat(byte[] recipientPriv, byte[] chatData)
     {
-        if (chatData.Length < 33 + 12) return null;
-        byte[]? pt = Cipher.EcdhOpen(recipientPriv, chatData[..33], new Cipher.EcdhSealed(chatData[33..45], chatData[45..]), ChatAad);
+        var hdr = TxProtocol.Read(chatData);
+        if (hdr is null || hdr.Value.type != TxType.Chat2P) return null;
+        byte[] p = hdr.Value.payload;
+        if (p.Length < 45) return null;
+        byte[]? pt = Cipher.EcdhOpen(recipientPriv, p[..33], new Cipher.EcdhSealed(p[33..45], p[45..]), ChatAad);
         return pt is null ? null : System.Text.Encoding.UTF8.GetString(pt);
     }
 

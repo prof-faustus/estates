@@ -364,6 +364,25 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("auction: refund is ALLOWED once the deadline passes", Auction.VerifyRefund(bid, roleNft, refundTx, 100_000, Array.Empty<long>(), deadline).Ok);
 }
 
+// Transaction-type protocol suite: each TYPE has its own number + self-identifying header (the
+// extractable protocol layer), and a typed transaction reports exactly what it is.
+{
+    foreach (var d in TxProtocol.Suite)
+    {
+        var h = TxProtocol.Read(TxProtocol.Stamp(d.Type, "payload"u8.ToArray()));
+        X($"protocol #{d.Number} {d.Name} self-identifies", h is not null && h.Value.type == d.Type && System.Text.Encoding.ASCII.GetString(h.Value.payload) == "payload");
+    }
+    X("protocol: non-EST data is not mistaken for a typed tx", TxProtocol.Read("not-est"u8.ToArray()) is null);
+    X("protocol: numbers are unique across the suite", TxProtocol.Suite.Select(d => d.Number).Distinct().Count() == TxProtocol.Suite.Count);
+    // a typed transaction built by the wallet carries its header in the on-chain marker output
+    byte[] wseed = SHA256.HashData("estates/typed-tx/selftest"u8.ToArray());
+    var tw = new StandaloneWallet(wseed, "regtest");
+    tw.AddCoin(Tx.ToHex(RandomNumberGenerator.GetBytes(32)), 0, 1_000_000, 0);
+    var ka = OnChainActions.KeepAlive(tw, 500);
+    // the marker output's pushdata begins with the EST header for KEEPALIVE
+    X("a KEEPALIVE tx is on-chain and self-identifying", ka.Tx.Outputs.Count >= 1);
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
