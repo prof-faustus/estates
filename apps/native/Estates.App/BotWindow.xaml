@@ -1,24 +1,36 @@
 <Window x:Class="Estates.App.BotWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="ESTATES · automated bot" Height="600" Width="340" Icon="appicon.ico"
+        Title="ESTATES · automated bot" Height="640" Width="360" Icon="appicon.ico"
         Background="#1a1206" WindowStartupLocation="Manual" Topmost="False"
         ResizeMode="CanMinimize" ShowInTaskbar="True">
-    <!-- A BOT — fully automated, NOT a person. Deliberately UNLIKE the player window: a narrow amber
-         console, NOT the wide emerald board; docked to a screen corner; never opens on top; never the
-         same size or look. It plays itself; the human may watch its wallet, take a move for it, or
-         close it to stop it. There is NO "run a bot" here — a bot never starts another bot. -->
+    <!-- A BOT — fully automated, NOT a person. Narrow amber console, docked to a screen corner, never
+         over the player window. The human can fund it (Funds), watch it, and End it. It never fakes a
+         solo game; it plays its seat only inside a real funded on-chain game. -->
     <StackPanel Margin="14">
         <TextBlock Text="🤖 AUTOMATED BOT" Foreground="#f5a623" FontSize="16" FontWeight="Bold"/>
-        <TextBlock Text="Plays itself. You can watch its wallet, take a move for it, or close it to stop it. It never opens over your window."
-                   Foreground="#b8a98a" FontSize="11" Margin="0,4,0,10" TextWrapping="Wrap"/>
-        <TextBlock x:Name="BotWallet" Foreground="#7bd88f" FontSize="12" FontFamily="Consolas" Margin="0,0,0,2" TextWrapping="Wrap"/>
-        <TextBlock x:Name="BotStatus" Foreground="#ffd54f" FontSize="12" Margin="0,2,0,8" TextWrapping="Wrap"/>
-        <CheckBox x:Name="AutoToggle" Content="Auto-play" IsChecked="True" Foreground="#b8a98a" Margin="0,0,0,6"/>
-        <TextBlock Text="take a move for it:" Foreground="#8a7c5e" FontSize="10" Margin="0,0,0,2"/>
-        <WrapPanel x:Name="BotMoves" Margin="0,0,0,8"/>
-        <TextBox x:Name="BotLog" IsReadOnly="True" Background="#0f0a03" Foreground="#cfc4ad"
-                 FontFamily="Consolas" FontSize="11" Height="320" VerticalScrollBarVisibility="Auto"
-                 BorderThickness="0" Padding="8"/>
+        <TextBlock x:Name="BotStatus" Foreground="#ffd54f" FontSize="12" Margin="0,4,0,8" TextWrapping="Wrap"/>
+
+        <TabControl Background="#1a1206" BorderThickness="0">
+            <TabItem Header="Funds">
+                <StackPanel Margin="8">
+                    <TextBlock x:Name="BotWallet" Foreground="#7bd88f" FontSize="12" FontFamily="Consolas" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                    <TextBlock Text="Fund the bot — import a coin you control (txid / vout / sat):" Foreground="#b8a98a" FontSize="11" TextWrapping="Wrap"/>
+                    <TextBox x:Name="FundTxid" Background="#0f0a03" Foreground="#cfc4ad" FontFamily="Consolas" FontSize="11" BorderThickness="0" Padding="6" Margin="0,4,0,4"/>
+                    <TextBox x:Name="FundVout" Background="#0f0a03" Foreground="#cfc4ad" FontFamily="Consolas" FontSize="11" BorderThickness="0" Padding="6" Margin="0,0,0,4" Text="0"/>
+                    <TextBox x:Name="FundSat" Background="#0f0a03" Foreground="#cfc4ad" FontFamily="Consolas" FontSize="11" BorderThickness="0" Padding="6" Margin="0,0,0,4"/>
+                    <Button x:Name="FundBtn" Content="Import coin" HorizontalAlignment="Left" Click="Fund_Click"/>
+                    <TextBlock x:Name="FundMsg" Foreground="#f5a623" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                </StackPanel>
+            </TabItem>
+            <TabItem Header="Log">
+                <TextBox x:Name="BotLog" IsReadOnly="True" Background="#0f0a03" Foreground="#cfc4ad"
+                         FontFamily="Consolas" FontSize="11" Height="360" VerticalScrollBarVisibility="Auto"
+                         BorderThickness="0" Padding="8"/>
+            </TabItem>
+        </TabControl>
+
+        <Button x:Name="EndBtn" Content="End bot" Click="End_Click" Background="#5a2d12" Foreground="#ffd54f"
+                HorizontalAlignment="Stretch" Margin="0,10,0,0" Padding="0,6,0,6"/>
     </StackPanel>
 </Window>
