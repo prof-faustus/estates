@@ -146,8 +146,10 @@ public static class GameReplay
                 }
                 case "commit":
                 {
+                    // DICE COMMIT PHASE: accepted ONLY before any reveal for that roll seq.
                     int seat = f.GetProperty("seat").GetInt32(); long roll = f.GetProperty("roll").GetInt64();
-                    if (seatKeys.GetValueOrDefault(seat) == signPub)
+                    bool anyReveal = revealsBySeq.TryGetValue(roll, out var rvm) && rvm.Count > 0;
+                    if (seatKeys.GetValueOrDefault(seat) == signPub && !anyReveal)
                     {
                         if (!commitsBySeq.TryGetValue(roll, out var map)) { map = new(); commitsBySeq[roll] = map; }
                         if (!map.ContainsKey(seat)) map[seat] = Tx.FromHex(f.GetProperty("c").GetString()!);
@@ -156,8 +158,11 @@ public static class GameReplay
                 }
                 case "reveal":
                 {
+                    // DICE REVEAL PHASE: accepted ONLY once EVERY live seat has committed for the seq.
                     int seat = f.GetProperty("seat").GetInt32(); long roll = f.GetProperty("roll").GetInt64();
-                    if (seatKeys.GetValueOrDefault(seat) == signPub)
+                    var live = state != null ? state.Seats.Where(q => !q.Bankrupt).Select(q => q.Id).ToList() : new List<int>();
+                    commitsBySeq.TryGetValue(roll, out var cmap);
+                    if (seatKeys.GetValueOrDefault(seat) == signPub && live.Count > 0 && cmap != null && live.All(s => cmap.ContainsKey(s)))
                     {
                         if (!revealsBySeq.TryGetValue(roll, out var map)) { map = new(); revealsBySeq[roll] = map; }
                         if (!map.ContainsKey(seat)) map[seat] = Tx.FromHex(f.GetProperty("s").GetString()!);

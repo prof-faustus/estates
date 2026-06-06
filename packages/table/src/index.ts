@@ -631,18 +631,26 @@ export class NetTable {
           }
           break;
         case 'commit':
-          if (seatKeys.get(m.seat) === signPub) {                   // signed by that seat's key
+          // DICE COMMIT PHASE (same soundness as the deck): a dice commitment for roll
+          // `seq` is accepted ONLY before any reveal for that seq — so no seat can pick
+          // its dice entropy after seeing another seat's revealed secret.
+          if (seatKeys.get(m.seat) === signPub && !revealsBySeq.get(m.roll)?.size) {
             let map = commitsBySeq.get(m.roll); if (!map) { map = new Map(); commitsBySeq.set(m.roll, map); }
             if (!map.has(m.seat)) map.set(m.seat, fromHex(m.c));     // m.c validated 32-byte hex → fromHex cannot throw
           }
           break;
-        case 'reveal':
-          if (seatKeys.get(m.seat) === signPub) {
+        case 'reveal': {
+          // DICE REVEAL PHASE: a reveal for roll `seq` is accepted ONLY once EVERY live
+          // seat has committed for that seq, so all dice commitments are fixed first.
+          const live = state ? state.seats.filter((q) => !q.bankrupt).map((q) => q.id) : [];
+          const cmap = commitsBySeq.get(m.roll);
+          if (seatKeys.get(m.seat) === signPub && live.length > 0 && cmap && live.every((s) => cmap.has(s))) {
             let map = revealsBySeq.get(m.roll); if (!map) { map = new Map(); revealsBySeq.set(m.roll, map); }
             if (!map.has(m.seat)) map.set(m.seat, fromHex(m.s));
           }
           tryRoll();
           break;
+        }
         case 'action':
           if (started && state) {
             // RAW DICE ARE NEVER ACCEPTED IN LIVE PLAY: a ROLL is produced ONLY by the
