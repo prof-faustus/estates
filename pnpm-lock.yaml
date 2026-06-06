@@ -110,27 +110,33 @@ importers:
 
   packages/bot:
     dependencies:
-      '@estates/chat':
-        specifier: workspace:*
-        version: link:../chat
       '@estates/engine':
         specifier: workspace:*
         version: link:../engine
       '@estates/params':
         specifier: workspace:*
         version: link:../params
-      '@estates/table':
-        specifier: workspace:*
-        version: link:../table
       '@estates/trade':
         specifier: workspace:*
         version: link:../trade
       '@estates/turn':
         specifier: workspace:*
         version: link:../turn
-      '@estates/wallet':
+
+  packages/cardchain:
+    dependencies:
+      '@estates/cardnft':
         specifier: workspace:*
-        version: link:../wallet
+        version: link:../cardnft
+      '@estates/deck':
+        specifier: workspace:*
+        version: link:../deck
+      '@estates/params':
+        specifier: workspace:*
+        version: link:../params
+      '@noble/hashes':
+        specifier: 1.5.0
+        version: 1.5.0
 
   packages/cardnft:
     dependencies:
