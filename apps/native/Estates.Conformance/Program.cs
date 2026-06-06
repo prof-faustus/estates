@@ -383,6 +383,21 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("a KEEPALIVE tx is on-chain and self-identifying", ka.Tx.Outputs.Count >= 1);
 }
 
+// Group chat over the broadcast key-graph: every member reads it; a non-member never can.
+{
+    byte[] aPriv = SHA256.HashData("ga"u8.ToArray()), aPub = Secp256k1.PublicKey(aPriv);
+    byte[] bPriv = SHA256.HashData("gb"u8.ToArray()), bPub = Secp256k1.PublicKey(bPriv);
+    byte[] cPriv = SHA256.HashData("gc"u8.ToArray()), cPub = Secp256k1.PublicKey(cPriv);
+    byte[] ePriv = SHA256.HashData("ge"u8.ToArray()), ePub = Secp256k1.PublicKey(ePriv);
+    byte[] frame = ChatCodec.Seal(aPriv, new[] { bPub, cPub }, "group hello")!;
+    var rb = ChatCodec.Open(frame, bPriv, bPub);
+    var rc = ChatCodec.Open(frame, cPriv, cPub);
+    var re = ChatCodec.Open(frame, ePriv, ePub);
+    X("group chat: member B reads the message", rb is not null && rb.Value.text == "group hello");
+    X("group chat: member C reads the message", rc is not null && rc.Value.text == "group hello");
+    X("group chat: a non-member cannot read it", re is null);
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");

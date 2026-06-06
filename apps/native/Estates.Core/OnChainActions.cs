@@ -66,6 +66,23 @@ public static class OnChainActions
     /// <summary>DEAL (#12) — an on-chain card deal record.</summary>
     public static StandaloneWallet.BuiltTx Deal(StandaloneWallet w, byte[] dealData, long feeSats) => Typed(w, TxType.Deal, dealData, feeSats);
 
+    /// <summary>CHAT-GROUP (#3) — group chat under the broadcast key-graph (one message, a leaf key
+    /// delivered to each member by ECDH+AES), carried on-chain as a typed transaction.</summary>
+    public static StandaloneWallet.BuiltTx ChatGroup(StandaloneWallet w, IReadOnlyList<byte[]> recipientPubs, string message, long feeSats)
+    {
+        byte[] frame = ChatCodec.Seal(w.ChildPriv(0), recipientPubs, message) ?? throw new ArgumentException("group chat needs at least one recipient");
+        byte[] selfPkh = Recovery.Hash160(w.ChildPub(0));
+        return w.BuildAndSign(new[] { new TxOutputN(1, CarrierScript(TxProtocol.Stamp(TxType.ChatGroup, frame), selfPkh)) }, feeSats, 0);
+    }
+
+    /// <summary>Open a CHAT-GROUP message addressed to you (your wallet key). null if not a member.</summary>
+    public static (string from, string text)? OpenChatGroup(byte[] recipientPriv, byte[] recipientPub, byte[] carrierData)
+    {
+        var hdr = TxProtocol.Read(carrierData);
+        if (hdr is null || hdr.Value.type != TxType.ChatGroup) return null;
+        return ChatCodec.Open(hdr.Value.payload, recipientPriv, recipientPub);
+    }
+
     /// <summary>Read the protocol layer off a typed marker's carrier data: which type is this tx?</summary>
     public static (TxType type, byte version, byte[] payload)? ReadType(byte[] carrierData) => TxProtocol.Read(carrierData);
 
