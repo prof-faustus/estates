@@ -290,6 +290,45 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("insufficient funds is refused, not silently underpaid", refused);
 }
 
+// In-client BSV NODE: the real P2P wire protocol + header proof-of-work validation. KATs use the
+// REAL Bitcoin/BSV mainnet genesis header — deterministic proof the node code is correct, no stubs.
+{
+    // wire envelope: a verack frame's checksum is the first 4 bytes of double-SHA256("") = 5df6e0e2
+    byte[] verack = BsvWire.Frame(BsvNet.Mainnet, "verack", Array.Empty<byte>());
+    X("wire: verack checksum is double-SHA256(empty)[:4]", Tx.ToHex(verack[20..24]) == "5df6e0e2");
+    var (vmsg, vcons) = BsvWire.TryRead(BsvNet.Mainnet, verack);
+    X("wire: a framed message reads back (command + length)", vmsg is not null && vmsg.Command == "verack" && vcons == 24);
+    // version round-trips through frame/read
+    byte[] vpl = BsvWire.Version(1700000000, 0x1122334455667788UL, "/estates:1.0/", 42, new byte[] { 127, 0, 0, 1 }, 8333);
+    var (vr, _) = BsvWire.TryRead(BsvNet.Mainnet, BsvWire.Frame(BsvNet.Mainnet, "version", vpl));
+    X("wire: version frames and parses back intact", vr is not null && vr.Command == "version" && vr.Payload.AsSpan().SequenceEqual(vpl));
+    // wrong magic ⇒ resync signal (consumed < 0), never a throw
+    byte[] wrong = BsvWire.Frame(BsvNet.Testnet, "verack", Array.Empty<byte>());
+    X("wire: a foreign-magic frame is rejected for resync (no throw)", BsvWire.TryRead(BsvNet.Mainnet, wrong).consumed < 0);
+    // total parsers: garbage never throws and yields null
+    var rng2 = new Random(7);
+    bool everThrew = false;
+    for (int t = 0; t < 5000; t++) { var g = new byte[rng2.Next(0, 64)]; rng2.NextBytes(g); try { BsvWire.ParseInv(g); BsvWire.ParseHeaders(g); } catch { everThrew = true; break; } }
+    X("wire: inv/headers parsers are fuzz-proof (never throw on garbage)", !everThrew);
+    // inv vector round-trips
+    byte[] h32 = SHA256.HashData("tx"u8.ToArray());
+    var invBack = BsvWire.ParseInv(BsvWire.InvVector(new[] { ((uint)1, h32) }));
+    X("wire: inv vector round-trips", invBack is { Count: 1 } && invBack[0].type == 1 && invBack[0].hash.AsSpan().SequenceEqual(h32));
+
+    // ---- header proof-of-work, against the REAL mainnet genesis header (80 bytes) ----
+    byte[] genesis = Tx.FromHex("0100000000000000000000000000000000000000000000000000000000000000000000003ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa4b1e5e4a29ab5f49ffff001d1dac2b7c");
+    var gh = BsvHeaders.Parse(genesis)!;
+    X("headers: genesis block hash matches the known id", gh.Id() == "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f");
+    X("headers: genesis nBits is 0x1d00ffff", gh.Bits == 0x1d00ffff);
+    X("headers: genesis prevHash is all zero", gh.PrevHash.All(b => b == 0));
+    X("headers: genesis MEETS its proof of work", BsvHeaders.MeetsProofOfWork(gh));
+    X("headers: a genuine chain of [genesis] verifies from the zero parent", BsvHeaders.VerifyChain(new[] { gh }, new byte[32]));
+    // tamper the nonce ⇒ the hash is now (overwhelmingly) above target ⇒ PoW fails
+    byte[] bad = (byte[])genesis.Clone(); bad[79] ^= 0x01;
+    X("headers: a tampered header FAILS proof of work", !BsvHeaders.MeetsProofOfWork(BsvHeaders.Parse(bad)!));
+    X("headers: an 81-byte buffer is rejected (total parse)", BsvHeaders.Parse(new byte[81]) is null);
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
