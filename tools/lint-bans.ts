@@ -109,13 +109,14 @@ function scan(full: string): void {
   const ext = dot >= 0 ? full.slice(dot) : '';
   const isCode = CODE_EXT.has(ext);
   const isContent = CONTENT_EXT.has(ext);
-  if (!isCode && !isContent) return;
+  const isNative = ext === '.cs';   // C# (the native exe) — server-banned too
+  if (!isCode && !isContent && !isNative) return;
 
   const allLines = readFileSync(full, 'utf8').split(/\r?\n/);
 
-  // NO-SERVER gate: enforced in EVERY code file (including tests) — only this lint is
-  // exempt. A server of any kind anywhere is a fatal, build-failing violation.
-  if (isCode && !SERVER_BAN_EXEMPT.test(rel)) {
+  // NO-SERVER gate: enforced in EVERY code file (TS/JS AND C#, including tests) — only
+  // this lint is exempt. A server of any kind anywhere is a fatal, build-failing violation.
+  if ((isCode || isNative) && !SERVER_BAN_EXEMPT.test(rel)) {
     allLines.forEach((text, i) => {
       for (const b of SERVER_BANS) {
         if (b.re.test(text)) hits.push({ file: rel, line: i + 1, ban: `NO SERVER — ${b.name}`, text: text.trim() });
@@ -123,6 +124,7 @@ function scan(full: string): void {
     });
   }
 
+  if (isNative) return;             // C#: server-banned only (opcode/brand bans are TS/JS)
   if (allowed(rel)) return;
 
   const lines = allLines;

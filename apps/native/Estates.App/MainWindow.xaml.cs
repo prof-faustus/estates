@@ -2,7 +2,6 @@ using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
-using System.Windows.Threading;
 using Estates.Core;
 using GameAction = Estates.Core.Action;
 
@@ -88,88 +87,4 @@ public partial class MainWindow : Window
         catch (Exception ex) { ResultLine.Text = "error: " + ex.Message; }
     }
 
-    // ----- spectate a LIVE game over the relay (native multiplayer read path) -----
-    private DispatcherTimer? _poll;
-    private bool _spectating;
-    private bool _polling;
-
-    private void Spectate_Click(object sender, RoutedEventArgs e)
-    {
-        if (_spectating)
-        {
-            _poll?.Stop();
-            _spectating = false;
-            SpectateBtn.Content = "Spectate";
-            LiveLine.Text = "stopped";
-            return;
-        }
-        string channel = ChannelBox.Text.Trim();
-        if (channel.Length == 0) { LiveLine.Text = "enter the game channel first"; return; }
-        _spectating = true;
-        SpectateBtn.Content = "Stop";
-        LiveLine.Text = "polling…";
-        _poll = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-        _poll.Tick += async (_, _) => await PollOnce();
-        _poll.Start();
-        _ = PollOnce(); // immediate first read
-    }
-
-    private async Task PollOnce()
-    {
-        if (_polling) return;            // never overlap a slow request with the next tick
-        _polling = true;
-        try
-        {
-            string baseUrl = RelayBox.Text.Trim();
-            string channel = ChannelBox.Text.Trim();
-            List<byte[]> frames;
-            try { frames = await new RelayClient(baseUrl).HistoryAsync(channel); }
-            catch (Exception ex) { LiveLine.Text = "relay unreachable: " + ex.Message; return; }
-
-            if (frames.Count == 0) { LiveLine.Text = $"no frames yet on '{channel}'"; return; }
-
-            var logHex = frames.Select(f => Tx.ToHex(f)).ToList();
-            // replay the ordered, per-frame-authenticated log into the canonical state.
-            // gameId = gameIdFromChannel(channel) so the dealerless deck order is rebuilt.
-            string gameId = GameReplay.GameIdFromChannel(channel);
-            GameState? s;
-            try { s = GameReplay.ReplayState(logHex, gameId); }
-            catch (Exception ex) { LiveLine.Text = $"{frames.Count} frames · replay error: " + ex.Message; return; }
-
-            if (s == null) { LiveLine.Text = $"{frames.Count} frames · game not started yet"; return; }
-            RenderLive(s, frames.Count);
-        }
-        finally { _polling = false; }
-    }
-
-    private void RenderLive(GameState s, int frameCount)
-    {
-        var p = Params.Instance;
-        string SpaceName(int pos) => pos >= 0 && pos < p.Board.Count ? p.Board[pos].Name : $"#{pos}";
-
-        long total = s.Seats.Sum(x => x.Balance) + s.BankReserve;
-        LiveLine.Text = $"{frameCount} frames · phase {s.Phase} · turn {s.TurnIndex} · " +
-                        $"current seat {s.Current} · winner {(s.Winner?.ToString() ?? "—")} · " +
-                        $"sats conserved {total:N0} · state {Canonical.HashState(s)[..12]}…";
-
-        var sb = new StringBuilder();
-        sb.AppendLine($"LIVE  channel replay — {frameCount} authenticated frames");
-        sb.AppendLine($"phase={s.Phase}  turn={s.TurnIndex}  current={s.Current}  winner={(s.Winner?.ToString() ?? "—")}");
-        sb.AppendLine(new string('-', 52));
-        foreach (var seat in s.Seats.OrderBy(x => x.Id))
-        {
-            string mark = seat.Id == s.Current && s.Winner == null ? "▶" : " ";
-            string dead = seat.Bankrupt ? "  BANKRUPT" : "";
-            string loc = seat.InHolding ? $"Holding ({seat.HoldingTurns})" : SpaceName(seat.Position);
-            sb.AppendLine($"{mark} seat {seat.Id}   {seat.Balance,12:N0} sat   @ {loc}{dead}");
-        }
-        sb.AppendLine(new string('-', 52));
-        sb.AppendLine($"bank reserve {s.BankReserve:N0} sat   ·   total conserved {total:N0} sat");
-        sb.AppendLine();
-        int shown = Math.Min(s.Log.Count, 24);
-        for (int i = s.Log.Count - shown; i < s.Log.Count; i++) sb.AppendLine(s.Log[i]);
-        LogBox.Text = sb.ToString();
-        LogBox.ScrollToEnd();
-        ResultLine.Text = $"spectating LIVE — {frameCount} frames replayed to state {Canonical.HashState(s)[..12]}…";
-    }
 }

@@ -317,54 +317,7 @@ if (File.Exists(bcPath))
     if (bfail == 0) Console.WriteLine("PASS: native dice beacon (dice + chained beacon + reveal checks) matches the TS reference.");
 }
 
-// ---- RELAY live round-trip (optional): if the relay is running, the native
-// client publishes a frame + reads it back from the ordered log. Skipped (not a
-// failure) when the relay is down, so the offline conformance run never depends on it.
-int rfail = 0;
-var relay = new RelayClient();
-if (await relay.ReachableAsync())
-{
-    string ch = "native-relay-test-" + Guid.NewGuid().ToString("N")[..8];
-    byte[] frame = System.Text.Encoding.UTF8.GetBytes("{\"native\":\"hello\",\"n\":42}");
-    await relay.PublishAsync(ch, frame);
-    var hist = await relay.HistoryAsync(ch);
-    bool ok = hist.Any(f => Tx.ToHex(f) == Tx.ToHex(frame));
-    Console.WriteLine($"Estates.Conformance (relay): live round-trip {(ok ? "PASS — native client published + read back its frame" : "FAIL")}");
-    if (!ok) rfail = 1;
-}
-else Console.WriteLine("Estates.Conformance (relay): skipped (relay not running on 127.0.0.1:8788)");
+// (No relay/spectate layers: ESTATES has NO server. The native client is a true P2P
+// peer over @estates/link; there is no HTTP relay to publish to or read history from.)
 
-// ---- LIVE SPECTATE end-to-end: if tools/live-spectate.ts has published a REAL
-// game to a live HTTP relay (manifest on disk), the native client reads that
-// channel back over HTTP and replays it with GameReplay — and must reach the SAME
-// canonical state hash the web NetTable produced. This is the native spectate path
-// exercised over the real wire, not just a static vector. Skipped when absent.
-int lfail = 0;
-// the harness writes the manifest to the project dir at RUNTIME (after build), so
-// the runner points ESTATES_LIVE_SPECTATE at it; fall back to the output dir.
-string livePath = Environment.GetEnvironmentVariable("ESTATES_LIVE_SPECTATE")
-    ?? Path.Combine(AppContext.BaseDirectory, "live-spectate.json");
-if (File.Exists(livePath))
-{
-    using var ldoc = JsonDocument.Parse(File.ReadAllText(livePath));
-    var lm = ldoc.RootElement;
-    string lurl = lm.GetProperty("relayUrl").GetString()!;
-    string lch = lm.GetProperty("channel").GetString()!;
-    string lwant = lm.GetProperty("stateHash").GetString()!;
-    int lframes = lm.GetProperty("frames").GetInt32();
-    var lclient = new RelayClient(lurl);
-    if (await lclient.ReachableAsync())
-    {
-        var lhist = await lclient.HistoryAsync(lch);
-        var lhex = lhist.Select(f => Tx.ToHex(f)).ToList();
-        string? lgid = lm.TryGetProperty("gameId", out var lg) ? lg.GetString() : null;
-        string? lgot = GameReplay.ReplayStateHash(lhex, lgid);
-        bool lok = lhist.Count == lframes && lgot == lwant;
-        Console.WriteLine($"Estates.Conformance (spectate): {(lok ? $"PASS — native read {lhist.Count} frames live over HTTP from '{lch}' and replayed to the SAME hash as the web ({lwant[..16]}…)" : $"FAIL — frames {lhist.Count}/{lframes}, want {lwant[..16]}… got {lgot?[..16] ?? "null"}…")}");
-        if (!lok) lfail = 1;
-    }
-    else Console.WriteLine($"Estates.Conformance (spectate): skipped (live relay {lurl} not reachable)");
-}
-else Console.WriteLine("Estates.Conformance (spectate): skipped (no live-spectate.json; run tools/live-spectate.ts alongside)");
-
-return (fail == 0 && kfail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && gfail == 0 && mfail == 0 && bfail == 0 && ffail == 0 && repfail == 0 && drfail == 0 && rfail == 0 && lfail == 0) ? 0 : 1;
+return (fail == 0 && kfail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && gfail == 0 && mfail == 0 && bfail == 0 && ffail == 0 && repfail == 0 && drfail == 0) ? 0 : 1;
