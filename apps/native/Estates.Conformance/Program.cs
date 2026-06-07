@@ -527,6 +527,21 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("block-parse: rejects a too-short block", Block.Parse(new byte[40]) is null);
 }
 
+// KEY RING (built from scratch): one seed -> trillions of unique never-reused keys; a fixed identity
+// key; fresh receive keys that never repeat; per-message ECDH-chained keys that differ every message.
+{
+    var seed = new byte[32]; seed[0] = 5;
+    var ring = new KeyRing(seed);
+    X("keyring: identity key is fixed/stable across instances", Tx.ToHex(ring.IdentityPub()) == Tx.ToHex(new KeyRing(seed).IdentityPub()));
+    var k1 = ring.NextReceive(); var k2 = ring.NextReceive();
+    X("keyring: every receive key is fresh (never reused)", Tx.ToHex(k1.pub) != Tx.ToHex(k2.pub) && k1.index != k2.index);
+    X("keyring: identity differs from wallet keys", Tx.ToHex(ring.IdentityPub()) != Tx.ToHex(k1.pub));
+    X("keyring: PrivAt is deterministic from the seed", Tx.ToHex(ring.PubAt(7)) == Tx.ToHex(new KeyRing(seed).PubAt(7)));
+    X("keyring: trillion-scale index derives a distinct 32-byte key", ring.PrivAt(1_000_000_000_000L).Length == 32 && Tx.ToHex(ring.PubAt(1_000_000_000_000L)) != Tx.ToHex(ring.PubAt(1)));
+    var cp = Secp256k1.PublicKey(new byte[32] { 2, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 });
+    X("keyring: per-message keys advance (new key each message)", Tx.ToHex(ring.MessagePub(cp, "conv", 0)) != Tx.ToHex(ring.MessagePub(cp, "conv", 1)));
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
