@@ -1,6 +1,6 @@
 // Estates.Core/Canonical.cs — the byte-exact state-hash oracle.
 //
-// Reproduces @estates/conformance hashState EXACTLY:
+// Canonical state hash:
 //   hashState(s) = sha256_hex( stable( canonicalState(s) ) )
 // where canonicalState drops the advisory `log`, and stable() is key-sorted
 // (lexicographic / ordinal) JSON with JSON.stringify value semantics. Any

@@ -1,6 +1,6 @@
 {
   "params_version": "estates.v1",
-  "generated_by": "@estates/conformance generate (executes @estates/engine)",
+  "generated_by": "Estates.Conformance vector generator (native engine)",
   "vectors": [
     {
       "id": "v01-buy",

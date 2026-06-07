@@ -1,5 +1,5 @@
-// Estates.Core/Tx.cs — native BSV transaction serialization + txid, byte-for-byte
-// with @estates/tx. Canonical layout: version(4 LE) ‖ varint(nIn) ‖ inputs ‖
+// Estates.Core/Tx.cs — native BSV transaction serialization + txid.
+// Canonical layout: version(4 LE) ‖ varint(nIn) ‖ inputs ‖
 // varint(nOut) ‖ outputs ‖ lockTime(4 LE). input = reverse(prevTxid)(32) ‖
 // vout(4 LE) ‖ varint(scriptLen) ‖ script ‖ sequence(4 LE). output = value(8 LE) ‖
 // varint(scriptLen) ‖ script. txid = reverse(sha256(sha256(serialized))). This is

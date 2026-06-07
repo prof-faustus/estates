@@ -1,8 +1,8 @@
 // Estates.Core/ChatCodec.cs — the ESTATES chat wire frame, combining BOTH primitives
 // exactly as specified: the message is broadcast-encrypted ONCE under the GB 2623780 B
 // key-graph root (Broadcast), and each member's leaf key is delivered by 2-person ECDH
-// (Cipher.EcdhSeal — the sender's OWN key ↔ that member's wallet pubkey; NO ECIES, no
-// ephemeral key). A non-member has no leaf key and cannot reach the message key; ciphertext
+// (Cipher.EcdhSeal — the sender's OWN key ↔ that member's wallet pubkey; no ephemeral
+// key). A non-member has no leaf key and cannot reach the message key; ciphertext
 // only on the wire. Total: hostile bytes → null.
 using System.Text;
 using System.Text.Json;

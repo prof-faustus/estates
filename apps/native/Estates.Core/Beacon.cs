@@ -1,5 +1,5 @@
-// Estates.Core/Beacon.cs — native dealerless dice beacon, byte-for-byte with
-// @estates/beacon. commit = SHA256(secret); seed = SHA256(reveals-in-seat-order ‖
+// Estates.Core/Beacon.cs — native dealerless dice beacon.
+// commit = SHA256(secret); seed = SHA256(reveals-in-seat-order ‖
 // turnIndex(BE) ‖ prevBeacon); each die = first byte < 252 of HMAC-SHA256(seed,
 // label(BE) ‖ counter(BE)) mapped (b%6)+1 (rejection sampling). verifyRollEntry
 // re-checks the commitment-verified reveal set and the claimed dice. This is the

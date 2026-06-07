@@ -1,74 +1,54 @@
-# ESTATES — security audit remediation
+# ESTATES — security posture
 
-A 10-finding security audit was raised against the repository. **All 10 are
-remediated with tests; Bitmessage-style encrypted chat is included.** CI is green
-(264 tests + web build). The critical fixes (#1, #2) live on the new authenticated
-**IP-to-IP, on-chain** architecture (`@estates/sidecar` over `@estates/link` +
-`@estates/channel` + `@estates/beacon`) which replaces the old unauthenticated
-HTTP-relay path the audit examined; the legacy packages were also hardened in place.
+ESTATES is a native Windows application (`estates.exe`, C# / .NET, WPF). There is no
+web client, no webview, no server, no relay, and no developer/command-line product
+path. The client is a peer in a true peer-to-peer system.
 
-| # | Finding | Fix | Test (proof) |
-|---|---------|-----|--------------|
-| 1 | Actions unauthenticated / forgeable | The seat is the PLAYER's own non-custodial key (`identityFrom(playerPriv)`, e.g. `@estates/keys genMaster`) — the SAME key authenticates the handshake, SIGNS every move over `(table, turn, actor, action)`, and addresses chat. A peer may only move its own seat; a move is applied only if its signature verifies against the active seat's registered player key. | `packages/sidecar/test` — "a badly-SIGNED move is rejected" + "moves are signed by the PLAYER key" (real sockets) |
-| 2 | Live dice bypass the beacon (mover-chosen) | A ROLL's dice come from a 2-party commit→reveal `@estates/beacon` round (debiased, `prev_beacon`-chained). The signed ROLL carries the commit/reveal transcript; the verifier REJECTS any ROLL whose dice are not the beacon of secrets that open the prior commitments. `policy()` emits no dice. | `packages/sidecar/test` — "a signed ROLL with MOVER-CHOSEN dice is REJECTED" |
-| 3 | Audit doesn't verify commitments | Roll entries carry the commitment set; `audit()` enforces one commitment per live seat, no duplicate commit/reveal seat, no reveal from a non-live/non-seat, each reveal opens its commitment, ≥1 honest reveal, and dice derived only from the verified set. | `packages/audit/test` — non-seat reveal / reveal-without-commitment / duplicate / swapped reveal all rejected |
-| 4 | Relay total-order broken after loss | `subscribeOrdered` no longer accumulates two sources; the server `/history` append order is the single authority, SSE only pokes a re-poll. | `packages/table/test` (determinism) + `packages/chat/test` |
-| 5 | Relay DoS / unbounded | Max body size (413), per-channel log cap (503), max-channels (503). | `packages/chat/test` — oversized body / full channel / channel cap |
-| 6 | NFT state not validated | `validateTitleState` rejects impossible state (kind, propertyId 0..39, groupId, buildLevel 0..5, canonical mortgaged byte, REPRIEVE=(0,0,0), uint32 vout); no `&0xff` masking. | `packages/onchain/test` — encode/decode rejection + accept-all-legal |
-| 7 | Trade not real-value | `verifyTradeValue(tx, prevAmounts, fee)` conserves against the REAL satoshis of the spent UTXOs + fee (not claimed amounts). Full script-satisfaction is the production step; the move ledger uses canonical `@estates/tx` serialization. | `packages/trade/test` — conserving verifies; bad fee/length/negative rejected |
-| 8 | Covenant unbound | `verifyCovenantSpend` binds to the spent outpoint + prev covenant script + rules hash, then the payout predicate. | `packages/bank/test` — wrong outpoint / wrong prev script / wrong recipient rejected |
-| 9 | Unsafe hex parsing | Strict codec `^[0-9a-fA-F]*$` + even length in every `fromHex` (audit/net/trade/relay/node/tx/onchain/sidecar). | covered across the suites |
-| 10 | CI doesn't build web client | `tools/ci.ts` builds `@estates/client-web` as a CI step. | `pnpm ci` / `node tools/ci.ts` |
-| — | Bitmessage-style encrypted chat | Multi-recipient ECIES (`@estates/chat`) over the link; ripemd160(sha256(pub)) addresses; ciphertext only on the wire. | `packages/sidecar/test` — chat decrypts with the right address |
+This document states what is **implemented and verified**, and — explicitly — what is
+**not yet done or not yet proven**. No claim of "complete", "production ready", or
+"CI green" is made beyond the exact evidence below.
 
-## Run it
+## Cryptography (in-tree, no third-party library)
+
+All cryptography is implemented in-tree over the Microsoft .NET base class library only
+(`System.Numerics`, `System.Security.Cryptography`). No external crypto library is used.
+
+- **Curve:** secp256k1 only (the BSV curve). No other signature curve appears anywhere
+  in the codebase.
+- **Signatures:** ECDSA on secp256k1, low-S, with a fresh CSPRNG-drawn random nonce per
+  signature (rejection-sampled in `[1, n-1]`).
+- **Encryption:** ECDH-derived shared secret used directly as an AES-256-GCM key. No
+  ephemeral-key / KDF hybrid scheme is used.
+- **Key derivation:** BSV-native Type-42 / hash-chained derivation from one 32-byte seed.
+  No hierarchical-wallet standard and no mnemonic scheme.
+- **Sighash:** the BSV FORKID sighash (`SIGHASH_ALL | FORKID`).
+
+## What is verified
+
+The `Estates.Conformance` project runs positive and hostile-negative assertions over the
+crypto core, the typed-transaction protocol suite, the messenger model, the node-backed
+wallet balance logic, and the in-process miner supervisor. Run it with:
 
 ```
-pnpm --filter @estates/sidecar run demo   # two peers, real sockets, authenticated, beacon dice, encrypted chat, on-chain
-node --experimental-strip-types tools/ci.ts   # bans → typecheck → 264 tests → web build
+dotnet run --project apps/native/Estates.Conformance -c Release
 ```
 
-## Remaining production hardening (honest)
+It prints the pass/fail count. Treat that printed count as the only verification
+evidence — do not infer anything beyond it.
 
-- The **desktop UI** drives the legacy `@estates/table` path, now fully authenticated and bound to the player's own wallet master key (`identityFrom(wallet.key)` → signed moves/announces, beacon dice). Migrating the shell to additionally drive the secure IP-to-IP `@estates/sidecar` peer (real sockets, no relay) is the next integration step (that protocol is done and tested).
-- #7's full Bitcoin **script-satisfaction** verification (locking-script execution) is the remaining production step for real-value trades; value conservation against real UTXOs + fee is enforced now.
+## What is NOT done / not yet proven (honest)
 
-## Second audit (live-protocol) — all 10 closed + extras
+- The wallet shown in the running exe is being migrated to a real node-backed wallet
+  (`NodeWallet`) that reads balances (immature / unconfirmed / spendable) from the chain
+  the client connects to. Until that wiring lands, the wallet does not reflect live chain
+  state. This is tracked, not finished.
+- Full Bitcoin **script-satisfaction** (locking-script execution) for every spend path is
+  not yet implemented end-to-end.
+- The in-process miner supervisor performs real proof-of-work and self-heals workers, but
+  is not yet wired to pull real block templates and submit found blocks.
+- No third-party security audit has been completed against this native codebase.
 
-A follow-up audit re-examined the live multiplayer boundary. All items are now fixed:
+## Reporting
 
-| # | Finding | Fix |
-|---|---|---|
-| 1 | `@estates/table` messages unsigned | Every table/seat/start/action/commit/reveal message signed with the player's Ed25519 key; rebuild verifies + binds host/seat/active-seat; forged dropped |
-| 2 | Seat ownership spoofable | A seat is claimed only by the key that SIGNED it (who==signer), one key one seat; `start` binds the final seat map |
-| 3 | Legacy table raw dice | `submit(ROLL)` is a no-op; a dealerless commit→reveal beacon over the relay resolves every roll (signed, roll-seq keyed for doubles, shared `verifyRollEntry`) |
-| 4 | `@estates/net` laxer than audit | Both use the SAME `@estates/beacon.verifyRollEntry` (commitments + participant set) |
-| 5 | Relay open to poisoning | Capability token (401), content-type (415), loopback Host (421), on top of message signatures |
-| 6 | Lobby announcements unauth | Signed by the host key; host := the signing pub; forged dropped |
-| 7 | Trade not a full BSV verifier | `verifyTradeValue` conserves vs real prev UTXO sats + fee (full script-satisfaction = production) |
-| 8 | Bank quorum-trust only | `BankMode = quorum | covenant` — `reserveOutput`/`verifyReserveSpend` give an explicit CHOICE of M-of-N or trustless script-covenant |
-| 9 | NFT group not semantic | `chainmap.validateTitleSemantics` ties groupId to the property's group; no buildings on stations/utilities |
-| 10 | Loose toolchain pins | Exact `@types/node`/`typescript`, pnpm engine pin, `ci`/`reproduce` use `--frozen-lockfile` |
-
-**Identity model (your requirement):** every player has ONE master key (the secp256k1
-wallet key that derives single-use address/payment keys); the Ed25519 protocol-signing
-key is DERIVED from that same master (`channel.signingKeyFromMaster`), bound through the
-IP-to-IP handshake. The same master signs moves and addresses Bitmessage chat — no
-throwaway keys. CI green: 270 tests + web build.
-
-## Third audit (production real-value retest) — all 5 remaining items closed
-
-A retest accepted the deck/card layer (unbiased shuffle, live deck-order gate,
-card-key no-reuse verifier, ECDH key primitive, sidecar seat-output keying, shared
-beacon verifier) and flagged five remaining items. All are now fixed + tested:
-
-| # | Finding | Fix |
-|---|---|---|
-| 1 | Bank/reserve/NFT outputs used raw reusable pkhs | `chainmap.MapContext` gains `bankMode` (**covenant default**, quorum opt-in); `bankValueOutput` locks every reserve receipt under the covenant; `titleToNftOutput` custodies OWNED titles with a fresh ECDH key (`PkhProvider`) and BANK-held titles under the covenant. `txForAction` provider is `(role, purpose)` → no intra-tx key reuse. |
-| 2 | Genesis accepted raw scripts, no derivation proof | `@estates/ledger/manifest`: a per-output key manifest (stable identity, derived spend pub, pkh, purpose, game id, output index, derivation context, **certification signature**). `verifyGenesisManifest` rejects any output without fresh ECDH-derived/covenant custody, a valid cert sig, or that reuses a key. |
-| 3 | Published pkhs not covered by the move signature | `movePayload` now signs the move **+ output-key manifest + beacon transcript**; the receiver reconstructs from the received pkhs/beacon and rejects any mismatch. |
-| 4 | No full BSV script satisfaction | `@estates/scriptvm`: a Script interpreter with real BIP-143 sighash + ECDSA `OP_CHECKSIG` (DER), covering P2PKH/NFT/covenant; `verifyTx` checks every input is satisfied, no banned opcode, non-negative fee. |
-| 5 | Reveal-withholding could halt play | A reveal **deadline** surfaces a `onStall(seat)` to the HUMAN (wait, or FORFEIT the stalling seat) — never a 2-party auto-roll (which would hand the mover the dice). |
-
-**Bank reserve default = covenant** (trustless, self-enforcing script); **quorum**
-(M-of-N banker signatures) is opt-in via `bankMode: 'quorum'`. CI green: 294 tests + web build.
+This is open reference cryptographic infrastructure intended for hostile review. Security
+issues and design questions should be raised as repository issues.

@@ -3,8 +3,8 @@
 // pubkey, …; new keys can be added any time) and is owned by the player's key. It LINKS the player's
 // games + history: each new identity card spends the previous one (a re-seal chain), so a verifiable
 // provenance line ties every game/chat the identity took part in back to one root card. Chat shows
-// players by their identity card. Encryption (when the card is private) is ECDH-with-an-AES-key — no
-// ECIES. The attribute list is length-prefixed and parsed totally (no malformed input can throw).
+// players by their identity card. Encryption (when the card is private) is ECDH-with-an-AES-key, not
+// an ephemeral-key scheme. The attribute list is length-prefixed and parsed totally (never throws).
 using System.Text;
 
 namespace Estates.Core;

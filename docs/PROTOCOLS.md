@@ -25,7 +25,7 @@ still spendable, **no OP_RETURN**.
 | # | Type | Template / purpose |
 |---|------|--------------------|
 | 1 | PAYMENT | Plain value transfer (P2PKH) — the base template. |
-| 2 | CHAT-2P | Two-person encrypted chat. Payload: senderPub‖nonce‖ciphertext, AES-256 key = secp256k1 ECDH x-coord (no ECIES, no ephemeral). |
+| 2 | CHAT-2P | Two-person encrypted chat. Payload: senderPub‖nonce‖ciphertext, AES-256 key = secp256k1 ECDH x-coord (no ephemeral key). |
 | 3 | CHAT-GROUP | Group chat under the broadcast key-graph (GB 2623780 B); content key wrapped to each member. |
 | 4 | NFT-MINT | Mint a true encrypted NFT (card/deed) to an owner: 1-sat output, face ECDH+AES-sealed to the owner. |
 | 5 | NFT-TRANSFER | Spend the old NFT outpoint and re-seal the face to the new owner (digital scarcity: old copy dead). |
@@ -50,6 +50,6 @@ intermediary and no half-completed exchange.
 
 ## Encryption
 
-The only asymmetric encryption is **ECDH with an AES key** (no ECIES): the two parties' own
+The only asymmetric encryption is **ECDH with an AES key** (no ephemeral-key scheme): the two parties' own
 secp256k1 keys do ECDH; the shared-secret x-coordinate is the AES-256 key; AES-256-GCM encrypts.
 Group secrecy uses the broadcast key-graph (content key wrapped per member).

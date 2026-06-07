@@ -1,5 +1,5 @@
-// Estates.Core/CardNftN.cs — native card-NFT output + transfer, byte-for-byte with
-// @estates/cardnft. A card is a 1-sat UTXO whose script is
+// Estates.Core/CardNftN.cs — native card-NFT output + transfer.
+// A card is a 1-sat UTXO whose script is
 //   <ESTATES_CARD_NFT_V1 ‖ tableId(32) ‖ commitment(32) ‖ cardPub(33)> OP_DROP P2PKH(owner)
 // and a transfer is a tx that SPENDS Alice's outpoint and CREATES Bob's successor
 // 1-sat output — so the native exe builds the identical "Alice's card is deleted"

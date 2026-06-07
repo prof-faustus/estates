@@ -1,4 +1,4 @@
-// Estates.Core/Engine.cs — a FAITHFUL native port of @estates/engine.
+// Estates.Core/Engine.cs — the native turn-FSM game engine.
 //
 // `Engine.Apply(state, action)` -> new state | typed rejection. Pure: no I/O, no
 // clock, no own randomness (dice arrive on ROLL; deck order is injected at init).

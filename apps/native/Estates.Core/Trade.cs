@@ -3,7 +3,7 @@
 // single tx spends both NFTs (input 0 = A's, input 1 = B's) and produces both re-sealed to the new
 // owner (output 0 = A's NFT to B, output 1 = B's NFT to A). Each party signs ONLY their own input,
 // so the swap is valid only when both have signed — atomicity by construction. Re-sealing uses
-// ECDH-with-an-AES-key (no ECIES): the prior owner's copy is dead, only the new owner can decrypt.
+// ECDH-with-an-AES-key: the prior owner's copy is dead, only the new owner can decrypt.
 namespace Estates.Core;
 
 public static class Trade

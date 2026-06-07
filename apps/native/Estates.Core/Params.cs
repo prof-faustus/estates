@@ -1,9 +1,8 @@
 // Estates.Core/Params.cs — the single source of truth for board + rules data.
 //
-// Loads the EXACT params/estates.v1.json (embedded as a resource — the same file
-// the audited TS reference loads), so the rules DATA cannot diverge. Only the
-// derived rent/cost FORMULAS are ported here, and they mirror @estates/params
-// line-for-line. JS `Math.round` rounds half UP (toward +Inf); C# Math.Round is
+// Loads the EXACT params/estates.v1.json (embedded as a resource), so the rules DATA
+// cannot diverge from the single source of truth. The derived rent/cost FORMULAS are
+// implemented here. Note: half-up rounding (toward +Inf); C# Math.Round is
 // banker's rounding by default, so every rounding uses JsRound = floor(x + 0.5).
 using System.Reflection;
 using System.Text.Json;

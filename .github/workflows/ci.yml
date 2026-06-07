@@ -1,8 +1,7 @@
 name: CI
 
-# Runs the full ESTATES gate on every push + PR, so the repository carries a
-# visible, verifiable status check: static bans → typecheck → all Node tests →
-# web-client build. Mirrors `pnpm ci` (tools/ci.ts).
+# Builds the native ESTATES app and runs the conformance suite on every push + PR, so the
+# repository carries a visible, verifiable status check tied to the exact commit.
 on:
   push:
     branches: [main]
@@ -10,24 +9,18 @@ on:
   workflow_dispatch:
 
 jobs:
-  ci:
-    runs-on: ubuntu-latest
+  build-and-verify:
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
         with:
-          version: 9.0.0
+          dotnet-version: '8.0.x'
 
-      - name: Use Node.js 24
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
+      - name: Build (Release)
+        run: dotnet build apps/native/Estates.App/Estates.App.csproj -c Release
 
-      - name: Install (frozen lockfile)
-        run: pnpm install --frozen-lockfile
-
-      - name: Gate (bans → typecheck → tests → web build)
-        run: node --experimental-strip-types tools/ci.ts
+      - name: Conformance (positive + hostile-negative assertions)
+        run: dotnet run --project apps/native/Estates.Conformance/Estates.Conformance.csproj -c Release

@@ -249,7 +249,7 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("refund rejects a tampered output (sig no longer covers it)", !Recovery.VerifyRefund(tamperedRefund, ms, stake, funderPub, sigF, counterPub, sigC));
 }
 
-// ECDH + AES (the ONLY asymmetric encryption — NO ECIES): Alice seals to Bob with HER key; Bob
+// ECDH + AES (the ONLY asymmetric encryption): Alice seals to Bob with HER key; Bob
 // opens with HIS key + Alice's pub. The ECDH x-coord is the AES key. Wrong key / tamper ⇒ nothing.
 {
     byte[] aPriv = RandomNumberGenerator.GetBytes(32), aPub = Secp256k1.PublicKey(aPriv);

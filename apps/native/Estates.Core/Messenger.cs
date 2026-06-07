@@ -3,7 +3,7 @@
 // modern messenger has — text, reply, reaction, edit, delete, read-receipt, typing, media. Each
 // message is serialized here and carried on-chain ENCRYPTED as a typed transaction (CHAT-2P #2 for
 // 1:1, CHAT-GROUP #3 for groups — see OnChainActions). This module is the model + apply-logic; the
-// UI binds to it. Encryption is ECDH-with-an-AES-key / the broadcast key-graph — never ECIES.
+// UI binds to it. Encryption is ECDH-with-an-AES-key / the broadcast key-graph.
 using System.Text;
 
 namespace Estates.Core;

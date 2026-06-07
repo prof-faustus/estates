@@ -1,7 +1,7 @@
 // Estates.Core/Cipher.cs — AEAD + ECDH-key encryption + authenticated key-wrap, LIBRARY-FREE:
 // secp256k1 is the in-tree Secp256k1; AES-256-GCM + SHA-256 are Microsoft .NET. NO third-party
-// library. ENCRYPTION IS ECDH ONLY WITH AN AES KEY — there is NO ECIES anywhere on BSV (no ephemeral
-// key, no HKDF): the two parties' OWN secp256k1 keys do ECDH; the shared secret's x-coordinate is
+// library. ENCRYPTION IS ECDH ONLY WITH AN AES KEY (no ephemeral key, no HKDF): the two parties'
+// OWN secp256k1 keys do ECDH; the shared secret's x-coordinate is
 // SHA-256'd to a 32-byte AES-256 key; AES-256-GCM encrypts. ECDH(myPriv,theirPub)==ECDH(theirPriv,myPub).
 using System.Security.Cryptography;
 using System.Text;
@@ -43,7 +43,7 @@ public static class Cipher
     // ---- keys / ECDH (in-tree secp256k1) ----
     public static byte[] PublicKey(byte[] priv) => Secp256k1.PublicKey(priv);
 
-    // ---- ECDH + AES: the ONLY asymmetric encryption (NO ECIES, no ephemeral key, no HKDF) ----
+    // ---- ECDH + AES: the ONLY asymmetric encryption (no ephemeral key, no HKDF) ----
     /// <summary>The shared AES-256 key for two parties: the secp256k1 ECDH shared-secret x-coordinate
     /// used DIRECTLY as the 32-byte AES-256 key. Static 2-person ECDH on the parties' OWN keys, so
     /// ECDH(myPriv, theirPub) and ECDH(theirPriv, myPub) yield the identical key.</summary>
@@ -52,7 +52,7 @@ public static class Cipher
     public sealed record EcdhSealed(byte[] Nonce, byte[] Bytes);
 
     /// <summary>Encrypt to `theirPub` with YOUR key `myPriv`: the ECDH x-coordinate is the AES-256 key;
-    /// AES-256-GCM with a random nonce. No ECIES, no ephemeral key.</summary>
+    /// AES-256-GCM with a random nonce. No ephemeral key.</summary>
     public static EcdhSealed EcdhSeal(byte[] myPriv, byte[] theirPub, byte[] plaintext, byte[] aad)
     {
         byte[] key = EcdhKey(myPriv, theirPub);
@@ -90,7 +90,7 @@ public static class Cipher
     }
     public static byte[]? OpenFor(byte[]? symmetricKey, byte[]? privateKey, SealedMessage sealed_, byte[] aad)
     {
-        _ = privateKey;   // asymmetric path removed (no ECIES); symmetric only
+        _ = privateKey;   // legacy asymmetric path removed; symmetric only
         return sealed_ is SealedMessage.Symmetric s && symmetricKey is not null ? Open(symmetricKey, s.Nonce, s.Bytes, aad) : null;
     }
 }

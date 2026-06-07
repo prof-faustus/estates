@@ -1,14 +1,11 @@
-# Node / TypeScript
-node_modules/
-dist/
-dist-app/
-build/
-*.tsbuildinfo
-.pnpm-store/
-coverage/
+# Build output (.NET)
+apps/native/**/bin/
+apps/native/**/obj/
+apps/native/**/publish/
+apps/native/nugetprobe/
 
-# Vite
-.vite/
+# Native single-file exe (large binary) — build with: dotnet publish -c Release
+/estates.exe
 
 # Editors / OS
 .DS_Store
@@ -23,37 +20,24 @@ Thumbs.db
 .env.*
 !.env.example
 
-# Local scratch
+# Local scratch / logs
 *.log
 *.tmp
 scratch/
 
-# Tauri / Rust build output
-**/src-tauri/target/
-**/src-tauri/gen/
-**/target/
+# Local render/screenshot proof artifacts (regenerable)
+apps/native/render_*.png
 
-# local test helper (not shipped)
-apps/client-web/_serve.mjs
-
-# red-team / render-proof output (regenerable: node tools/redteam.mjs etc.)
-tools/render-out/
-
-# native build output
-apps/native/**/bin/
-apps/native/**/obj/
-apps/native/nugetprobe/
-
-# native single-file exe (73MB binary) + publish output — build with: dotnet publish -c Release
-/estates.exe
-apps/native/**/publish/
+# Agent/instruction notes — MUST NEVER be published (major breach)
 PLAN.md
 HANDOFF.md
 CLAUDE.md
 *.claude.md
 .claude/
-# Claude/agent session notes & transcript extractions — MUST NEVER be published (major breach)
 TRANSCRIPT-KNOWLEDGE.md
 *-KNOWLEDGE.md
 TRANSCRIPT*.md
 AGENTS.md
+
+# Published binary artifact
+publish/*.exe
