@@ -63,6 +63,7 @@ public partial class MainWindow : Window
             NodeList.Children.Add(new Border { Background = B("#232529"), CornerRadius = new CornerRadius(8), Padding = new Thickness(12), Margin = new Thickness(0, 0, 0, 8), Child = stack });
         }
         LobbyStatus.Text = peers.Count == 0 ? "You're the only node here right now." : $"{peers.Count} other node(s) live right now.";
+        _refreshChatWho?.Invoke();          // keep the chat contact line in sync with who's live
     }
 
     private (string net, int seats) Config()
@@ -465,6 +466,7 @@ public partial class MainWindow : Window
     private readonly Conversation _conv = new("lobby", true, Array.Empty<string>());
     private string _displayName = "";
     private StackPanel? _chatList;
+    private System.Action? _refreshChatWho;
 
     private UIElement BuildChatUI()
     {
@@ -476,8 +478,14 @@ public partial class MainWindow : Window
         var setName = new Button { Content = "Set identity", Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(12, 6, 12, 6) };
         DockPanel.SetDock(setName, Dock.Right); idRow.Children.Add(setName); idRow.Children.Add(nameBox);
         DockPanel.SetDock(idRow, Dock.Top); root.Children.Add(idRow);
-        var who = new TextBlock { Foreground = B("#9aa0a6"), FontSize = 11, Margin = new Thickness(0, 0, 0, 8) };
-        void ShowWho() => who.Text = $"you: {(_displayName.Length > 0 ? _displayName : "(set a name)")}   ·   {Tx.ToHex(_walletPub)[..12]}…   ·   peers: {_node.Peers().Count}";
+        var who = new TextBlock { Foreground = B("#9aa0a6"), FontSize = 11, Margin = new Thickness(0, 0, 0, 8), TextWrapping = TextWrapping.Wrap };
+        void ShowWho()
+        {
+            var peers = _node.Peers();
+            string names = peers.Count == 0 ? "no one else here yet" : string.Join(", ", peers.Select(p => p.Name));
+            who.Text = $"you: {(_displayName.Length > 0 ? _displayName : "(set a name)")}  ·  {Tx.ToHex(_walletPub)[..12]}…\nin chat: {names}";
+        }
+        _refreshChatWho = ShowWho;          // so peer discovery/loss live-updates the contact line
         ShowWho(); DockPanel.SetDock(who, Dock.Top); root.Children.Add(who);
         setName.Click += (_, _) => { _displayName = nameBox.Text.Trim(); ShowWho(); RenderChat(); };
 
@@ -488,7 +496,7 @@ public partial class MainWindow : Window
         DockPanel.SetDock(send, Dock.Right); bar.Children.Add(send); bar.Children.Add(input);
         DockPanel.SetDock(bar, Dock.Bottom); root.Children.Add(bar);
         send.Click += (_, _) => { SendChat(input.Text); input.Clear(); ShowWho(); };
-        input.KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Enter) { SendChat(input.Text); input.Clear(); ShowWho(); } };
+        input.PreviewKeyDown += (_, e) => { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Return) { e.Handled = true; SendChat(input.Text); input.Clear(); ShowWho(); } };
 
         _chatList = new StackPanel();
         root.Children.Add(new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _chatList });
@@ -567,7 +575,7 @@ public partial class MainWindow : Window
         var ok = new Button { Content = "OK", Width = 90, Margin = new Thickness(0, 12, 0, 0), HorizontalAlignment = HorizontalAlignment.Right, Padding = new Thickness(10, 5, 10, 5) };
         string? res = null;
         ok.Click += (_, _) => { res = tb.Text; w.Close(); };
-        tb.KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Enter) { res = tb.Text; w.Close(); } };
+        tb.PreviewKeyDown += (_, e) => { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Return) { e.Handled = true; res = tb.Text; w.Close(); } };
         sp.Children.Add(tb); sp.Children.Add(ok); w.Content = sp; tb.Focus(); tb.SelectAll(); w.ShowDialog();
         return res;
     }

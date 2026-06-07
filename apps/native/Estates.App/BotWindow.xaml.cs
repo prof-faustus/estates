@@ -15,8 +15,10 @@ public partial class BotWindow : Window
 {
     private readonly P2PNode _node;
     private readonly byte[] _master = RandomNumberGenerator.GetBytes(32);
+    private readonly byte[] _pub;                 // chat/identity pubkey (same scheme as the player client)
     private readonly StandaloneWallet _wallet;
     private readonly DispatcherTimer _poll = new();
+    private bool _greeted;
 
     public BotWindow()
     {
@@ -25,9 +27,12 @@ public partial class BotWindow : Window
         Left = wa.Right - Width - 12;
         Top = wa.Bottom - Height - 12;
 
-        byte[] pub = Type42.PublicKey(_master);
-        _node = new P2PNode("bot-" + Tx.ToHex(pub)[..6], Tx.ToHex(pub));
+        _pub = Cipher.PublicKey(_master);          // IDENTICAL scheme to MainWindow so chat keys match
+        _node = new P2PNode("bot-" + Tx.ToHex(_pub)[..6], Tx.ToHex(_pub));
         _wallet = new StandaloneWallet(_master, "regtest");
+        // Receive chat on every link. (Greeting is sent from the poll tick once we actually hold a
+        // peer's key — the announce can arrive a moment after the socket links.)
+        _node.OnLink += link => link.OnFrame += (l, f) => Dispatcher.Invoke(() => OnBotChat(l, f));
         App.Teardowns.Add(() => { try { _node.Dispose(); } catch { } });
         Closed += (_, _) => { _poll.Stop(); try { _node.Dispose(); } catch { } };
 
@@ -37,7 +42,12 @@ public partial class BotWindow : Window
         Log("I never simulate a solo game");
 
         _poll.Interval = TimeSpan.FromMilliseconds(2000);
-        _poll.Tick += (_, _) => { ShowWallet(); BotStatus.Text = $"Connected · peers {_node.Peers().Count} · funded {_wallet.Balance()} sat"; };
+        _poll.Tick += (_, _) =>
+        {
+            ShowWallet();
+            BotStatus.Text = $"Connected · peers {_node.Peers().Count} · funded {_wallet.Balance()} sat";
+            if (!_greeted && _node.LiveLinks().Count > 0 && _node.PeerWalletPubs().Count > 0) Greet();
+        };
         _poll.Start();
         BotStatus.Text = "Connected · awaiting a real game";
     }
@@ -57,6 +67,39 @@ public partial class BotWindow : Window
     }
 
     private void End_Click(object sender, RoutedEventArgs e) => Close();   // ends the bot (Closed reaps the node)
+
+    // ---- the bot is a real CHAT peer: it receives, acknowledges, and auto-replies ----
+    private void Greet()
+    {
+        if (_greeted) return;
+        _greeted = true;
+        SendChat(Messenger.Text(Tx.ToHex(_pub), "hi — automated bot here, linked as a peer. Message me and I'll reply."));
+    }
+
+    private void OnBotChat(PeerLink link, byte[] frame)
+    {
+        var opened = ChatCodec.Open(frame, _master, _pub);
+        if (opened is null) return;
+        ChatMessage? m = null;
+        try { m = Messenger.Parse(Convert.FromHexString(opened.Value.text)); } catch { }
+        m ??= Messenger.Text(opened.Value.from, opened.Value.text);
+        if (m.FromPub == Tx.ToHex(_pub)) return;                            // ignore our own echo
+        if (m.Kind is ChatKind.Text or ChatKind.Reply or ChatKind.Media)
+        {
+            Log($"chat ← {opened.Value.from[..6]}: {m.Display}");
+            SendChat(Messenger.Read(Tx.ToHex(_pub), m.Id));                  // read receipt (their ✓)
+            SendChat(Messenger.Text(Tx.ToHex(_pub), $"got it: “{m.Display}”"));   // auto-reply
+        }
+    }
+
+    private void SendChat(ChatMessage m)
+    {
+        var wire = Convert.ToHexString(Messenger.Serialize(m));
+        var frame = ChatCodec.Seal(_master, _node.PeerWalletPubs(), wire);   // encrypted to live peers
+        if (frame is null) return;
+        foreach (var l in _node.LiveLinks()) l.Send(frame);
+        if (m.Kind is ChatKind.Text or ChatKind.Reply) Log($"chat → {m.Display}");
+    }
 
     private void Log(string s) { BotLog.AppendText(s + "\n"); BotLog.ScrollToEnd(); }
 }

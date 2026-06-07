@@ -123,6 +123,7 @@ public sealed class P2PNode : IDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<string, PeerInfo> _peers = new();
     private readonly ConcurrentBag<PeerLink> _links = new();
+    private readonly ConcurrentDictionary<string, PeerLink> _linkByPeer = new();   // one live link per peer (auto-mesh)
     private bool _disposed;
 
     public event Action<PeerInfo>? OnPeerDiscovered;
@@ -192,6 +193,7 @@ public sealed class P2PNode : IDisposable
                 bool isNew = !_peers.ContainsKey(a.NodeId);
                 _peers[a.NodeId] = info;
                 if (isNew) OnPeerDiscovered?.Invoke(info);
+                MaybeAutoLink(info);                 // form a direct link immediately — chat/game always has a path
             }
             catch { }
         }
@@ -243,6 +245,21 @@ public sealed class P2PNode : IDisposable
             _links.Add(link);
             OnLink?.Invoke(link);
         }
+    }
+
+    /// <summary>Auto-form a direct link to every discovered peer (a true P2P MESH) so chat and game
+    /// frames always have a path the instant a peer appears — no "join a table" needed. The lower
+    /// NodeId initiates and the higher accepts, so exactly ONE link forms per pair; a dropped link
+    /// auto-reconnects on the next announce. No server is involved — the address came from the peer's
+    /// own multicast announce.</summary>
+    private void MaybeAutoLink(PeerInfo p)
+    {
+        if (string.CompareOrdinal(NodeId, p.NodeId) >= 0) return;          // higher id waits to be connected to
+        if (_linkByPeer.TryGetValue(p.NodeId, out var ex) && ex.IsLive) return;
+        var link = Connect(p);
+        if (link is null) return;
+        _linkByPeer[p.NodeId] = link;
+        link.OnClosed += _ => _linkByPeer.TryRemove(p.NodeId, out PeerLink? _);   // gone → reconnect on next announce
     }
 
     /// <summary>Connect DIRECTLY to a discovered peer (no server in between). Returns the link or null.</summary>
