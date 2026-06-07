@@ -80,4 +80,34 @@ public static class Messenger
     public static ChatMessage Delete(string fromPub, string msgId) => new(NewId(), ChatKind.Delete, fromPub, Now(), "", msgId, null);
     public static ChatMessage Read(string fromPub, string msgId) => new(NewId(), ChatKind.ReadReceipt, fromPub, Now(), "", msgId, null);
     public static ChatMessage Media(string fromPub, string mediaRef, string caption) => new(NewId(), ChatKind.Media, fromPub, Now(), caption, null, mediaRef);
+
+    // ---- on-wire framing: each chat TYPE is its OWN protocol — CHAT-2P (#2, two-person) and
+    // CHAT-GROUP (#3, group/broadcast). A frame is TxProtocol.Stamp(type, convId ‖ message) so a
+    // receiver routes by protocol number + conversation id, exactly as it extracts a protocol off IP. ----
+    public static byte[] WireOut(TxType type, string convId, ChatMessage m)
+    {
+        var inner = new List<byte>();
+        Put(inner, convId);
+        inner.AddRange(Serialize(m));
+        return TxProtocol.Stamp(type, inner.ToArray());
+    }
+
+    /// <summary>TOTAL parse of a chat frame: returns the protocol type, conversation id and message,
+    /// or null if it is not a CHAT-2P/CHAT-GROUP frame or is malformed (never throws).</summary>
+    public static (TxType type, string convId, ChatMessage msg)? WireIn(byte[] data)
+    {
+        var h = TxProtocol.Read(data);
+        if (h is null || (h.Value.type is not TxType.Chat2P and not TxType.ChatGroup)) return null;
+        var p = h.Value.payload; int i = 0, shift = 0, n = 0;
+        while (i < p.Length) { byte b = p[i++]; n |= (b & 0x7f) << shift; if ((b & 0x80) == 0) break; shift += 7; if (shift > 21) return null; }
+        if (n < 0 || i + n > p.Length) return null;
+        string convId = Encoding.UTF8.GetString(p, i, n); i += n;
+        var m = Parse(p[i..]);
+        return m is null ? null : (h.Value.type, convId, m);
+    }
+
+    /// <summary>The stable conversation id for a two-person chat (order-independent), so both ends
+    /// map the same DM to the same history regardless of who sent.</summary>
+    public static string DmId(string pubA, string pubB)
+        => string.CompareOrdinal(pubA, pubB) < 0 ? $"dm:{pubA}:{pubB}" : $"dm:{pubB}:{pubA}";
 }

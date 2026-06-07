@@ -454,6 +454,25 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("messenger: total parse rejects garbage", Messenger.Parse(new byte[] { 0x09 }) is null);
 }
 
+// MINER SUPERVISOR: real double-SHA256 PoW across independent workers, each monitored separately and
+// auto-respawned on death — the never-down guarantee, in-process. Easy target => a block is found.
+{
+    var hdr = new byte[80];
+    var easy = System.Linq.Enumerable.Repeat((byte)0xFF, 32).ToArray();
+    var sup = new MinerSupervisor(4, hdr, easy);
+    bool found = false; sup.OnBlockFound += (_, _) => found = true;
+    sup.Start();
+    System.Threading.Thread.Sleep(400);
+    X("miner: 4 independent workers alive", sup.AliveCount() == 4);
+    X("miner: real hashing is happening", sup.TotalHashes() > 0);
+    X("miner: easy target yields a found block", found);
+    sup.KillWorker(0);
+    System.Threading.Thread.Sleep(1600);
+    var st = sup.Status();
+    X("miner: killed worker auto-respawned (never-down)", sup.AliveCount() == 4 && st[0].Restarts >= 1);
+    sup.Dispose();
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
