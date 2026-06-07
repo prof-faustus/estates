@@ -594,6 +594,34 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("txtransport: a stranger extracts nothing", TxTransport.Extract(rxTx, evePriv) is null);
 }
 
+// BASE58CHECK (from scratch): a P2PKH address round-trips with its version; a corrupted character
+// fails the checksum; testnet uses a different version byte.
+{
+    var pkh = Recovery.Hash160(Cipher.PublicKey(new byte[32] { 31, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }));
+    string addr = Address.P2pkh(pkh, BsvNet.Mainnet);
+    var dec = Base58.CheckDecode(addr, out byte ver);
+    X("base58: mainnet P2PKH round-trips with version 0x00", dec is not null && Tx.ToHex(dec) == Tx.ToHex(pkh) && ver == 0x00 && addr.StartsWith("1"));
+    string bad = addr[..^1] + (addr[^1] == 'A' ? 'B' : 'A');
+    X("base58: a corrupted address fails the checksum", Base58.CheckDecode(bad, out _) is null);
+    X("base58: testnet uses version 0x6f", Base58.CheckDecode(Address.P2pkh(pkh, BsvNet.Testnet), out byte tv) is not null && tv == 0x6f);
+}
+
+// WALLET ENGINE (node-backed): reads its balance straight from the UTXO ledger over its rotating
+// addresses; a coinbase mined to its address is immature then spendable; receive addresses never repeat.
+{
+    var wseed = new byte[32]; wseed[0] = 33;
+    var w = new WalletEngine(wseed, watchHorizon: 20);
+    byte[] wsc = NodeWallet.P2pkhScript(Recovery.Hash160(new KeyRing(wseed).PubAt(1)));
+    var wu = new UtxoSet();
+    var wcb = new NativeTx(1, new[] { new TxInputN(new string('0', 64), 0xffffffff, new byte[] { 0 }, 0xffffffff) }, new[] { new TxOutputN(500_000, wsc) }, 0);
+    wu.ApplyBlock(1000, new ParsedBlock(new byte[80], "h", new[] { wcb }));
+    X("walletengine: reads node-ledger coinbase as immature", w.Immature(wu) == 500_000 && w.Spendable(wu) == 0);
+    wu.SetTip(1099);
+    X("walletengine: matures to spendable from the ledger", w.Spendable(wu) == 500_000);
+    var a1 = w.NextReceiveAddress(BsvNet.Mainnet); var a2 = w.NextReceiveAddress(BsvNet.Mainnet);
+    X("walletengine: every receive address is fresh", a1.address != a2.address && a1.index != a2.index && a1.address.StartsWith("1"));
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
