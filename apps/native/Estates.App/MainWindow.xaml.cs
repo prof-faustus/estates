@@ -461,44 +461,79 @@ public partial class MainWindow : Window
         return tabs;
     }
 
-    // ---- Chat (its own tab): end-to-end encrypted over the peer links ----------------
-    private StackPanel? _chatLog;
+    // ---- Chat: a real messenger (group + 1:1, history, reactions/edit/delete/receipts, identity) ----
+    private readonly Conversation _conv = new("lobby", true, Array.Empty<string>());
+    private string _displayName = "";
+    private StackPanel? _chatList;
+
     private UIElement BuildChatUI()
     {
-        var dock = new DockPanel { Margin = new Thickness(0, 12, 0, 0) };
+        var root = new DockPanel { Margin = new Thickness(0, 12, 0, 0) };
+
+        // identity row — set your name (your identity card); your pubkey is your address
+        var idRow = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
+        var nameBox = new TextBox { Background = B("#171819"), Foreground = B("#e6e6e6"), BorderThickness = new Thickness(0), Padding = new Thickness(8), FontSize = 13, Text = _displayName };
+        var setName = new Button { Content = "Set identity", Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(12, 6, 12, 6) };
+        DockPanel.SetDock(setName, Dock.Right); idRow.Children.Add(setName); idRow.Children.Add(nameBox);
+        DockPanel.SetDock(idRow, Dock.Top); root.Children.Add(idRow);
+        var who = new TextBlock { Foreground = B("#9aa0a6"), FontSize = 11, Margin = new Thickness(0, 0, 0, 8) };
+        void ShowWho() => who.Text = $"you: {(_displayName.Length > 0 ? _displayName : "(set a name)")}   ·   {Tx.ToHex(_walletPub)[..12]}…   ·   peers: {_node.Peers().Count}";
+        ShowWho(); DockPanel.SetDock(who, Dock.Top); root.Children.Add(who);
+        setName.Click += (_, _) => { _displayName = nameBox.Text.Trim(); ShowWho(); RenderChat(); };
+
+        // send bar
         var input = new TextBox { Background = B("#171819"), Foreground = B("#e6e6e6"), BorderThickness = new Thickness(0), Padding = new Thickness(8), FontSize = 13 };
         var send = new Button { Content = "Send", Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(14, 6, 14, 6) };
         var bar = new DockPanel { Margin = new Thickness(0, 10, 0, 0) };
         DockPanel.SetDock(send, Dock.Right); bar.Children.Add(send); bar.Children.Add(input);
-        DockPanel.SetDock(bar, Dock.Bottom);
-        _chatLog = new StackPanel();
-        dock.Children.Add(bar);
-        dock.Children.Add(new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _chatLog });
-        send.Click += (_, _) => { SendChat(input.Text); input.Clear(); };
-        return dock;
+        DockPanel.SetDock(bar, Dock.Bottom); root.Children.Add(bar);
+        send.Click += (_, _) => { SendChat(input.Text); input.Clear(); ShowWho(); };
+        input.KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Enter) { SendChat(input.Text); input.Clear(); ShowWho(); } };
+
+        _chatList = new StackPanel();
+        root.Children.Add(new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _chatList });
+        RenderChat();
+        return root;
+    }
+
+    private string NameFor(string pub) => pub == Tx.ToHex(_walletPub) ? (_displayName.Length > 0 ? _displayName : "you") : "player-" + (pub.Length >= 6 ? pub[..6] : pub);
+
+    private void RenderChat()
+    {
+        if (_chatList is null) return;
+        _chatList.Children.Clear();
+        if (_conv.History.Count == 0)
+        {
+            _chatList.Children.Add(new TextBlock { Text = "No messages yet. Messages are encrypted and on-chain.", Foreground = B("#6a6f76"), FontSize = 12 });
+            return;
+        }
+        foreach (var m in _conv.History)
+        {
+            var line = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6) };
+            line.Inlines.Add(new System.Windows.Documents.Run(NameFor(m.FromPub) + "  ") { Foreground = B("#f5a623"), FontWeight = FontWeights.SemiBold });
+            line.Inlines.Add(new System.Windows.Documents.Run(m.Display) { Foreground = m.Deleted ? B("#6a6f76") : B("#cfd2d6") });
+            if (m.EditedText is not null && !m.Deleted) line.Inlines.Add(new System.Windows.Documents.Run("  (edited)") { Foreground = B("#6a6f76"), FontSize = 10 });
+            if (m.Reactions.Count > 0) line.Inlines.Add(new System.Windows.Documents.Run("  " + string.Join(" ", m.Reactions.Values)) { Foreground = B("#ffd54f") });
+            if (m.ReadBy.Count > 0) line.Inlines.Add(new System.Windows.Documents.Run("  ✓") { Foreground = B("#7bd88f"), FontSize = 10 });
+            _chatList.Children.Add(line);
+        }
     }
 
     private void SendChat(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return;
-        var frame = ChatCodec.Seal(_master, _node.PeerWalletPubs(), text);
-        if (frame is null) { AppendChat("(no peers connected)", text); return; }
-        foreach (var l in _node.LiveLinks()) l.Send(frame);
-        AppendChat(_node.Name, text);
+        var m = Messenger.Text(Tx.ToHex(_walletPub), text);
+        _conv.Apply(m); RenderChat();
+        var wire = Convert.ToHexString(Messenger.Serialize(m));
+        var frame = ChatCodec.Seal(_master, _node.PeerWalletPubs(), wire);   // encrypted; on-chain when funded
+        if (frame is not null) foreach (var l in _node.LiveLinks()) l.Send(frame);
     }
 
     private void OnChatFrame(PeerLink link, byte[] frame)
     {
-        var msg = ChatCodec.Open(frame, _master, _walletPub);
-        if (msg is not null) AppendChat("player-" + msg.Value.from[..6], msg.Value.text);
-    }
-
-    private void AppendChat(string who, string text)
-    {
-        if (_chatLog is null) return;
-        var line = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6) };
-        line.Inlines.Add(new System.Windows.Documents.Run(who + "  ") { Foreground = B("#f5a623"), FontWeight = FontWeights.SemiBold });
-        line.Inlines.Add(new System.Windows.Documents.Run(text) { Foreground = B("#cfd2d6") });
-        _chatLog.Children.Add(line);
+        var opened = ChatCodec.Open(frame, _master, _walletPub);
+        if (opened is null) return;
+        try { var m = Messenger.Parse(Convert.FromHexString(opened.Value.text)); if (m is not null) { _conv.Apply(m); RenderChat(); return; } } catch { }
+        _conv.Apply(Messenger.Text(opened.Value.from, opened.Value.text)); RenderChat();
     }
 }
