@@ -3,7 +3,8 @@
 // SENDER (Alice) has STORED that envelope and hands it to the payee (Bob) IP-to-IP with the payment.
 // Bob's wallet VERIFIES it (merkle branch → header merkle root, and the header meets proof-of-work) and
 // STORES it — ALWAYS — so Bob can in turn hand it to whoever he pays. No node query, no chain scan, no
-// header IBD: the proof arrives WITH the money, so the wallet is instant and works offline.
+// header IBD: the proof arrives WITH the money over the live IP-to-IP link, so the wallet is instant.
+// (Always online — there is no offline mode; SPV just means it never queries a blockchain node.)
 namespace Estates.Core;
 
 public sealed record SpvEnvelope(byte[] RawTx, byte[] Header80, IReadOnlyList<string> Branch, long Index)

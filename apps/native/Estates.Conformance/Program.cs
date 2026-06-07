@@ -703,6 +703,27 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("type42: payee never publishes an address (derived address is valid mainnet P2PKH)", Type42Payment.PayToAddress(payeePub, payerPriv, "inv-1", BsvNet.Mainnet).StartsWith("1"));
 }
 
+// SPV PAYMENT (offline accept): Alice pays Bob and hands over a merkle-proof envelope for the input;
+// Bob verifies it against headers and accepts instantly. Missing/tampered proof => rejected.
+{
+    byte[] bobScript = NodeWallet.P2pkhScript(Recovery.Hash160(Cipher.PublicKey(new byte[32] { 71, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 })));
+    byte[] aliceScript = NodeWallet.P2pkhScript(Recovery.Hash160(Cipher.PublicKey(new byte[32] { 72, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 })));
+    // Alice's input coin (prior tx) + its SPV envelope (1-tx block, easy PoW)
+    var prior = new NativeTx(1, new[] { new TxInputN(new string('0', 64), 0, new byte[] { 0 }, 0xffffffff) }, new[] { new TxOutputN(100_000, aliceScript) }, 0);
+    byte[] priorRaw = Tx.Serialize(prior);
+    byte[] mInt = Tx.FromHex(Tx.Txid(prior)); System.Array.Reverse(mInt);
+    var phdr = new byte[80]; phdr[72] = 0xff; phdr[73] = 0xff; phdr[74] = 0x7f; phdr[75] = 0x20; System.Array.Copy(mInt, 0, phdr, 36, 32);
+    var penv = new SpvEnvelope(priorRaw, phdr, System.Array.Empty<string>(), 0);
+    // Tx3: Alice spends that coin, pays Bob 90k
+    var tx3 = new NativeTx(1, new[] { new TxInputN(Tx.Txid(prior), 0, new byte[] { 1 }, 0xffffffff) }, new[] { new TxOutputN(90_000, bobScript) }, 0);
+    var bobScripts = new HashSet<string> { Tx.ToHex(bobScript) };
+    var r = SpvPayment.VerifyIncoming(Tx.Serialize(tx3), new[] { penv }, bobScripts);
+    X("spvpay: Bob accepts the payment with a valid input proof", r.Ok && r.PaidToMe == 90_000);
+    X("spvpay: missing input proof => rejected", !SpvPayment.VerifyIncoming(Tx.Serialize(tx3), System.Array.Empty<SpvEnvelope>(), bobScripts).Ok);
+    var tampered = new SpvEnvelope(priorRaw, phdr, new[] { new string('a', 64) }, 0);
+    X("spvpay: tampered input proof => rejected", !SpvPayment.VerifyIncoming(Tx.Serialize(tx3), new[] { tampered }, bobScripts).Ok);
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
