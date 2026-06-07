@@ -132,6 +132,12 @@ public partial class BotWindow : Window
                 if (f is not null && Tx.ToHex(f.BobPub) == Tx.ToHex(_pub)) OnFunded(f);
                 return;
             }
+            if (ex.Value.type == TxType.GameClose)                          // human closed → refund first, then exit
+            {
+                Log("human closed the game — refunding and closing now");
+                Close();                                                    // Closed handler runs RefundHumanOnClose
+                return;
+            }
             ChatMessage? m = null;
             try { m = Messenger.Parse(ex.Value.plaintext); } catch { }
             if (m is null || m.FromPub == Tx.ToHex(_pub)) return;           // ignore our own echo

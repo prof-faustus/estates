@@ -32,6 +32,7 @@ public partial class MainWindow : Window
         _node.OnPeerDiscovered += _ => Dispatcher.Invoke(RefreshNodes);
         _node.OnPeerLost += _ => Dispatcher.Invoke(RefreshNodes);
         _node.OnLink += link => link.OnFrame += (l, f) => Dispatcher.Invoke(() => OnChatFrame(l, f));
+        Closing += OnHumanClosing;                       // bots close + refund me FIRST, then I close
         Closed += (_, _) => { try { _node.Dispose(); } catch { } };
 
         RefreshNodes();
@@ -764,6 +765,42 @@ public partial class MainWindow : Window
     // The 2-of-2 bot fundings THIS human created, keyed by lock-script hex → the human's signing key and
     // the bot's pubkey. Lets us complete (add our signature) the bot's refund reclaim on close.
     private readonly Dictionary<string, (byte[] priv, byte[] pub, byte[] botPub)> _botFunds = new();
+
+    // ABSOLUTE close-ordering: when the human closes the game, EVERY bot closes and refunds the human
+    // FIRST. We hold the human's close, tell each bot to close+refund, wait for the refunds to settle
+    // (so no bot is left running and no sat is left in a 2-of-2), then close.
+    private bool _closeHandled;
+    private async void OnHumanClosing(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        if (_closeHandled || _botFunds.Count == 0) return;          // nothing outstanding → close normally
+        e.Cancel = true;                                            // hold my close until bots refund
+        SendGameCloseToBots();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (_botFunds.Count > 0 && sw.Elapsed < System.TimeSpan.FromSeconds(15))
+            await System.Threading.Tasks.Task.Delay(150);
+        _closeHandled = true;
+        Close();                                                    // now I close
+    }
+
+    // Signal every bot peer to close + refund me now (GameClose carrier, IP-to-IP).
+    private void SendGameCloseToBots()
+    {
+        try
+        {
+            var ring = new KeyRing(_walletSeed!);
+            byte[] myPkh = Recovery.Hash160(_walletPub);
+            foreach (var botPub in _node.PeerWalletPubs())
+            {
+                long seq = System.DateTime.UtcNow.Ticks;
+                byte[] carrier = TxMessage.SealCarrier(ring.MessagePriv(botPub, "fund", seq), botPub, TxType.GameClose, "close"u8.ToArray());
+                var tx = new NativeTx(1, new[] { new TxInputN(new string('0', 64), 0xffffffff, System.Array.Empty<byte>(), 0xffffffff) },
+                    new[] { new TxOutputN(1, TxTransport.MessageOutput(carrier, myPkh)) }, 0);
+                byte[] raw = Tx.Serialize(tx);
+                foreach (var l in _node.LiveLinks()) { try { l.Send(raw); } catch { } }
+            }
+        }
+        catch (System.Exception e) { App.CrashLog("game-close-signal", e); }
+    }
 
     // The bot, on close, sent its half-signed 2-of-2 reclaim refunding us 100%. Add our signature and
     // broadcast it — money safety: the funder always gets the funds back.
