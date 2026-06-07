@@ -724,6 +724,25 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("spvpay: tampered input proof => rejected", !SpvPayment.VerifyIncoming(Tx.Serialize(tx3), new[] { tampered }, bobScripts).Ok);
 }
 
+// BLOCK MERKLE (build a real coin's proof): the branch computed from a block's txid list verifies
+// against the block's merkle root for every position — so any mined coin becomes an SPV envelope.
+{
+    var txids = new List<string>();
+    for (int i = 0; i < 5; i++) { var b = new byte[32]; b[0] = (byte)(100 + i); System.Array.Reverse(b); txids.Add(Tx.ToHex(b)); }   // 5 txids (odd -> duplication path)
+    var rootInt = BlockMerkle.Root(txids);
+    bool all = true;
+    for (int i = 0; i < txids.Count; i++)
+    {
+        var br = BlockMerkle.BranchFor(txids, txids[i]);
+        if (br is null || !MerkleProof.Verify(txids[i], br.Value.branch, br.Value.index, rootInt)) { all = false; break; }
+    }
+    X("blockmerkle: every coin's computed branch verifies to the block root", all);
+    X("blockmerkle: a tx not in the block has no branch", BlockMerkle.BranchFor(txids, new string('f', 64)) is null);
+    var single = new List<string> { txids[0] };
+    var sbr = BlockMerkle.BranchFor(single, txids[0]);
+    X("blockmerkle: single-tx block has empty branch verifying to root", sbr is not null && sbr.Value.branch.Count == 0 && MerkleProof.Verify(txids[0], sbr.Value.branch, 0, BlockMerkle.Root(single)));
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
