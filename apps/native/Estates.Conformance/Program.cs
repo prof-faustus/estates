@@ -795,6 +795,22 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("gossip: empty tag returns all live", gs.Query("").Count == 2);
 }
 
+// BOT 2-of-2 funding/reclaim: a 2-of-2 spend needs BOTH the human's and the bot's signature; both
+// verify; a wrong key fails. (Human funds the bot; on close both sign and the human reclaims.)
+{
+    byte[] aPriv = Type42.UniqueKey(new byte[32] { 93, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }, "alice"); byte[] aPub = Secp256k1.PublicKey(aPriv);
+    byte[] bPriv = Type42.UniqueKey(new byte[32] { 94, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }, "bot"); byte[] bPub = Secp256k1.PublicKey(bPriv);
+    byte[] lockScript = Multisig.Lock2of2(aPub, bPub);
+    byte[] toScript = NodeWallet.P2pkhScript(Recovery.Hash160(aPub));   // reclaim to Alice
+    var spend = new NativeTx(2, new[] { new TxInputN(new string('1', 64), 0, System.Array.Empty<byte>(), 0xffffffff) }, new[] { new TxOutputN(99500, toScript) }, 0);
+    byte[] sigA = Multisig.Sign(spend, 0, lockScript, 100000, aPriv);
+    byte[] sigB = Multisig.Sign(spend, 0, lockScript, 100000, bPriv);
+    X("multisig: 2-of-2 reclaim verifies with both signatures", Multisig.Verify2of2(spend, 0, lockScript, 100000, sigA, sigB, aPub, bPub));
+    byte[] wrong = Multisig.Sign(spend, 0, lockScript, 100000, Type42.UniqueKey(new byte[32] { 95, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }, "eve"));
+    X("multisig: a wrong signer fails", !Multisig.Verify2of2(spend, 0, lockScript, 100000, sigA, wrong, aPub, bPub));
+    X("multisig: unlock script is OP_0 + both sigs", Multisig.Unlock2of2(sigA, sigB)[0] == 0x00);
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
