@@ -35,7 +35,7 @@ public partial class MainWindow : Window
         Closed += (_, _) => { try { _node.Dispose(); } catch { } };
 
         RefreshNodes();
-        WalletHost.Content = BuildWalletUI();
+        WalletHost.Content = BuildNodeWalletUI();
         ChatHost.Content = BuildChatUI();
 
         // Real (mainnet) is default; testnet free; regtest is password-gated (test-only).
@@ -44,7 +44,7 @@ public partial class MainWindow : Window
             string sel = ((ComboBoxItem)Network.SelectedItem).Content!.ToString()!;
             if (sel == "regtest" && PromptPassword("Regtest is test-only — enter the password") != "craig") { Network.SelectedIndex = 0; return; }
             _network = sel;
-            WalletHost.Content = BuildWalletUI();   // rebuild the wallet against the chosen network
+            WalletHost.Content = BuildNodeWalletUI();   // rebuild the wallet against the chosen network
         };
     }
 
@@ -247,6 +247,85 @@ public partial class MainWindow : Window
 
     // ---- Wallet (its own tab): real, connected to YOUR BSV node ----------------------
     private byte[]? _walletSeed;   // the persisted wallet seed once unlocked (null = locked)
+    // A REAL node-backed wallet wired into the exe: connects to the BSV network as a node and shows
+    // live IMMATURE / UNCONFIRMED / SPENDABLE balances. No manual UTXO import, no refresh button —
+    // funding is a real inbound payment to your address.
+    private NodeWallet? _nodeWallet;
+    private BsvPeer? _walletPeer;
+    private System.Windows.Threading.DispatcherTimer? _walletTimer;
+
+    private BsvNet NetOf() => _network == "mainnet" ? BsvNet.Mainnet : _network == "testnet" ? BsvNet.Testnet : BsvNet.Regtest;
+
+    private UIElement BuildNodeWalletUI()
+    {
+        try { _walletTimer?.Stop(); } catch { }
+        try { _walletPeer?.Dispose(); } catch { }
+
+        var seed = _walletSeed ?? _master;
+        var sw = new StandaloneWallet(seed, _network);
+        string address = sw.AddressAt(0);
+        _nodeWallet = new NodeWallet(new[] { sw.ChildPub(0) });
+
+        var root = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+        root.Children.Add(new TextBlock { Text = $"Wallet — live BSV node ({_network})", Foreground = B("#e6e6e6"), FontSize = 16, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 2) });
+        var nodeStatus = new TextBlock { Text = "node: starting…", Foreground = B("#9aa0a6"), FontSize = 11, Margin = new Thickness(0, 0, 0, 12), TextWrapping = TextWrapping.Wrap };
+        root.Children.Add(nodeStatus);
+
+        Border Card(string label, out TextBlock val, string color)
+        {
+            var l = new TextBlock { Text = label, Foreground = B("#9aa0a6"), FontSize = 11 };
+            val = new TextBlock { Text = "0 sat", Foreground = B(color), FontSize = 20, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 2, 0, 0) };
+            var sp = new StackPanel(); sp.Children.Add(l); sp.Children.Add(val);
+            return new Border { Background = B("#232529"), CornerRadius = new CornerRadius(8), Padding = new Thickness(14), Margin = new Thickness(0, 0, 8, 8), Child = sp, MinWidth = 150 };
+        }
+        var rowB = new StackPanel { Orientation = Orientation.Horizontal };
+        rowB.Children.Add(Card("Spendable", out var spendVal, "#7bd88f"));
+        rowB.Children.Add(Card("Unconfirmed", out var uncVal, "#f5a623"));
+        rowB.Children.Add(Card("Immature (mined)", out var immVal, "#8ab4f8"));
+        root.Children.Add(rowB);
+
+        root.Children.Add(new TextBlock { Text = "Your address — funding is always a real payment sent here (never a manual import):", Foreground = B("#9aa0a6"), FontSize = 11, Margin = new Thickness(0, 8, 0, 2) });
+        root.Children.Add(new TextBox { Text = address, IsReadOnly = true, Background = B("#171819"), Foreground = B("#e6e6e6"), BorderThickness = new Thickness(0), Padding = new Thickness(8), FontSize = 13 });
+
+        var hostRow = new DockPanel { Margin = new Thickness(0, 10, 0, 0) };
+        var hostBox = new TextBox { Text = $"127.0.0.1:{BsvWire.DefaultPort(NetOf())}", Background = B("#171819"), Foreground = B("#e6e6e6"), BorderThickness = new Thickness(0), Padding = new Thickness(8), FontSize = 13 };
+        var connectBtn = new Button { Content = "Connect node", Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(12, 6, 12, 6) };
+        DockPanel.SetDock(connectBtn, Dock.Right); hostRow.Children.Add(connectBtn); hostRow.Children.Add(hostBox);
+        root.Children.Add(hostRow);
+
+        void Connect()
+        {
+            var hp = hostBox.Text.Trim();
+            int ci = hp.IndexOf(':');
+            string host = ci > 0 ? hp[..ci] : hp;
+            int port = ci > 0 && int.TryParse(hp[(ci + 1)..], out var pp) ? pp : BsvWire.DefaultPort(NetOf());
+            try { _walletPeer?.Dispose(); } catch { }
+            var peer = new BsvPeer(NetOf(), host, port);
+            _walletPeer = peer;
+            nodeStatus.Text = $"node: connecting to {host}:{port}…";
+            _ = System.Threading.Tasks.Task.Run(async () =>
+            {
+                try { await peer.ConnectAsync(); Dispatcher.Invoke(() => { _nodeWallet?.SetTip(peer.PeerStartHeight); nodeStatus.Text = $"node: connected to {host}:{port} · chain height {peer.PeerStartHeight:n0} · {peer.PeerUserAgent}"; }); }
+                catch (Exception ex) { Dispatcher.Invoke(() => nodeStatus.Text = $"node: running · no peer yet — {ex.Message}"); }
+            });
+        }
+        connectBtn.Click += (_, _) => Connect();
+        Connect();
+
+        void Refresh()
+        {
+            if (_nodeWallet is null) return;
+            spendVal.Text = $"{_nodeWallet.Spendable():n0} sat";
+            uncVal.Text = $"{_nodeWallet.Unconfirmed():n0} sat";
+            immVal.Text = $"{_nodeWallet.Immature():n0} sat";
+        }
+        _walletTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        _walletTimer.Tick += (_, _) => Refresh();
+        _walletTimer.Start();
+        Refresh();
+        return root;
+    }
+
     private UIElement BuildWalletUI()
     {
         var host = new ContentControl();
