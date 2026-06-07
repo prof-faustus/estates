@@ -496,6 +496,37 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("nodewallet: foreign pay is ignored (not mine)", new NodeWallet(new[] { pub }).Immature() == 0);
 }
 
+// NODE LEDGER (built from scratch): tx parser round-trips + rejects garbage; block parses; the UTXO
+// set tracks a coinbase as immature, matures it at 100 confs, and removes it when spent.
+{
+    var sc = NodeWallet.P2pkhScript(Recovery.Hash160(Cipher.PublicKey(new byte[32] { 9, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 })));
+    var tx0 = new NativeTx(2, new[] { new TxInputN(new string('a', 64), 0, new byte[] { 1, 2, 3 }, 0xffffffff) }, new[] { new TxOutputN(50000, sc) }, 0);
+    var raw = Tx.Serialize(tx0);
+    var back = Tx.Parse(raw);
+    X("tx-parse: serialize/deserialize round-trips", back is not null && Tx.Txid(back) == Tx.Txid(tx0));
+    X("tx-parse: rejects trailing garbage", Tx.Parse(raw.Append((byte)0).ToArray()) is null);
+    X("tx-parse: rejects truncation", Tx.Parse(raw[..^2]) is null);
+
+    var coinbase = new NativeTx(1, new[] { new TxInputN(new string('0', 64), 0xffffffff, new byte[] { 0 }, 0xffffffff) }, new[] { new TxOutputN(1_250_000_000, sc) }, 0);
+    var hdr = new byte[80];
+    var u = new UtxoSet();
+    u.ApplyBlock(1000, new ParsedBlock(hdr, Block.HashOf(hdr), new[] { coinbase }));
+    var owned = new HashSet<string> { Tx.ToHex(sc) };
+    X("utxo: coinbase tracked, immature at tip", u.ImmatureFor(owned) == 1_250_000_000 && u.SpendableFor(owned) == 0);
+    u.SetTip(1099);
+    X("utxo: matures to spendable at 100 confs", u.SpendableFor(owned) == 1_250_000_000 && u.ImmatureFor(owned) == 0);
+    string cbid = Tx.Txid(coinbase);
+    var cb2 = new NativeTx(1, new[] { new TxInputN(new string('0', 64), 0xffffffff, new byte[] { 1 }, 0xffffffff) }, new[] { new TxOutputN(1, sc) }, 0);
+    var spend = new NativeTx(1, new[] { new TxInputN(cbid, 0, new byte[] { 2 }, 0xffffffff) }, new[] { new TxOutputN(40000, sc) }, 0);
+    u.ApplyBlock(1100, new ParsedBlock(hdr, "x", new[] { cb2, spend }));
+    X("utxo: spent coinbase output removed", u.Get(cbid, 0) is null);
+    // round-trip a real block through the parser
+    var blkRaw = new List<byte>(); blkRaw.AddRange(hdr); blkRaw.Add(1); blkRaw.AddRange(Tx.Serialize(coinbase));
+    var pb = Block.Parse(blkRaw.ToArray());
+    X("block-parse: header + 1 tx parses, hash matches", pb is not null && pb.Txs.Count == 1 && pb.BlockHash == Block.HashOf(hdr));
+    X("block-parse: rejects a too-short block", Block.Parse(new byte[40]) is null);
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");

@@ -77,4 +77,55 @@ public static class Tx
         Array.Reverse(h);
         return ToHex(h);
     }
+
+    // ---- parsing (the exact inverse of Serialize) — TOTAL and bounded: every read is range-checked
+    // and a truncated/oversized field throws FormatException (never an out-of-range crash). ----
+    private static void Need(byte[] b, int pos, long n) { if (n < 0 || pos < 0 || pos + n > b.Length) throw new FormatException("truncated/over-bounded"); }
+    public static long ReadU32(byte[] b, ref int p) { Need(b, p, 4); long v = (uint)(b[p] | (b[p + 1] << 8) | (b[p + 2] << 16) | (b[p + 3] << 24)); p += 4; return v; }
+    public static long ReadU64(byte[] b, ref int p) { Need(b, p, 8); long v = 0; for (int i = 0; i < 8; i++) v |= (long)b[p + i] << (8 * i); p += 8; return v; }
+    public static long ReadVarint(byte[] b, ref int p)
+    {
+        Need(b, p, 1); byte x = b[p++];
+        if (x < 0xfd) return x;
+        if (x == 0xfd) { Need(b, p, 2); long v = b[p] | (b[p + 1] << 8); p += 2; return v; }
+        if (x == 0xfe) { return ReadU32(b, ref p); }
+        return ReadU64(b, ref p);
+    }
+    private static byte[] ReadBytes(byte[] b, ref int p, long n) { Need(b, p, n); var o = new byte[n]; Array.Copy(b, p, o, 0, (int)n); p += (int)n; return o; }
+
+    /// <summary>Parse ONE transaction starting at `pos`, advancing `pos` past it. Bounded/total.</summary>
+    public static NativeTx Deserialize(byte[] b, ref int pos)
+    {
+        int version = (int)ReadU32(b, ref pos);
+        long nIn = ReadVarint(b, ref pos);
+        if (nIn < 0 || nIn > 1_000_000) throw new FormatException("nIn");
+        var ins = new List<TxInputN>((int)Math.Min(nIn, 4096));
+        for (long k = 0; k < nIn; k++)
+        {
+            var prev = ReadBytes(b, ref pos, 32); Array.Reverse(prev);   // internal -> display order
+            long vout = ReadU32(b, ref pos);
+            long sl = ReadVarint(b, ref pos);
+            var ss = ReadBytes(b, ref pos, sl);
+            long seq = ReadU32(b, ref pos);
+            ins.Add(new TxInputN(ToHex(prev), vout, ss, seq));
+        }
+        long nOut = ReadVarint(b, ref pos);
+        if (nOut < 0 || nOut > 1_000_000) throw new FormatException("nOut");
+        var outs = new List<TxOutputN>((int)Math.Min(nOut, 4096));
+        for (long k = 0; k < nOut; k++)
+        {
+            long val = ReadU64(b, ref pos);
+            long sl = ReadVarint(b, ref pos);
+            outs.Add(new TxOutputN(val, ReadBytes(b, ref pos, sl)));
+        }
+        long lockTime = ReadU32(b, ref pos);
+        return new NativeTx(version, ins, outs, lockTime);
+    }
+
+    /// <summary>Parse a complete raw transaction (must consume all bytes). null on any malformed input.</summary>
+    public static NativeTx? Parse(byte[] raw)
+    {
+        try { int p = 0; var tx = Deserialize(raw, ref p); return p == raw.Length ? tx : null; }
+        catch { return null; }
+    }
 }
