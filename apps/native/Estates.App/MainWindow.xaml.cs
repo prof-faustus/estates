@@ -565,13 +565,36 @@ public partial class MainWindow : Window
         Broadcast(Messenger.Text(MyPub(), text));
     }
 
-    // Apply a message locally (folds into history) and push it ENCRYPTED to every live peer.
+    private long _msgSeq;
+
+    // THE RULE: every message is a BSV TRANSACTION, sent IP-to-IP to each player (and to miners once
+    // funded). UI work stays on the UI thread; the heavy seal+serialize+socket work runs OFF-thread and
+    // fully guarded, so a peer-link callback can never block or crash the app.
     private void Broadcast(ChatMessage m)
     {
         _conv.Apply(m); RenderChat();
-        var wire = Convert.ToHexString(Messenger.Serialize(m));
-        var frame = ChatCodec.Seal(_master, _node.PeerWalletPubs(), wire);
-        if (frame is not null) foreach (var l in _node.LiveLinks()) l.Send(frame);
+        var peers = _node.PeerWalletPubs();
+        var links = _node.LiveLinks();
+        byte[] payload = Messenger.Serialize(m);
+        byte[] master = _master, myPkh = Recovery.Hash160(_walletPub);
+        string conv = _conv.Id;
+        System.Threading.Tasks.Task.Run(() =>
+        {
+            try
+            {
+                var ring = new KeyRing(master);
+                foreach (var peerPub in peers)
+                {
+                    long seq = System.Threading.Interlocked.Increment(ref _msgSeq);
+                    byte[] carrier = TxMessage.SealCarrier(ring.MessagePriv(peerPub, conv, seq), peerPub, TxType.Chat2P, payload);
+                    var tx = new NativeTx(1, new[] { new TxInputN(new string('0', 64), 0xffffffff, System.Array.Empty<byte>(), 0xffffffff) },
+                        new[] { new TxOutputN(1, TxTransport.MessageOutput(carrier, myPkh)) }, 0);
+                    byte[] raw = Tx.Serialize(tx);
+                    foreach (var l in links) l.Send(raw);            // IP-to-IP to players, AS a transaction
+                }
+            }
+            catch (System.Exception ex) { App.CrashLog("chat-send", ex); }
+        });
     }
 
     // A small modal text prompt (for Reply / Edit) — no external dependencies.
@@ -588,15 +611,23 @@ public partial class MainWindow : Window
         return res;
     }
 
+    // Incoming bytes are parsed AS A TRANSACTION; the carrier addressed to us is extracted. Fully
+    // guarded so a malformed/hostile frame can never escape to the peer-link thread.
     private void OnChatFrame(PeerLink link, byte[] frame)
     {
-        var opened = ChatCodec.Open(frame, _master, _walletPub);
-        if (opened is null) return;
-        ChatMessage? m = null;
-        try { m = Messenger.Parse(Convert.FromHexString(opened.Value.text)); } catch { }
-        m ??= Messenger.Text(opened.Value.from, opened.Value.text);
-        _conv.Apply(m); RenderChat();
-        if (m.FromPub != MyPub() && (m.Kind is ChatKind.Text or ChatKind.Reply or ChatKind.Media))
-            Broadcast(Messenger.Read(MyPub(), m.Id));
+        try
+        {
+            var tx = Tx.Parse(frame);
+            if (tx is null) return;
+            var ex = TxTransport.Extract(tx, _master);
+            if (ex is null) return;
+            ChatMessage? m = null;
+            try { m = Messenger.Parse(ex.Value.plaintext); } catch { }
+            if (m is null) return;
+            _conv.Apply(m); RenderChat();
+            if (m.FromPub != MyPub() && (m.Kind is ChatKind.Text or ChatKind.Reply or ChatKind.Media))
+                Broadcast(Messenger.Read(MyPub(), m.Id));
+        }
+        catch (System.Exception e) { App.CrashLog("chat-recv", e); }
     }
 }

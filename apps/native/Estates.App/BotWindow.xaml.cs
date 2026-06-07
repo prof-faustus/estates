@@ -78,26 +78,51 @@ public partial class BotWindow : Window
 
     private void OnBotChat(PeerLink link, byte[] frame)
     {
-        var opened = ChatCodec.Open(frame, _master, _pub);
-        if (opened is null) return;
-        ChatMessage? m = null;
-        try { m = Messenger.Parse(Convert.FromHexString(opened.Value.text)); } catch { }
-        m ??= Messenger.Text(opened.Value.from, opened.Value.text);
-        if (m.FromPub == Tx.ToHex(_pub)) return;                            // ignore our own echo
-        if (m.Kind is ChatKind.Text or ChatKind.Reply or ChatKind.Media)
+        try
         {
-            Log($"chat ← {opened.Value.from[..6]}: {m.Display}");
-            SendChat(Messenger.Read(Tx.ToHex(_pub), m.Id));                  // read receipt (their ✓)
-            SendChat(Messenger.Text(Tx.ToHex(_pub), $"got it: “{m.Display}”"));   // auto-reply
+            var tx = Tx.Parse(frame);
+            if (tx is null) return;
+            var ex = TxTransport.Extract(tx, _master);
+            if (ex is null) return;
+            ChatMessage? m = null;
+            try { m = Messenger.Parse(ex.Value.plaintext); } catch { }
+            if (m is null || m.FromPub == Tx.ToHex(_pub)) return;           // ignore our own echo
+            if (m.Kind is ChatKind.Text or ChatKind.Reply or ChatKind.Media)
+            {
+                Log($"chat ← {m.FromPub[..6]}: {m.Display}");
+                SendChat(Messenger.Read(Tx.ToHex(_pub), m.Id));             // read receipt (their ✓)
+                SendChat(Messenger.Text(Tx.ToHex(_pub), $"got it: “{m.Display}”"));   // auto-reply
+            }
         }
+        catch (System.Exception e) { App.CrashLog("bot-chat-recv", e); }
     }
 
+    private long _msgSeq;
+
+    // Every message is a TRANSACTION, sent IP-to-IP per peer; heavy work off-thread and fully guarded.
     private void SendChat(ChatMessage m)
     {
-        var wire = Convert.ToHexString(Messenger.Serialize(m));
-        var frame = ChatCodec.Seal(_master, _node.PeerWalletPubs(), wire);
-        if (frame is null) return;
-        foreach (var l in _node.LiveLinks()) l.Send(frame);
+        var peers = _node.PeerWalletPubs();
+        var links = _node.LiveLinks();
+        byte[] payload = Messenger.Serialize(m);
+        byte[] master = _master, myPkh = Recovery.Hash160(_pub);
+        System.Threading.Tasks.Task.Run(() =>
+        {
+            try
+            {
+                var ring = new KeyRing(master);
+                foreach (var peerPub in peers)
+                {
+                    long seq = System.Threading.Interlocked.Increment(ref _msgSeq);
+                    byte[] carrier = TxMessage.SealCarrier(ring.MessagePriv(peerPub, "lobby", seq), peerPub, TxType.Chat2P, payload);
+                    var tx = new NativeTx(1, new[] { new TxInputN(new string('0', 64), 0xffffffff, System.Array.Empty<byte>(), 0xffffffff) },
+                        new[] { new TxOutputN(1, TxTransport.MessageOutput(carrier, myPkh)) }, 0);
+                    byte[] raw = Tx.Serialize(tx);
+                    foreach (var l in links) l.Send(raw);
+                }
+            }
+            catch (System.Exception ex) { App.CrashLog("bot-chat-send", ex); }
+        });
         if (m.Kind is ChatKind.Text or ChatKind.Reply) Log($"chat → {m.Display}");
     }
 

@@ -8,11 +8,11 @@ public partial class App : Application
     {
         // Mission-critical: a UI exception must never silently kill the app — surface
         // it and keep the window alive where possible.
-        DispatcherUnhandledException += (_, args) =>
-        {
-            MessageBox.Show($"ESTATES hit an error:\n\n{args.Exception.Message}", "ESTATES", MessageBoxButton.OK, MessageBoxImage.Warning);
-            args.Handled = true;
-        };
+        // Never crash silently and never pop a window: log every fault (UI thread, background threads,
+        // and tasks) to a file and keep the app alive where possible.
+        DispatcherUnhandledException += (_, args) => { CrashLog("UI", args.Exception); args.Handled = true; };
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => CrashLog("DOMAIN", e.ExceptionObject as Exception);
+        System.Threading.Tasks.TaskScheduler.UnobservedTaskException += (_, e) => { CrashLog("TASK", e.Exception); e.SetObserved(); };
         // GUARANTEED TERMINATION (absolute rule): a game/lobby exists only while a player
         // is up. ShutdownMode=OnLastWindowClose means closing the window shuts the app;
         // every P2P thread is a BACKGROUND thread and every socket is owned by this one
@@ -46,5 +46,11 @@ public partial class App : Application
         _exiting = true;
         foreach (var t in Teardowns) { try { t(); } catch { } }  // clean socket teardown
         Environment.Exit(0);                                     // OS reaps every thread + socket — nothing survives
+    }
+
+    /// <summary>Append a fault to a crash log (never throws, never opens a window).</summary>
+    internal static void CrashLog(string where, System.Exception? ex)
+    {
+        try { System.IO.File.AppendAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "estates-crash.log"), $"{System.DateTime.Now:o} [{where}] {ex}\n\n"); } catch { }
     }
 }
