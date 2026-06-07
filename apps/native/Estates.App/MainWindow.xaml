@@ -4,7 +4,15 @@
         Title="ESTATES" Height="860" Width="1280" Icon="appicon.ico"
         Background="{StaticResource Bg}" WindowStartupLocation="CenterScreen">
     <DockPanel Margin="16">
-        <TextBlock x:Name="Wordmark" DockPanel.Dock="Top" Text="ESTATES" Foreground="{StaticResource Fg}" FontSize="24" FontWeight="Bold" Margin="4,0,0,12"/>
+        <DockPanel DockPanel.Dock="Top" Margin="4,0,0,12">
+            <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
+                <TextBlock Text="network" Foreground="#9aa0a6" FontSize="11" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                <ComboBox x:Name="Network" SelectedIndex="0" Width="130" VerticalAlignment="Center">
+                    <ComboBoxItem>mainnet</ComboBoxItem><ComboBoxItem>testnet</ComboBoxItem><ComboBoxItem>regtest</ComboBoxItem>
+                </ComboBox>
+            </StackPanel>
+            <TextBlock x:Name="Wordmark" Text="ESTATES" Foreground="{StaticResource Fg}" FontSize="24" FontWeight="Bold"/>
+        </DockPanel>
 
         <TabControl x:Name="Tabs" Background="{StaticResource Bg}" BorderThickness="0" Padding="0">
             <!-- LOBBY -->
@@ -23,10 +31,6 @@
                     </Border>
                     <Border Grid.Column="1" Background="{StaticResource Panel}" CornerRadius="10" Padding="16">
                         <StackPanel>
-                            <TextBlock Text="network" Foreground="#9aa0a6" FontSize="11"/>
-                            <ComboBox x:Name="Network" SelectedIndex="0" Margin="0,2,0,10">
-                                <ComboBoxItem>mainnet</ComboBoxItem><ComboBoxItem>testnet</ComboBoxItem><ComboBoxItem>regtest</ComboBoxItem>
-                            </ComboBox>
                             <TextBlock Text="players" Foreground="#9aa0a6" FontSize="11"/>
                             <ComboBox x:Name="SeatCount" SelectedIndex="0" Margin="0,2,0,14">
                                 <ComboBoxItem>2</ComboBoxItem><ComboBoxItem>3</ComboBoxItem><ComboBoxItem>4</ComboBoxItem><ComboBoxItem>5</ComboBoxItem><ComboBoxItem>6</ComboBoxItem>

@@ -95,7 +95,7 @@ public partial class BotWindow : Window
     private void SendChat(ChatMessage m)
     {
         var wire = Convert.ToHexString(Messenger.Serialize(m));
-        var frame = ChatCodec.Seal(_master, _node.PeerWalletPubs(), wire);   // encrypted to live peers
+        var frame = ChatCodec.Seal(_master, _node.PeerWalletPubs(), wire);
         if (frame is null) return;
         foreach (var l in _node.LiveLinks()) l.Send(frame);
         if (m.Kind is ChatKind.Text or ChatKind.Reply) Log($"chat → {m.Display}");

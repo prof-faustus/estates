@@ -283,6 +283,7 @@ public partial class MainWindow : Window
                     sp.Children.Add(Lab("password (leave blank if you set none)")); sp.Children.Add(pw);
                     var go = Btn2("Unlock");
                     go.Click += (_, _) => { try { var s = WalletStore.Open(path, pw.Password); if (s is null) { msg.Text = "wrong password"; return; } Unlocked(s); } catch (Exception ex) { msg.Text = ex.Message; } };
+                    pw.KeyDown += (_, e) => { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Return) { e.Handled = true; go.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)); } };
                     sp.Children.Add(go);
                     var load = Btn2("Load a different wallet.dat file…"); load.Click += (_, _) => LoadFile(); sp.Children.Add(load);
 
@@ -302,11 +303,13 @@ public partial class MainWindow : Window
                     sp.Children.Add(Lab("password (optional)")); sp.Children.Add(pw);
                     var create = Btn2("Create a new wallet");
                     create.Click += (_, _) => { try { Unlocked(WalletStore.OpenOrCreate(path, pw.Password)); } catch (Exception ex) { msg.Text = ex.Message; } };
+                    pw.KeyDown += (_, e) => { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Return) { e.Handled = true; create.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)); } };
                     sp.Children.Add(create);
                     sp.Children.Add(Note("…or restore an existing wallet:"));
                     sp.Children.Add(Lab("seed (64-hex backup)")); var seedBox = FieldBox(); sp.Children.Add(seedBox);
                     var restore = Btn2("Restore from seed");
                     restore.Click += (_, _) => { try { string h = seedBox.Text.Trim(); if (h.Length != 64) { msg.Text = "seed must be 64 hex characters"; return; } byte[] s = Tx.FromHex(h); WalletStore.Create(path, s, pw.Password); Unlocked(s); } catch (Exception ex) { msg.Text = ex.Message; } };
+                    seedBox.PreviewKeyDown += (_, e) => { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Return) { e.Handled = true; restore.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)); } };
                     sp.Children.Add(restore);
                     var load = Btn2("Load a wallet.dat file…"); load.Click += (_, _) => LoadFile(); sp.Children.Add(load);
                 }
@@ -346,8 +349,11 @@ public partial class MainWindow : Window
         string? result = null;
         var ok = new Button { Content = "OK", HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
         ok.Click += (_, _) => { result = pw.Password; w.DialogResult = true; };
+        // Enter submits exactly as clicking OK (Enter MUST equal the button everywhere).
+        pw.KeyDown += (_, e) => { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Return) { e.Handled = true; result = pw.Password; w.DialogResult = true; } };
         sp.Children.Add(ok);
         w.Content = sp;
+        pw.Focus();
         w.ShowDialog();
         return result;
     }
@@ -386,6 +392,7 @@ public partial class MainWindow : Window
         var ftx = F(); var fvout = F(); var fsat = F(); var fidx = F(); var fo2 = O();
         var fbtn = Btn("Import coin");
         fbtn.Click += (_, _) => { try { w.AddCoin(ftx.Text.Trim(), long.Parse(fvout.Text.Trim()), long.Parse(fsat.Text.Trim()), int.Parse(fidx.Text.Trim())); fo2.Text = $"imported · balance {w.Balance()} sat"; ShowBal(); } catch (Exception e) { fo2.Text = e.Message; } };
+        foreach (var f in new[] { ftx, fvout, fsat, fidx }) f.PreviewKeyDown += (_, e) => { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Return) { e.Handled = true; fbtn.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)); } };
         fund.Children.Add(L("txid")); fund.Children.Add(ftx); fund.Children.Add(L("vout")); fund.Children.Add(fvout); fund.Children.Add(L("value (sat)")); fund.Children.Add(fsat); fund.Children.Add(L("address index holding it")); fund.Children.Add(fidx); fund.Children.Add(fbtn); fund.Children.Add(fo2);
         tabs.Items.Add(Tab("Fund", fund));
 
@@ -412,6 +419,7 @@ public partial class MainWindow : Window
             }
             catch (Exception e) { sbtn.IsEnabled = true; so.Text = e.Message; }
         };
+        foreach (var f in new[] { to, amt, fee, peer }) f.PreviewKeyDown += (_, e) => { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Return) { e.Handled = true; sbtn.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)); } };
         send.Children.Add(L("Pay to (address)")); send.Children.Add(to); send.Children.Add(L("Amount (sat)")); send.Children.Add(amt); send.Children.Add(L("Fee (sat)")); send.Children.Add(fee);
         send.Children.Add(L("Broadcast peer (host:port)")); send.Children.Add(peer); send.Children.Add(sbtn); send.Children.Add(so);
         send.Children.Add(L("Signed raw transaction")); send.Children.Add(raw);
@@ -562,7 +570,7 @@ public partial class MainWindow : Window
     {
         _conv.Apply(m); RenderChat();
         var wire = Convert.ToHexString(Messenger.Serialize(m));
-        var frame = ChatCodec.Seal(_master, _node.PeerWalletPubs(), wire);   // encrypted; on-chain when funded
+        var frame = ChatCodec.Seal(_master, _node.PeerWalletPubs(), wire);
         if (frame is not null) foreach (var l in _node.LiveLinks()) l.Send(frame);
     }
 
@@ -586,9 +594,8 @@ public partial class MainWindow : Window
         if (opened is null) return;
         ChatMessage? m = null;
         try { m = Messenger.Parse(Convert.FromHexString(opened.Value.text)); } catch { }
-        m ??= Messenger.Text(opened.Value.from, opened.Value.text);   // plain text from an older peer
+        m ??= Messenger.Text(opened.Value.from, opened.Value.text);
         _conv.Apply(m); RenderChat();
-        // Send a read receipt back for content we received from someone else (the ✓ they see).
         if (m.FromPub != MyPub() && (m.Kind is ChatKind.Text or ChatKind.Reply or ChatKind.Media))
             Broadcast(Messenger.Read(MyPub(), m.Id));
     }
