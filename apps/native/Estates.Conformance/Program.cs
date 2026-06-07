@@ -473,6 +473,29 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     sup.Dispose();
 }
 
+// NODE WALLET: a real wallet that SEES immature/unconfirmed/spendable coins from the chain (the fake
+// node-less wallet cannot). A mined coinbase shows IMMATURE, matures to SPENDABLE at 100 confs, a
+// mempool pay shows UNCONFIRMED, and a spend removes the coin.
+{
+    var master = new byte[32]; master[0] = 7;
+    var pub = Cipher.PublicKey(master);
+    var script = NodeWallet.P2pkhScript(Recovery.Hash160(pub));
+    var nw = new NodeWallet(new[] { pub });
+    var cb = new NodeWallet.WTx("cb1", Array.Empty<NodeWallet.WIn>(), new[] { new NodeWallet.WOut(1_250_000_000, script) });
+    nw.ApplyBlock(1000, new[] { cb });
+    X("nodewallet: mined coinbase shows as IMMATURE", nw.Immature() == 1_250_000_000 && nw.Spendable() == 0);
+    nw.SetTip(1098);
+    X("nodewallet: still immature at 99 confs", nw.Immature() == 1_250_000_000);
+    nw.SetTip(1099);
+    X("nodewallet: matures to SPENDABLE at 100 confs", nw.Spendable() == 1_250_000_000 && nw.Immature() == 0);
+    nw.ApplyMempoolTx(new NodeWallet.WTx("mp1", Array.Empty<NodeWallet.WIn>(), new[] { new NodeWallet.WOut(50_000, script) }));
+    X("nodewallet: mempool pay shows UNCONFIRMED", nw.Unconfirmed() == 50_000);
+    var spend = new NodeWallet.WTx("sp1", new[] { new NodeWallet.WIn("cb1", 0) }, Array.Empty<NodeWallet.WOut>());
+    nw.ApplyBlock(1101, new[] { new NodeWallet.WTx("cbx", Array.Empty<NodeWallet.WIn>(), Array.Empty<NodeWallet.WOut>()), spend });
+    X("nodewallet: spent coinbase is removed", nw.Spendable() == 0);
+    X("nodewallet: foreign pay is ignored (not mine)", new NodeWallet(new[] { pub }).Immature() == 0);
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
