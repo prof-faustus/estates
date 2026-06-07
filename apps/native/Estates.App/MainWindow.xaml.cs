@@ -510,30 +510,78 @@ public partial class MainWindow : Window
         foreach (var m in _conv.History)
         {
             var line = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6) };
+            if (m.Kind == ChatKind.Reply) line.Inlines.Add(new System.Windows.Documents.Run("↩ ") { Foreground = B("#6a6f76") });
             line.Inlines.Add(new System.Windows.Documents.Run(NameFor(m.FromPub) + "  ") { Foreground = B("#f5a623"), FontWeight = FontWeights.SemiBold });
             line.Inlines.Add(new System.Windows.Documents.Run(m.Display) { Foreground = m.Deleted ? B("#6a6f76") : B("#cfd2d6") });
             if (m.EditedText is not null && !m.Deleted) line.Inlines.Add(new System.Windows.Documents.Run("  (edited)") { Foreground = B("#6a6f76"), FontSize = 10 });
             if (m.Reactions.Count > 0) line.Inlines.Add(new System.Windows.Documents.Run("  " + string.Join(" ", m.Reactions.Values)) { Foreground = B("#ffd54f") });
             if (m.ReadBy.Count > 0) line.Inlines.Add(new System.Windows.Documents.Run("  ✓") { Foreground = B("#7bd88f"), FontSize = 10 });
+            // Right-click a message: reply, react, and (your own) edit / delete — a usable messenger.
+            if (!m.Deleted)
+            {
+                var cm = new ContextMenu();
+                var reply = new MenuItem { Header = "Reply" };
+                reply.Click += (_, _) => { var t = Prompt("Reply", ""); if (!string.IsNullOrWhiteSpace(t)) Broadcast(Messenger.Reply(MyPub(), m.Id, t)); };
+                cm.Items.Add(reply);
+                var react = new MenuItem { Header = "React" };
+                foreach (var e in new[] { "\U0001F44D", "❤", "\U0001F602", "\U0001F389", "\U0001F62E" })
+                { var em = e; var mi = new MenuItem { Header = e }; mi.Click += (_, _) => Broadcast(Messenger.React(MyPub(), m.Id, em)); react.Items.Add(mi); }
+                cm.Items.Add(react);
+                if (m.FromPub == MyPub())
+                {
+                    var edit = new MenuItem { Header = "Edit" };
+                    edit.Click += (_, _) => { var t = Prompt("Edit", m.Display); if (t is not null) Broadcast(Messenger.Edit(MyPub(), m.Id, t)); };
+                    var del = new MenuItem { Header = "Delete" };
+                    del.Click += (_, _) => Broadcast(Messenger.Delete(MyPub(), m.Id));
+                    cm.Items.Add(edit); cm.Items.Add(del);
+                }
+                line.ContextMenu = cm;
+            }
             _chatList.Children.Add(line);
         }
     }
 
+    private string MyPub() => Tx.ToHex(_walletPub);
+
     private void SendChat(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return;
-        var m = Messenger.Text(Tx.ToHex(_walletPub), text);
+        Broadcast(Messenger.Text(MyPub(), text));
+    }
+
+    // Apply a message locally (folds into history) and push it ENCRYPTED to every live peer.
+    private void Broadcast(ChatMessage m)
+    {
         _conv.Apply(m); RenderChat();
         var wire = Convert.ToHexString(Messenger.Serialize(m));
         var frame = ChatCodec.Seal(_master, _node.PeerWalletPubs(), wire);   // encrypted; on-chain when funded
         if (frame is not null) foreach (var l in _node.LiveLinks()) l.Send(frame);
     }
 
+    // A small modal text prompt (for Reply / Edit) — no external dependencies.
+    private string? Prompt(string title, string initial)
+    {
+        var w = new Window { Title = title, Width = 440, Height = 150, WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this, Background = B("#1b1d1e"), ResizeMode = ResizeMode.NoResize };
+        var sp = new StackPanel { Margin = new Thickness(14) };
+        var tb = new TextBox { Text = initial, Padding = new Thickness(8), FontSize = 13, Background = B("#171819"), Foreground = B("#e6e6e6"), BorderThickness = new Thickness(0) };
+        var ok = new Button { Content = "OK", Width = 90, Margin = new Thickness(0, 12, 0, 0), HorizontalAlignment = HorizontalAlignment.Right, Padding = new Thickness(10, 5, 10, 5) };
+        string? res = null;
+        ok.Click += (_, _) => { res = tb.Text; w.Close(); };
+        tb.KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Enter) { res = tb.Text; w.Close(); } };
+        sp.Children.Add(tb); sp.Children.Add(ok); w.Content = sp; tb.Focus(); tb.SelectAll(); w.ShowDialog();
+        return res;
+    }
+
     private void OnChatFrame(PeerLink link, byte[] frame)
     {
         var opened = ChatCodec.Open(frame, _master, _walletPub);
         if (opened is null) return;
-        try { var m = Messenger.Parse(Convert.FromHexString(opened.Value.text)); if (m is not null) { _conv.Apply(m); RenderChat(); return; } } catch { }
-        _conv.Apply(Messenger.Text(opened.Value.from, opened.Value.text)); RenderChat();
+        ChatMessage? m = null;
+        try { m = Messenger.Parse(Convert.FromHexString(opened.Value.text)); } catch { }
+        m ??= Messenger.Text(opened.Value.from, opened.Value.text);   // plain text from an older peer
+        _conv.Apply(m); RenderChat();
+        // Send a read receipt back for content we received from someone else (the ✓ they see).
+        if (m.FromPub != MyPub() && (m.Kind is ChatKind.Text or ChatKind.Reply or ChatKind.Media))
+            Broadcast(Messenger.Read(MyPub(), m.Id));
     }
 }
