@@ -31,6 +31,8 @@ public sealed class BsvPeer : IDisposable
     public event Action<IReadOnlyList<byte[]>>? OnHeaders;
     /// <summary>Raised when the peer announces inventory (txids/blocks) to us.</summary>
     public event Action<IReadOnlyList<(uint type, byte[] hash)>>? OnInv;
+    /// <summary>Raised with each raw block the peer sends in response to our getdata. Feed to ChainSync.</summary>
+    public event Action<byte[]>? OnBlock;
     /// <summary>Raised after we hand a broadcast tx to the peer (it sent getdata and we sent the tx) —
     /// the confirmation that the broadcast reached the network. Carries the txid.</summary>
     public event Action<string>? OnTxSent;
@@ -73,6 +75,26 @@ public sealed class BsvPeer : IDisposable
         var s = _stream ?? throw new InvalidOperationException("not connected");
         byte[] framed = BsvWire.Frame(_net, command, payload);
         await s.WriteAsync(framed).ConfigureAwait(false);
+    }
+
+    /// <summary>Ask the peer for full blocks by hash (display order); they arrive on OnBlock. Builds a
+    /// getdata inv vector with MSG_BLOCK (type 2) entries, hashes converted to internal byte order.</summary>
+    public async Task RequestBlocks(IReadOnlyList<string> blockHashesDisplay)
+    {
+        if (blockHashesDisplay is null || blockHashesDisplay.Count == 0) return;
+        var p = new List<byte>();
+        long c = blockHashesDisplay.Count;
+        if (c < 0xfd) p.Add((byte)c);
+        else { p.Add(0xfd); p.Add((byte)(c & 0xff)); p.Add((byte)((c >> 8) & 0xff)); }
+        foreach (var hx in blockHashesDisplay)
+        {
+            byte[] h; try { h = Tx.FromHex(hx); } catch { return; }
+            if (h.Length != 32) return;
+            Array.Reverse(h);                                   // display -> internal
+            p.Add(2); p.Add(0); p.Add(0); p.Add(0);            // MSG_BLOCK = 2 (uint32 LE)
+            p.AddRange(h);
+        }
+        await SendAsync("getdata", p.ToArray()).ConfigureAwait(false);
     }
 
     private async Task ReadLoopAsync(CancellationToken ct)
@@ -137,6 +159,9 @@ public sealed class BsvPeer : IDisposable
                 if (hs is not null) OnHeaders?.Invoke(hs);
                 break;
             }
+            case "block":
+                OnBlock?.Invoke(m.Payload);             // raw block → caller validates via ChainSync
+                break;
             // sendheaders/feefilter/addr/etc.: safely ignored (total parser already validated framing)
         }
     }
