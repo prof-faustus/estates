@@ -62,4 +62,41 @@ public sealed class SpvWallet
     public SpvEnvelope? ProofFor(string outpoint) { lock (_lock) return _proofs.TryGetValue(outpoint, out var e) ? e : null; }
     public void Spend(string outpoint) { lock (_lock) { _utxos.Remove(outpoint); _proofs.Remove(outpoint); } }
     public int CoinCount { get { lock (_lock) return _utxos.Count; } }
+
+    /// <summary>Persist the stored envelopes so the next open shows the balance instantly (no re-fetch).
+    /// One line per distinct envelope: rawTxHex|header80Hex|branchCsv|index.</summary>
+    public void Save(string path)
+    {
+        lock (_lock)
+        {
+            var seen = new HashSet<string>();
+            var sb = new System.Text.StringBuilder();
+            foreach (var e in _proofs.Values)
+            {
+                string key = Tx.ToHex(e.RawTx);
+                if (!seen.Add(key)) continue;
+                sb.Append(key).Append('|').Append(Tx.ToHex(e.Header80)).Append('|').Append(string.Join(",", e.Branch)).Append('|').Append(e.Index).Append('\n');
+            }
+            System.IO.File.WriteAllText(path, sb.ToString());
+        }
+    }
+
+    /// <summary>Load persisted envelopes and re-credit (each is re-verified by Receive). Total — bad
+    /// lines are skipped.</summary>
+    public void Load(string path)
+    {
+        if (!System.IO.File.Exists(path)) return;
+        foreach (var line in System.IO.File.ReadAllLines(path))
+        {
+            if (line.Length == 0) continue;
+            var p = line.Split('|');
+            if (p.Length != 4) continue;
+            try
+            {
+                var branch = p[2].Length == 0 ? new List<string>() : new List<string>(p[2].Split(','));
+                Receive(new SpvEnvelope(Tx.FromHex(p[0]), Tx.FromHex(p[1]), branch, long.Parse(p[3])));
+            }
+            catch { }
+        }
+    }
 }

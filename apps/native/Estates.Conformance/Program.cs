@@ -743,6 +743,22 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("blockmerkle: single-tx block has empty branch verifying to root", sbr is not null && sbr.Value.branch.Count == 0 && MerkleProof.Verify(txids[0], sbr.Value.branch, 0, BlockMerkle.Root(single)));
 }
 
+// SPV WALLET PERSISTENCE ("open and it's just there"): a received coin is saved and reloads on a
+// fresh wallet with the balance intact — no re-fetch, instant.
+{
+    byte[] osc = NodeWallet.P2pkhScript(Recovery.Hash160(Cipher.PublicKey(new byte[32] { 81, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 })));
+    var otx = new NativeTx(1, new[] { new TxInputN(new string('0', 64), 0, new byte[] { 0 }, 0xffffffff) }, new[] { new TxOutputN(424242, osc) }, 0);
+    byte[] oInt = Tx.FromHex(Tx.Txid(otx)); System.Array.Reverse(oInt);
+    var ohdr = new byte[80]; ohdr[72] = 0xff; ohdr[73] = 0xff; ohdr[74] = 0x7f; ohdr[75] = 0x20; System.Array.Copy(oInt, 0, ohdr, 36, 32);
+    var oenv = new SpvEnvelope(Tx.Serialize(otx), ohdr, System.Array.Empty<string>(), 0);
+    var w1 = new SpvWallet(new[] { osc }); w1.Receive(oenv);
+    string pf = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "estates_spv_test.dat");
+    w1.Save(pf);
+    var w2 = new SpvWallet(new[] { osc }); w2.Load(pf);
+    X("spv-persist: a reloaded wallet shows the saved balance instantly", w2.Balance() == 424242 && w2.CoinCount == 1);
+    try { System.IO.File.Delete(pf); } catch { }
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
