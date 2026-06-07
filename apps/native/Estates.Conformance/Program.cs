@@ -673,7 +673,7 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
 
 // SPV WALLET (real BSV peer-to-peer SPV): a coin arrives as tx + merkle proof + header (the envelope
 // the sender stored and handed over). The wallet VERIFIES and STORES it; balance is its own verified
-// coins. No node, no scan — instant/offline. A tampered proof credits nothing.
+// coins. No node, no scan — instant, always online. A tampered proof credits nothing.
 {
     byte[] ssc = NodeWallet.P2pkhScript(Recovery.Hash160(Cipher.PublicKey(new byte[32] { 51, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 })));
     var stx = new NativeTx(1, new[] { new TxInputN(new string('0', 64), 0, new byte[] { 1 }, 0xffffffff) }, new[] { new TxOutputN(250_000, ssc) }, 0);
@@ -703,7 +703,7 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("type42: payee never publishes an address (derived address is valid mainnet P2PKH)", Type42Payment.PayToAddress(payeePub, payerPriv, "inv-1", BsvNet.Mainnet).StartsWith("1"));
 }
 
-// SPV PAYMENT (offline accept): Alice pays Bob and hands over a merkle-proof envelope for the input;
+// SPV PAYMENT (online accept): Alice pays Bob and hands over a merkle-proof envelope for the input;
 // Bob verifies it against headers and accepts instantly. Missing/tampered proof => rejected.
 {
     byte[] bobScript = NodeWallet.P2pkhScript(Recovery.Hash160(Cipher.PublicKey(new byte[32] { 71, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 })));

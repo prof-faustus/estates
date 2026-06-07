@@ -52,6 +52,13 @@ public sealed class StandaloneWallet
     public IReadOnlyList<Coin> Coins => _coins;
     public long Balance() => _coins.Sum(c => c.Sats);
 
+    /// <summary>Pending (0-conf, unconfirmed) balance. This local wallet holds only confirmed coins, so
+    /// it is 0; it is populated from the node-backed UTXO view once the in-client node feeds it.</summary>
+    public long PendingSats => 0;
+    /// <summary>Immature coinbase balance (mined, &lt;100 confirmations). 0 for a local wallet; populated
+    /// from the node-backed UTXO view (UtxoSet) once the in-client node feeds it.</summary>
+    public long ImmatureSats => 0;
+
     /// <summary>Record a coin this wallet owns. `addrIndex` is the wallet address that holds it.
     /// Used both for a test-faucet import and for a P2P transfer received from a peer.</summary>
     public void AddCoin(string txid, long vout, long sats, int addrIndex)

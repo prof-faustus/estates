@@ -1,4 +1,4 @@
-// Estates.Core/SpvPayment.cs — the offline SPV payment exchange (the capstone, per the SPV appendix).
+// Estates.Core/SpvPayment.cs — the online SPV payment exchange (the capstone, per the SPV appendix).
 // The payer (Alice) hands the payee (Bob) the payment transaction PLUS a merkle-proof envelope for
 // every input it spends — proof those input coins were mined. Bob VERIFIES each envelope against the
 // headers he already holds and accepts the payment INSTANTLY (always online, IP-to-IP), with no
