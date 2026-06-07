@@ -622,6 +622,27 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("walletengine: every receive address is fresh", a1.address != a2.address && a1.index != a2.index && a1.address.StartsWith("1"));
 }
 
+// CHAIN SYNC (the node's block pipeline): a valid-PoW block that links to the tip extends the chain
+// and funds the ledger; a block failing PoW or not linking to the tip is rejected.
+{
+    byte[] MkHeader(byte prev4) { var h = new byte[80]; h[0] = 1; h[4] = prev4; h[72] = 0xff; h[73] = 0xff; h[74] = 0x7f; h[75] = 0x20; return h; }  // bits 0x207fffff = easy target
+    var sc = NodeWallet.P2pkhScript(Recovery.Hash160(Cipher.PublicKey(new byte[32] { 41, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 })));
+    var cb = new NativeTx(1, new[] { new TxInputN(new string('0', 64), 0xffffffff, new byte[] { 0 }, 0xffffffff) }, new[] { new TxOutputN(5000, sc) }, 0);
+    byte[] MkBlock(byte prev4) { var r = new List<byte>(); r.AddRange(MkHeader(prev4)); r.Add(1); r.AddRange(Tx.Serialize(cb)); return r.ToArray(); }
+    var owned = new HashSet<string> { Tx.ToHex(sc) };
+
+    var cs = new ChainSync(new UtxoSet(), new Mempool());
+    var u = new UtxoSet(); cs = new ChainSync(u, new Mempool());
+    bool ok = cs.OnBlock(MkBlock(0));
+    X("chainsync: valid-PoW block extends chain + funds ledger (immature)", ok && cs.Height == 0 && u.ImmatureFor(owned) == 5000);
+    X("chainsync: a block not linking to the tip is rejected", !cs.OnBlock(MkBlock(0x99)));   // prev != tip
+
+    var hdrNoPow = MkHeader(0); hdrNoPow[72] = 0; hdrNoPow[73] = 0; hdrNoPow[74] = 0; hdrNoPow[75] = 0;   // bits=0 -> target 0
+    var bad = new List<byte>(); bad.AddRange(hdrNoPow); bad.Add(1); bad.AddRange(Tx.Serialize(cb));
+    X("chainsync: a block failing PoW is rejected", !new ChainSync(new UtxoSet(), new Mempool()).OnBlock(bad.ToArray()));
+    X("chainsync: garbage is rejected", !cs.OnBlock(new byte[] { 1, 2, 3 }));
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
