@@ -32,6 +32,8 @@ public enum TxType : ushort
     TableOpen     = 14,  // open a table
     GameStart     = 15,  // start a game
     Identity      = 16,  // a player IDENTITY NFT card (expandable attributes; links games + history)
+    BotFundOffer  = 17,  // human → bot: the 2-of-2 funding details (txid/vout/value + pubs + refund addr)
+    BotRefund     = 18,  // bot → human (on close): the half-signed 2-of-2 reclaim refunding the human 100%
 }
 
 public static class TxProtocol

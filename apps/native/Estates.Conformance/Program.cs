@@ -811,6 +811,25 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("multisig: unlock script is OP_0 + both sigs", Multisig.Unlock2of2(sigA, sigB)[0] == 0x00);
 }
 
+// BOT FUNDING refund-to-funder: the bot builds + half-signs the reclaim; Alice completes it; the final
+// tx carries a valid 2-of-2 unlock and pays 100% (minus fee) back to Alice's address. A forged bot
+// signature is rejected.
+{
+    byte[] aPriv = Type42.UniqueKey(new byte[32] { 96, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }, "alice2"); byte[] aPub = Secp256k1.PublicKey(aPriv);
+    byte[] bPriv = Type42.UniqueKey(new byte[32] { 97, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }, "bot2"); byte[] bPub = Secp256k1.PublicKey(bPriv);
+    byte[] ePriv = Type42.UniqueKey(new byte[32] { 98, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }, "eve2");
+    byte[] aRefund = NodeWallet.P2pkhScript(Recovery.Hash160(aPub));
+    var fund = new BotFund(new string('a', 64), 0, 1_000_000, aPub, bPub, aRefund);
+    var refund = BotFunding.BuildBotRefund(fund, bPriv, 500);
+    X("botfunding: bot half-signs the reclaim", refund.BotSig.Length > 2 && refund.Value == 1_000_000);
+    var final = BotFunding.CompleteRefund(refund, aPriv, aPub, bPub);
+    X("botfunding: Alice completes the refund (both sigs valid)", final is not null);
+    X("botfunding: refund pays 100% minus fee back to Alice", final!.Outputs[0].Value == 999_500 && Tx.ToHex(final.Outputs[0].Script) == Tx.ToHex(aRefund));
+    X("botfunding: final tx is fully unlocked (OP_0 + 2 sigs)", final.Inputs[0].ScriptSig.Length > 100 && final.Inputs[0].ScriptSig[0] == 0x00);
+    byte[] forged = Multisig.Sign(refund.Tx, 0, refund.LockScript, refund.Value, ePriv);
+    X("botfunding: a forged bot signature is rejected", BotFunding.CompleteRefund(refund with { BotSig = forged }, aPriv, aPub, bPub) is null);
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");

@@ -34,7 +34,7 @@ public partial class BotWindow : Window
         // peer's key — the announce can arrive a moment after the socket links.)
         _node.OnLink += link => link.OnFrame += (l, f) => Dispatcher.Invoke(() => OnBotChat(l, f));
         App.Teardowns.Add(() => { try { _node.Dispose(); } catch { } });
-        Closed += (_, _) => { _poll.Stop(); try { _node.Dispose(); } catch { } };
+        Closed += (_, _) => { _poll.Stop(); RefundHumanOnClose(); try { _node.Dispose(); } catch { } };
 
         ShowWallet();
         Log("automated bot started — connected as a peer node");
@@ -52,18 +52,60 @@ public partial class BotWindow : Window
         BotStatus.Text = "Connected · awaiting a real game";
     }
 
-    private void ShowWallet() => BotWallet.Text = $"wallet {_wallet.AddressAt(0)}\nbalance {_wallet.Balance()} sat";
+    // The 2-of-2 funding this bot holds from the human (Alice). The human funds it; the bot reclaims to
+    // the human on close. Null until the human funds the bot. There is NO import-coin path — funding is
+    // always a real on-chain payment to the {Alice, bot} 2-of-2.
+    private BotFund? _fund;
+
+    private void ShowWallet()
+    {
+        long held = _fund?.Value ?? 0;
+        BotWallet.Text = $"my 2-of-2 funding key:\n{Tx.ToHex(_pub)}\n\n" +
+                         (_fund is null
+                            ? "not funded yet — the human funds my 2-of-2 from their wallet"
+                            : $"funded by the human · {held} sat in a 2-of-2 I cannot move alone\nrefunded to the human in full when I close");
+    }
+
+    // The human funds the bot by sending the bot its 2-of-2 funding details IP-to-IP (txid/vout/value +
+    // the human's pubkey + the human's refund address). The bot records it; it never imports a coin.
+    public void OnFunded(BotFund f)
+    {
+        _fund = f;
+        Dispatcher.Invoke(() => { ShowWallet(); Log($"funded by the human: {f.Value} sat in a {2}-of-2 I cannot spend alone"); FundMsg.Text = $"funded · {f.Value} sat"; });
+    }
+
+    // refund-to-funder on close: build + half-sign the reclaim that pays 100% (minus fee) back to the
+    // human, and hand it to the human over the link. After this the bot holds nothing.
+    private void RefundHumanOnClose()
+    {
+        var f = _fund; if (f is null) return;
+        try
+        {
+            var r = BotFunding.BuildBotRefund(f, _master, 500);          // pay 100% (minus fee) back to the human, my half-signature
+            byte[] payload = BotFunding.EncodeRefund(r);
+            var ring = new KeyRing(_master);
+            byte[] myPkh = Recovery.Hash160(_pub);
+            foreach (var peerPub in _node.PeerWalletPubs())
+            {
+                long seq = System.Threading.Interlocked.Increment(ref _msgSeq);
+                byte[] carrier = TxMessage.SealCarrier(ring.MessagePriv(peerPub, "fund", seq), peerPub, TxType.BotRefund, payload);
+                var tx = new NativeTx(1, new[] { new TxInputN(new string('0', 64), 0xffffffff, System.Array.Empty<byte>(), 0xffffffff) },
+                    new[] { new TxOutputN(1, TxTransport.MessageOutput(carrier, myPkh)) }, 0);
+                byte[] raw = Tx.Serialize(tx);
+                foreach (var l in _node.LiveLinks()) { try { l.Send(raw); } catch { } }
+            }
+            Log($"close: refunded the human {f.Value - 500} sat — 2-of-2 reclaim half-signed and sent; I keep nothing");
+            _fund = null;
+        }
+        catch (Exception ex) { Log("refund-on-close error: " + ex.Message); }
+    }
 
     private void Fund_Click(object sender, RoutedEventArgs e)
     {
-        try
-        {
-            _wallet.AddCoin(FundTxid.Text.Trim(), long.Parse(FundVout.Text.Trim()), long.Parse(FundSat.Text.Trim()), 0);
-            FundMsg.Text = $"imported · balance {_wallet.Balance()} sat";
-            ShowWallet();
-            Log($"funded: +{FundSat.Text.Trim()} sat");
-        }
-        catch (Exception ex) { FundMsg.Text = ex.Message; }
+        // No import-coin. Funding is a real on-chain 2-of-2 payment from the human's wallet to this key.
+        try { Clipboard.SetText(Tx.ToHex(_pub)); FundMsg.Text = "copied my 2-of-2 funding key — fund me from your wallet"; }
+        catch { FundMsg.Text = $"my 2-of-2 funding key: {Tx.ToHex(_pub)}"; }
+        ShowWallet();
     }
 
     private void End_Click(object sender, RoutedEventArgs e) => Close();   // ends the bot (Closed reaps the node)
@@ -84,6 +126,12 @@ public partial class BotWindow : Window
             if (tx is null) return;
             var ex = TxTransport.Extract(tx, _master);
             if (ex is null) return;
+            if (ex.Value.type == TxType.BotFundOffer)                       // the human is funding my 2-of-2
+            {
+                var f = BotFunding.ParseOffer(ex.Value.plaintext);
+                if (f is not null && Tx.ToHex(f.BobPub) == Tx.ToHex(_pub)) OnFunded(f);
+                return;
+            }
             ChatMessage? m = null;
             try { m = Messenger.Parse(ex.Value.plaintext); } catch { }
             if (m is null || m.FromPub == Tx.ToHex(_pub)) return;           // ignore our own echo

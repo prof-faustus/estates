@@ -451,6 +451,53 @@ public partial class MainWindow : Window
         ssend.Click += (_, _) => DoSpvSend();
         samt.PreviewKeyDown += (_, e) => { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Return) { e.Handled = true; DoSpvSend(); } };
         info.Children.Add(L("to address")); info.Children.Add(stoAddr); info.Children.Add(L("amount (sat)")); info.Children.Add(samt); info.Children.Add(ssend); info.Children.Add(sout);
+
+        // Fund a bot (2-of-2) — a REAL on-chain payment to a {me, bot} 2-of-2 I still control. The bot
+        // can never spend it alone, and refunds me 100% when it closes. No import-coin anywhere.
+        info.Children.Add(L("Fund a bot (2-of-2) — paste the bot's funding key + amount in sat"));
+        var bpub = F(); var bamt = F(); var bout = O();
+        var bfund = Btn("Fund bot");
+        async void DoFundBot()
+        {
+            try
+            {
+                byte[]? botPub = null; try { botPub = Tx.FromHex(bpub.Text.Trim()); } catch { }
+                if (botPub is null || botPub.Length != 33) { bout.Text = "bad bot key"; return; }
+                if (!long.TryParse(bamt.Text.Trim(), out long amt) || amt <= 0) { bout.Text = "bad amount"; return; }
+                byte[] alicePriv = w.ChildPriv(0), alicePub = w.ChildPub(0);
+                byte[] lockScript = Multisig.Lock2of2(alicePub, botPub);
+                var keymap = new Dictionary<string, (byte[] priv, byte[] pub)>();
+                for (int i = 0; i < 20; i++) { var pu = w.ChildPub(i); keymap[Tx.ToHex(NodeWallet.P2pkhScript(Recovery.Hash160(pu)))] = (w.ChildPriv(i), pu); }
+                byte[] changeScript = NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(0)));
+                var built = SpvSpend.Build(spv, keymap, lockScript, amt, 500, changeScript);   // pay the 2-of-2 (output 0)
+                if (built is null) { bout.Text = "insufficient SPV funds"; return; }
+                int rpcPort = _network == "mainnet" ? 8332 : _network == "testnet" ? 18332 : 18443;
+                using var rpc = new BsvRpc("127.0.0.1", rpcPort, "e", "e");
+                var r = await rpc.CallAsync("sendrawtransaction", Tx.ToHex(built.Raw));
+                if (r is null) { bout.Text = "broadcast rejected by node"; return; }
+                foreach (var c in built.Tx.Inputs) spv.Spend(c.PrevTxid + ":" + c.PrevVout);
+                spv.Save(spvPath); Dispatcher.Invoke(ShowSpv);
+
+                byte[] aliceRefund = NodeWallet.P2pkhScript(Recovery.Hash160(alicePub));
+                var fund = new BotFund(built.Txid, 0, amt, alicePub, botPub, aliceRefund);
+                _botFunds[Tx.ToHex(lockScript)] = (alicePriv, alicePub, botPub);
+
+                // tell the bot its funding details IP-to-IP so it can track + refund on close
+                var ring = new KeyRing(_walletSeed!);
+                long seq = System.DateTime.UtcNow.Ticks;
+                byte[] carrier = TxMessage.SealCarrier(ring.MessagePriv(botPub, "fund", seq), botPub, TxType.BotFundOffer, BotFunding.EncodeOffer(fund));
+                var otx = new NativeTx(1, new[] { new TxInputN(new string('0', 64), 0xffffffff, System.Array.Empty<byte>(), 0xffffffff) },
+                    new[] { new TxOutputN(1, TxTransport.MessageOutput(carrier, Recovery.Hash160(_walletPub))) }, 0);
+                byte[] oraw = Tx.Serialize(otx);
+                foreach (var l in _node.LiveLinks()) { try { l.Send(oraw); } catch { } }
+                bout.Text = $"FUNDED bot · {amt} sat in 2-of-2 · txid {built.Txid[..16]}… (refunded to you on close)";
+            }
+            catch (System.Exception e) { bout.Text = e.Message; }
+        }
+        bfund.Click += (_, _) => DoFundBot();
+        bamt.PreviewKeyDown += (_, e) => { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Return) { e.Handled = true; DoFundBot(); } };
+        info.Children.Add(L("bot funding key")); info.Children.Add(bpub); info.Children.Add(L("amount (sat)")); info.Children.Add(bamt); info.Children.Add(bfund); info.Children.Add(bout);
+
         info.Children.Add(L("Recovery seed (back this up)")); var sb0 = F(); sb0.IsReadOnly = true; sb0.Text = Tx.ToHex(_walletSeed!); info.Children.Add(sb0);
         info.Children.Add(L("Address #0")); var sa0 = F(); sa0.IsReadOnly = true; sa0.Text = w.AddressAt(0); info.Children.Add(sa0);
         var lk = Btn("Lock wallet"); lk.Click += (_, _) => relock(); info.Children.Add(lk);
@@ -714,6 +761,28 @@ public partial class MainWindow : Window
         return res;
     }
 
+    // The 2-of-2 bot fundings THIS human created, keyed by lock-script hex → the human's signing key and
+    // the bot's pubkey. Lets us complete (add our signature) the bot's refund reclaim on close.
+    private readonly Dictionary<string, (byte[] priv, byte[] pub, byte[] botPub)> _botFunds = new();
+
+    // The bot, on close, sent its half-signed 2-of-2 reclaim refunding us 100%. Add our signature and
+    // broadcast it — money safety: the funder always gets the funds back.
+    private async void CompleteBotRefund(byte[] payload)
+    {
+        try
+        {
+            var r = BotFunding.ParseRefund(payload);
+            if (r is null || !_botFunds.TryGetValue(Tx.ToHex(r.LockScript), out var k)) return;
+            var final = BotFunding.CompleteRefund(r, k.priv, k.pub, k.botPub);
+            if (final is null) return;                                   // forged/invalid bot signature
+            int rpcPort = _network == "mainnet" ? 8332 : _network == "testnet" ? 18332 : 18443;
+            using var rpc = new BsvRpc("127.0.0.1", rpcPort, "e", "e");
+            await rpc.CallAsync("sendrawtransaction", Tx.ToHex(Tx.Serialize(final)));
+            _botFunds.Remove(Tx.ToHex(r.LockScript));
+        }
+        catch (System.Exception e) { App.CrashLog("bot-refund-complete", e); }
+    }
+
     // Incoming bytes are parsed AS A TRANSACTION; the carrier addressed to us is extracted. Fully
     // guarded so a malformed/hostile frame can never escape to the peer-link thread.
     private void OnChatFrame(PeerLink link, byte[] frame)
@@ -724,6 +793,7 @@ public partial class MainWindow : Window
             if (tx is null) return;
             var ex = TxTransport.Extract(tx, _master);
             if (ex is null) return;
+            if (ex.Value.type == TxType.BotRefund) { CompleteBotRefund(ex.Value.plaintext); return; }
             ChatMessage? m = null;
             try { m = Messenger.Parse(ex.Value.plaintext); } catch { }
             if (m is null) return;
