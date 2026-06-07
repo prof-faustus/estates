@@ -433,6 +433,27 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("identity: total parse rejects garbage", Identity.Parse(new byte[] { 0xff, 0xff, 0xff }) is null);
 }
 
+// MESSENGER backend: message kinds round-trip; a conversation folds edit/delete/reaction/receipt
+// onto the target message (as WhatsApp/Telegram/Signal render them), not as noise.
+{
+    var t = Messenger.Text("alicepub", "hello");
+    var rt = Messenger.Parse(Messenger.Serialize(t));
+    X("messenger: a message round-trips on the wire", rt is not null && rt.Text == "hello" && rt.Kind == ChatKind.Text);
+    var conv = new Conversation("c1", false, new[] { "alicepub", "bobpub" });
+    conv.Apply(t);
+    conv.Apply(Messenger.Reply("bobpub", t.Id, "hi alice"));
+    X("messenger: history holds text + reply", conv.History.Count == 2);
+    conv.Apply(Messenger.React("bobpub", t.Id, "thumbsup"));
+    X("messenger: reaction folds onto its target", conv.History[0].Reactions.Count == 1);
+    conv.Apply(Messenger.Edit("alicepub", t.Id, "hello (edited)"));
+    X("messenger: edit updates in place, not appended", conv.History.Count == 2 && conv.History[0].Display == "hello (edited)");
+    conv.Apply(Messenger.Read("bobpub", t.Id));
+    X("messenger: read receipt folds", conv.History[0].ReadBy.Contains("bobpub"));
+    conv.Apply(Messenger.Delete("alicepub", t.Id));
+    X("messenger: delete marks the message", conv.History[0].Deleted && conv.History[0].Display == "(deleted)");
+    X("messenger: total parse rejects garbage", Messenger.Parse(new byte[] { 0x09 }) is null);
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
