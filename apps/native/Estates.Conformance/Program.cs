@@ -558,6 +558,24 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("mempool: a confirmed tx is evicted", !mp.Contains(Tx.Txid(a)) && mp.Count == 0);
 }
 
+// TX MESSAGE (the rule made concrete): a message is an encrypted typed transaction carrier with a
+// FRESH per-message key; it round-trips for the recipient, a stranger cannot open it, and a different
+// sequence yields different ciphertext (a new key every message).
+{
+    var seedA = new byte[32]; seedA[0] = 11; var ringA = new KeyRing(seedA);
+    byte[] bobPriv = Type42.UniqueKey(new byte[32] { 12, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }, "id");
+    byte[] bobPub = Secp256k1.PublicKey(bobPriv);
+    byte[] hello = System.Text.Encoding.UTF8.GetBytes("hello bob");
+    var carrier = TxMessage.SealCarrier(ringA.MessagePriv(bobPub, "conv", 0), bobPub, TxType.Chat2P, hello);
+    var opened = TxMessage.OpenCarrier(carrier, bobPriv);
+    X("txmessage: encrypted tx carrier round-trips for the recipient", opened is not null && System.Text.Encoding.UTF8.GetString(opened.Value.plaintext) == "hello bob" && opened.Value.type == TxType.Chat2P);
+    byte[] evePriv = Type42.UniqueKey(new byte[32] { 13, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }, "id");
+    X("txmessage: a stranger cannot open it", TxMessage.OpenCarrier(carrier, evePriv) is null);
+    var carrier2 = TxMessage.SealCarrier(ringA.MessagePriv(bobPub, "conv", 1), bobPub, TxType.Chat2P, hello);
+    X("txmessage: a NEW key per message gives different ciphertext", Tx.ToHex(carrier) != Tx.ToHex(carrier2));
+    X("txmessage: garbage carrier rejected", TxMessage.OpenCarrier(new byte[] { 1, 2, 3 }, bobPriv) is null);
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
