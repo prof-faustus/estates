@@ -780,6 +780,21 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("spvspend: insufficient funds returns null", SpvSpend.Build(sw, keymap, toScript, 999_999_999, 500, myScript) is null);
 }
 
+// ESTATE GOSSIP overlay: announce/query messages round-trip; state tracks live peers and answers
+// queries by offer tag; garbage is rejected.
+{
+    var enc = EstateGossip.Encode(GossipKind.Announce, "node-1", "02abc", "table:holdem:6");
+    var dec = EstateGossip.Decode(enc);
+    X("gossip: announce round-trips", dec is not null && dec.Value.kind == GossipKind.Announce && dec.Value.nodeId == "node-1" && dec.Value.offer == "table:holdem:6");
+    X("gossip: garbage rejected", EstateGossip.Decode(new byte[] { 9 }) is null);
+    var gs = new GossipState();
+    gs.OnAnnounce("n1", "02a", "estate:london");
+    gs.OnAnnounce("n2", "02b", "estate:paris");
+    X("gossip: state lists live peers", gs.Live().Count == 2);
+    X("gossip: query by tag finds the match", gs.Query("paris").Count == 1 && gs.Query("paris")[0].NodeId == "n2");
+    X("gossip: empty tag returns all live", gs.Query("").Count == 2);
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
