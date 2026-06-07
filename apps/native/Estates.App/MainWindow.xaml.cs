@@ -36,6 +36,11 @@ public partial class MainWindow : Window
         Closed += (_, _) => { try { _node.Dispose(); } catch { } };
 
         RefreshNodes();
+        // keep the lobby live for gossip-discovered peers (they age in/out without a discovery event)
+        var lobbyTimer = new System.Windows.Threading.DispatcherTimer { Interval = System.TimeSpan.FromSeconds(3) };
+        lobbyTimer.Tick += (_, _) => RefreshNodes();
+        lobbyTimer.Start();
+        Closed += (_, _) => lobbyTimer.Stop();
         WalletHost.Content = BuildWalletUI();
         ChatHost.Content = BuildChatUI();
 
@@ -63,7 +68,22 @@ public partial class MainWindow : Window
             var stack = new StackPanel(); stack.Children.Add(name); stack.Children.Add(sub);
             NodeList.Children.Add(new Border { Background = B("#232529"), CornerRadius = new CornerRadius(8), Padding = new Thickness(12), Margin = new Thickness(0, 0, 0, 8), Child = stack });
         }
-        LobbyStatus.Text = peers.Count == 0 ? "You're the only node here right now." : $"{peers.Count} other node(s) live right now.";
+        // Estate-gossip peers learned transitively over the mesh (beyond this multicast segment), not
+        // already shown as a directly-discovered peer.
+        var directPubs = new HashSet<string>(peers.Select(p => p.WalletPub));
+        int gossiped = 0;
+        foreach (var gp in _node.Gossip.Live())
+        {
+            if (gp.IdentityPub == Tx.ToHex(_walletPub) || directPubs.Contains(gp.IdentityPub)) continue;
+            gossiped++;
+            var name = new TextBlock { Text = gp.NodeId.Length >= 8 ? gp.NodeId[..8] : gp.NodeId, Foreground = B("#e6e6e6"), FontSize = 13, FontWeight = FontWeights.SemiBold };
+            string offer = gp.Offer == "lobby" ? "in the lobby (via gossip)" : $"offering: {gp.Offer}  (via gossip)";
+            var sub = new TextBlock { Text = offer, Foreground = B("#9aa0a6"), FontSize = 11, Margin = new Thickness(0, 2, 0, 0) };
+            var stack = new StackPanel(); stack.Children.Add(name); stack.Children.Add(sub);
+            NodeList.Children.Add(new Border { Background = B("#1f2937"), CornerRadius = new CornerRadius(8), Padding = new Thickness(12), Margin = new Thickness(0, 0, 0, 8), Child = stack });
+        }
+        int total = peers.Count + gossiped;
+        LobbyStatus.Text = total == 0 ? "You're the only node here right now." : $"{total} other node(s) live right now.";
         _refreshChatWho?.Invoke();          // keep the chat contact line in sync with who's live
     }
 

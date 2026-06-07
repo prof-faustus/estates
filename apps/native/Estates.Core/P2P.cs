@@ -130,6 +130,13 @@ public sealed class P2PNode : IDisposable
     public event Action<string>? OnPeerLost;
     public event Action<PeerLink>? OnLink;             // a peer connected to us OR we connected to a peer
 
+    /// <summary>The ESTATE gossip overlay: peers/offers learned transitively over the mesh links (beyond
+    /// the local multicast segment). NOT Bitcoin gossip. Ages out peers it stops hearing from.</summary>
+    public GossipState Gossip { get; } = new();
+    // A magic prefix so a gossip frame is never mistaken for a transaction frame (and vice-versa): a tx
+    // begins with its version (0x01/0x02…), never with these 4 bytes.
+    private static readonly byte[] GossipMagic = "EGSP"u8.ToArray();
+
     public P2PNode(string name, string walletPub)
     {
         Name = name;
@@ -149,6 +156,52 @@ public sealed class P2PNode : IDisposable
         Start(DiscoveryRecvLoop, "p2p-discovery-recv");
         Start(AnnounceLoop, "p2p-announce");
         Start(PruneLoop, "p2p-prune");
+        Start(GossipAnnounceLoop, "p2p-gossip");
+    }
+
+    // ---- estate gossip overlay (over the mesh links) ----
+
+    // Periodically tell every linked peer who I am and what I offer, so discovery propagates across the
+    // mesh (transitively), not just within one multicast segment.
+    private void GossipAnnounceLoop()
+    {
+        while (!_cts.IsCancellationRequested)
+        {
+            try
+            {
+                string offer = Advertised is { } a ? a.id + "|" + a.info : "lobby";
+                byte[] body = EstateGossip.Encode(GossipKind.Announce, NodeId, _walletPub, offer);
+                byte[] frame = new byte[GossipMagic.Length + body.Length];
+                System.Array.Copy(GossipMagic, frame, GossipMagic.Length);
+                System.Array.Copy(body, 0, frame, GossipMagic.Length, body.Length);
+                foreach (var l in LiveLinks()) { try { l.Send(frame); } catch { } }
+            }
+            catch { }
+            _cts.Token.WaitHandle.WaitOne(TimeSpan.FromSeconds(3));
+        }
+    }
+
+    // Record + relay gossip ANNOUNCEs arriving on a link. Transaction frames (no magic) are ignored here
+    // and flow to the app's own handler; gossip frames are consumed here and ignored by the app (they do
+    // not parse as a transaction). A newly-learned peer is relayed once to the other links (bounded fan-out).
+    private void WireGossip(PeerLink link)
+    {
+        link.OnFrame += (l, f) =>
+        {
+            try
+            {
+                if (f.Length <= GossipMagic.Length) return;
+                for (int i = 0; i < GossipMagic.Length; i++) if (f[i] != GossipMagic[i]) return;   // not gossip
+                var body = new byte[f.Length - GossipMagic.Length];
+                System.Array.Copy(f, GossipMagic.Length, body, 0, body.Length);
+                var g = EstateGossip.Decode(body);
+                if (g is null || g.Value.kind != GossipKind.Announce || g.Value.nodeId == NodeId) return;
+                bool isNew = Gossip.Live().All(p => p.NodeId != g.Value.nodeId);
+                Gossip.OnAnnounce(g.Value.nodeId, g.Value.identityPub, g.Value.offer);
+                if (isNew) foreach (var other in LiveLinks()) if (!ReferenceEquals(other, l)) { try { other.Send(f); } catch { } }
+            }
+            catch { }
+        };
     }
 
     private void Start(System.Action loop, string name)
@@ -243,6 +296,7 @@ public sealed class P2PNode : IDisposable
             try { c = _listener.AcceptTcpClient(); } catch { if (_cts.IsCancellationRequested) break; continue; }
             var link = new PeerLink(c);
             _links.Add(link);
+            WireGossip(link);
             OnLink?.Invoke(link);
         }
     }
@@ -271,6 +325,7 @@ public sealed class P2PNode : IDisposable
             c.Connect(peer.Host, peer.Port);
             var link = new PeerLink(c) { RemoteId = peer.NodeId };
             _links.Add(link);
+            WireGossip(link);
             OnLink?.Invoke(link);
             return link;
         }
