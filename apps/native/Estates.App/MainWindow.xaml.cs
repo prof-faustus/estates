@@ -387,6 +387,32 @@ public partial class MainWindow : Window
         }
         ShowBal();
         info.Children.Add(bal); info.Children.Add(balPend); info.Children.Add(balImm);
+
+        // ON-CHAIN (SPV): the estate node's SPV wallet — verified merkle proofs only, never a full node,
+        // never mines. Loads persisted coins instantly on open; pulls each coin's proof from the node.
+        var spvOwned = new List<byte[]>();
+        for (int i = 0; i < 20; i++) spvOwned.Add(NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(i))));
+        var spv = new SpvWallet(spvOwned);
+        string spvPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"estates_spv_{_network}.dat");
+        try { spv.Load(spvPath); } catch { }
+        var spvBal = new TextBlock { Foreground = B("#8ab4f8"), FontSize = 16, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 2, 0, 6) };
+        void ShowSpv() => spvBal.Text = $"On-chain (SPV): {spv.Balance():n0} sat   ·   {spv.CoinCount} coin(s)";
+        ShowSpv();
+        info.Children.Add(spvBal);
+        async void SpvSyncNow()
+        {
+            // host RPC ports: regtest->18443, testnet->18332, mainnet->8332 (the proof source; live play delivers envelopes IP-to-IP)
+            int rpcPort = _network == "mainnet" ? 8332 : _network == "testnet" ? 18332 : 18443;
+            try
+            {
+                using var rpc = new BsvRpc("127.0.0.1", rpcPort, "e", "e");
+                int n = await SpvSync.SyncAddressAsync(rpc, spv, w.AddressAt(0));
+                if (n > 0) spv.Save(spvPath);
+                Dispatcher.Invoke(ShowSpv);
+            }
+            catch { }
+        }
+        SpvSyncNow();
         info.Children.Add(L("Recovery seed (back this up)")); var sb0 = F(); sb0.IsReadOnly = true; sb0.Text = Tx.ToHex(_walletSeed!); info.Children.Add(sb0);
         info.Children.Add(L("Address #0")); var sa0 = F(); sa0.IsReadOnly = true; sa0.Text = w.AddressAt(0); info.Children.Add(sa0);
         var lk = Btn("Lock wallet"); lk.Click += (_, _) => relock(); info.Children.Add(lk);
@@ -475,7 +501,7 @@ public partial class MainWindow : Window
         // AUTO-REFRESH: balance + coins update themselves; no manual refresh needed. Stops when the
         // wallet view is unloaded (lock/close) so it never leaks.
         var auto = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-        auto.Tick += (_, _) => { try { ShowBal(); LoadCoins(); } catch { } };
+        auto.Tick += (_, _) => { try { ShowBal(); ShowSpv(); SpvSyncNow(); LoadCoins(); } catch { } };
         auto.Start();
         tabs.Unloaded += (_, _) => auto.Stop();
         return tabs;
@@ -486,6 +512,7 @@ public partial class MainWindow : Window
     private string _displayName = "";
     private StackPanel? _chatList;
     private System.Action? _refreshChatWho;
+    private byte[]? _chatDirectTo;   // null = Broadcast (everyone); else a specific peer pub = Direct (1:1)
 
     private UIElement BuildChatUI()
     {
@@ -497,6 +524,31 @@ public partial class MainWindow : Window
         var setName = new Button { Content = "Set identity", Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(12, 6, 12, 6) };
         DockPanel.SetDock(setName, Dock.Right); idRow.Children.Add(setName); idRow.Children.Add(nameBox);
         DockPanel.SetDock(idRow, Dock.Top); root.Children.Add(idRow);
+
+        // Direct (one peer, CHAT-2P) or Broadcast (everyone, CHAT-GROUP) — the required selection.
+        var modeRow = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
+        var modeLbl = new TextBlock { Text = "Send as:", Foreground = B("#9aa0a6"), FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
+        var modeBox = new ComboBox { MinWidth = 220 };
+        void RefreshModes()
+        {
+            int keep = modeBox.SelectedIndex;
+            modeBox.Items.Clear();
+            modeBox.Items.Add("Broadcast (everyone)");
+            foreach (var p in _node.Peers()) modeBox.Items.Add($"Direct: {p.Name}");
+            modeBox.SelectedIndex = keep >= 0 && keep < modeBox.Items.Count ? keep : 0;
+        }
+        modeBox.DropDownOpened += (_, _) => RefreshModes();
+        modeBox.SelectionChanged += (_, _) =>
+        {
+            int i = modeBox.SelectedIndex;
+            if (i <= 0) { _chatDirectTo = null; return; }
+            var peers = _node.Peers();
+            if (i - 1 < peers.Count && peers[i - 1].WalletPub.Length > 0) { try { _chatDirectTo = Tx.FromHex(peers[i - 1].WalletPub); } catch { _chatDirectTo = null; } }
+            else _chatDirectTo = null;
+        };
+        RefreshModes();
+        DockPanel.SetDock(modeLbl, Dock.Left); modeRow.Children.Add(modeLbl); modeRow.Children.Add(modeBox);
+        DockPanel.SetDock(modeRow, Dock.Top); root.Children.Add(modeRow);
         var who = new TextBlock { Foreground = B("#9aa0a6"), FontSize = 11, Margin = new Thickness(0, 0, 0, 8), TextWrapping = TextWrapping.Wrap };
         void ShowWho()
         {
@@ -584,7 +636,9 @@ public partial class MainWindow : Window
     private void Broadcast(ChatMessage m)
     {
         _conv.Apply(m); RenderChat();
-        var peers = _node.PeerWalletPubs();
+        var directTo = _chatDirectTo;
+        var peers = directTo is not null ? new[] { directTo } : _node.PeerWalletPubs();   // Direct = one peer; Broadcast = all
+        var chatType = directTo is not null ? TxType.Chat2P : TxType.ChatGroup;
         var links = _node.LiveLinks();
         byte[] payload = Messenger.Serialize(m);
         byte[] master = _master, myPkh = Recovery.Hash160(_walletPub);
@@ -597,7 +651,7 @@ public partial class MainWindow : Window
                 foreach (var peerPub in peers)
                 {
                     long seq = System.Threading.Interlocked.Increment(ref _msgSeq);
-                    byte[] carrier = TxMessage.SealCarrier(ring.MessagePriv(peerPub, conv, seq), peerPub, TxType.Chat2P, payload);
+                    byte[] carrier = TxMessage.SealCarrier(ring.MessagePriv(peerPub, conv, seq), peerPub, chatType, payload);
                     var tx = new NativeTx(1, new[] { new TxInputN(new string('0', 64), 0xffffffff, System.Array.Empty<byte>(), 0xffffffff) },
                         new[] { new TxOutputN(1, TxTransport.MessageOutput(carrier, myPkh)) }, 0);
                     byte[] raw = Tx.Serialize(tx);
