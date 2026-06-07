@@ -44,6 +44,8 @@ public sealed class BsvRpc : System.IDisposable
     {
         string s => "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"",
         bool b => b ? "true" : "false",
+        double d => d.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        decimal m => m.ToString(System.Globalization.CultureInfo.InvariantCulture),
         string[] a => "[" + string.Join(",", System.Array.ConvertAll(a, x => "\"" + x + "\"")) + "]",
         _ => o.ToString()!
     };

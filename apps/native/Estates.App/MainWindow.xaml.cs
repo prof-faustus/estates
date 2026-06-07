@@ -406,6 +406,14 @@ public partial class MainWindow : Window
             try
             {
                 using var rpc = new BsvRpc("127.0.0.1", rpcPort, "e", "e");
+                // regtest bring-up: if empty, the local node pays the wallet's OWN address (a real payment
+                // to it) and confirms it — then SPV picks it up. So it just shows on open.
+                if (_network == "regtest" && spv.Balance() == 0)
+                {
+                    await rpc.CallAsync("sendtoaddress", w.AddressAt(0), 100.0);
+                    var mineTo = (await rpc.CallAsync("getnewaddress"))?.GetString() ?? w.AddressAt(1);
+                    await rpc.CallAsync("generatetoaddress", 1, mineTo);
+                }
                 int n = await SpvSync.SyncAddressAsync(rpc, spv, w.AddressAt(0));
                 if (n > 0) spv.Save(spvPath);
                 Dispatcher.Invoke(ShowSpv);
