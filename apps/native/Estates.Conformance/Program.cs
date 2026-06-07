@@ -643,6 +643,19 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("chainsync: garbage is rejected", !cs.OnBlock(new byte[] { 1, 2, 3 }));
 }
 
+// NODE SERVICE (the client IS the node): ingesting a validated block credits the wallet straight from
+// the ledger (proof-gated — only a chain-valid block funds it); a bad-PoW block credits nothing.
+{
+    var nseed = new byte[32]; nseed[0] = 44;
+    var node = new NodeService(nseed, watchHorizon: 20);
+    byte[] wsc = NodeWallet.P2pkhScript(Recovery.Hash160(new KeyRing(nseed).PubAt(1)));
+    byte[] MkHdr(bool goodPow) { var h = new byte[80]; h[0] = 1; if (goodPow) { h[72] = 0xff; h[73] = 0xff; h[74] = 0x7f; h[75] = 0x20; } return h; }
+    var ncb = new NativeTx(1, new[] { new TxInputN(new string('0', 64), 0xffffffff, new byte[] { 0 }, 0xffffffff) }, new[] { new TxOutputN(700_000, wsc) }, 0);
+    byte[] MkBlk(bool goodPow) { var b = new List<byte>(); b.AddRange(MkHdr(goodPow)); b.Add(1); b.AddRange(Tx.Serialize(ncb)); return b.ToArray(); }
+    X("node: a validated block funds the wallet from the ledger (immature)", node.IngestBlock(MkBlk(true)) && node.Immature() == 700_000 && node.Height == 0);
+    X("node: a bad-PoW block credits nothing", !new NodeService(nseed, 20).IngestBlock(MkBlk(false)));
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
