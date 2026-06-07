@@ -671,6 +671,24 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("merkle: tampered branch rejected", !MerkleProof.Verify(Disp(l0), new[] { Disp(l2), Disp(H2(l2, l3)) }, 0, mroot));
 }
 
+// SPV WALLET (real BSV peer-to-peer SPV): a coin arrives as tx + merkle proof + header (the envelope
+// the sender stored and handed over). The wallet VERIFIES and STORES it; balance is its own verified
+// coins. No node, no scan — instant/offline. A tampered proof credits nothing.
+{
+    byte[] ssc = NodeWallet.P2pkhScript(Recovery.Hash160(Cipher.PublicKey(new byte[32] { 51, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 })));
+    var stx = new NativeTx(1, new[] { new TxInputN(new string('0', 64), 0, new byte[] { 1 }, 0xffffffff) }, new[] { new TxOutputN(250_000, ssc) }, 0);
+    byte[] sraw = Tx.Serialize(stx);
+    byte[] txidInt = Tx.FromHex(Tx.Txid(stx)); System.Array.Reverse(txidInt);           // display -> internal
+    var shdr = new byte[80]; shdr[72] = 0xff; shdr[73] = 0xff; shdr[74] = 0x7f; shdr[75] = 0x20; System.Array.Copy(txidInt, 0, shdr, 36, 32);  // 1-tx block: merkle root = txid
+    var env = new SpvEnvelope(sraw, shdr, System.Array.Empty<string>(), 0);
+    X("spv: envelope verifies (merkle->root + header PoW)", env.Verify());
+    var sw = new SpvWallet(new[] { ssc });
+    X("spv: wallet receives + stores the coin from the envelope", sw.Receive(env) && sw.Balance() == 250_000);
+    X("spv: the proof is stored for handoff to the next payee", sw.ProofFor(Tx.Txid(stx) + ":0") is not null);
+    var sbad = new SpvEnvelope(sraw, shdr, new[] { new string('a', 64) }, 0);
+    X("spv: a tampered proof credits nothing", !sbad.Verify() && !new SpvWallet(new[] { ssc }).Receive(sbad));
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
