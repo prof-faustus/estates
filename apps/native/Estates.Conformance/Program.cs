@@ -576,6 +576,24 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("txmessage: garbage carrier rejected", TxMessage.OpenCarrier(new byte[] { 1, 2, 3 }, bobPriv) is null);
 }
 
+// TX TRANSPORT (dual-propagation): a sealed message survives the carrier output script, is extracted
+// from a received transaction by the recipient, and a stranger extracts nothing.
+{
+    var ringA = new KeyRing(new byte[32] { 21, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 });
+    byte[] bobPriv = Type42.UniqueKey(new byte[32] { 22, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }, "id");
+    byte[] bobPub = Secp256k1.PublicKey(bobPriv);
+    byte[] carrier = TxMessage.SealCarrier(ringA.MessagePriv(bobPub, "c", 0), bobPub, TxType.Move, System.Text.Encoding.UTF8.GetBytes("move:7"));
+    byte[] outScript = TxTransport.MessageOutput(carrier, Recovery.Hash160(bobPub));
+    var read = TxTransport.ReadCarrier(outScript);
+    X("txtransport: carrier survives the output-script round-trip", read is not null && Tx.ToHex(read) == Tx.ToHex(carrier));
+    var rxTx = new NativeTx(1, new[] { new TxInputN(new string('a', 64), 0, new byte[] { 1 }, 0xffffffff) },
+        new[] { new TxOutputN(1, outScript), new TxOutputN(1000, NodeWallet.P2pkhScript(Recovery.Hash160(bobPub))) }, 0);
+    var ex = TxTransport.Extract(rxTx, bobPriv);
+    X("txtransport: message extracted from a received transaction", ex is not null && System.Text.Encoding.UTF8.GetString(ex.Value.plaintext) == "move:7" && ex.Value.type == TxType.Move);
+    byte[] evePriv = Type42.UniqueKey(new byte[32] { 23, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }, "id");
+    X("txtransport: a stranger extracts nothing", TxTransport.Extract(rxTx, evePriv) is null);
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
