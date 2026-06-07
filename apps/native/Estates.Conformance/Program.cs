@@ -759,6 +759,27 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     try { System.IO.File.Delete(pf); } catch { }
 }
 
+// SPV SPEND (send): the wallet selects its SPV coin, builds + signs the payment (FORKID), the input
+// signature verifies, change is correct, and the spent coin's proof is handed to the payee.
+{
+    byte[] priv = Type42.UniqueKey(new byte[32] { 91, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }, "x");
+    byte[] pub = Secp256k1.PublicKey(priv);
+    byte[] myScript = NodeWallet.P2pkhScript(Recovery.Hash160(pub));
+    long coinVal = 1_000_000;
+    var ctx = new NativeTx(1, new[] { new TxInputN(new string('0', 64), 0, new byte[] { 0 }, 0xffffffff) }, new[] { new TxOutputN(coinVal, myScript) }, 0);
+    byte[] cInt = Tx.FromHex(Tx.Txid(ctx)); System.Array.Reverse(cInt);
+    var chdr = new byte[80]; chdr[72] = 0xff; chdr[73] = 0xff; chdr[74] = 0x7f; chdr[75] = 0x20; System.Array.Copy(cInt, 0, chdr, 36, 32);
+    var sw = new SpvWallet(new[] { myScript }); sw.Receive(new SpvEnvelope(Tx.Serialize(ctx), chdr, System.Array.Empty<string>(), 0));
+    byte[] toScript = NodeWallet.P2pkhScript(Recovery.Hash160(Secp256k1.PublicKey(Type42.UniqueKey(new byte[32] { 92, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }, "y"))));
+    var keymap = new Dictionary<string, (byte[] priv, byte[] pub)> { [Tx.ToHex(myScript)] = (priv, pub) };
+    var built = SpvSpend.Build(sw, keymap, toScript, 600_000, 500, myScript);
+    X("spvspend: spend built from the SPV coin", built is not null && built.Change == coinVal - 600_000 - 500);
+    var sigWithType = TxTransport.ReadCarrier(built!.Tx.Inputs[0].ScriptSig);
+    X("spvspend: input signature verifies (FORKID OP_CHECKSIG)", sigWithType is not null && Scriptvm.CheckSig(built.Tx, 0, myScript, coinVal, sigWithType, Tx.ToHex(pub)));
+    X("spvspend: the spent coin's proof is handed to the payee", built.InputProofs.Count == 1);
+    X("spvspend: insufficient funds returns null", SpvSpend.Build(sw, keymap, toScript, 999_999_999, 500, myScript) is null);
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");

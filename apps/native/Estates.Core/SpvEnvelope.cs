@@ -60,6 +60,21 @@ public sealed class SpvWallet
     public long Balance() { lock (_lock) { long s = 0; foreach (var c in _utxos.Values) s += c.value; return s; } }
     /// <summary>The stored proof for a coin — handed to the next payee when this coin is spent.</summary>
     public SpvEnvelope? ProofFor(string outpoint) { lock (_lock) return _proofs.TryGetValue(outpoint, out var e) ? e : null; }
+
+    /// <summary>The wallet's spendable coins (for coin selection): txid, vout, value, locking script.</summary>
+    public IReadOnlyList<(string txid, int vout, long value, byte[] script)> Utxos()
+    {
+        lock (_lock)
+        {
+            var o = new List<(string, int, long, byte[])>();
+            foreach (var kv in _utxos)
+            {
+                int c = kv.Key.LastIndexOf(':');
+                o.Add((kv.Key[..c], int.Parse(kv.Key[(c + 1)..]), kv.Value.value, kv.Value.script));
+            }
+            return o;
+        }
+    }
     public void Spend(string outpoint) { lock (_lock) { _utxos.Remove(outpoint); _proofs.Remove(outpoint); } }
     public int CoinCount { get { lock (_lock) return _utxos.Count; } }
 
