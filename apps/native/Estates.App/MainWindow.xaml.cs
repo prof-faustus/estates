@@ -452,6 +452,12 @@ public partial class MainWindow : Window
         LoadNfts(); var nrb = Btn("Refresh"); nrb.Click += (_, _) => LoadNfts();
         nft.Children.Add(nrb); nft.Children.Add(nl); tabs.Items.Add(Tab("NFTs", nft));
 
+        // AUTO-REFRESH: balance + coins update themselves; no manual refresh needed. Stops when the
+        // wallet view is unloaded (lock/close) so it never leaks.
+        var auto = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        auto.Tick += (_, _) => { try { ShowBal(); LoadCoins(); } catch { } };
+        auto.Start();
+        tabs.Unloaded += (_, _) => auto.Stop();
         return tabs;
     }
 

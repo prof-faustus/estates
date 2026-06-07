@@ -418,6 +418,21 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("atomic swap: a tampered signature breaks the whole swap", !Trade.VerifySwap(tampered, aNft, aPub, bNft, bPub));
 }
 
+// IDENTITY NFT card (#16): expandable attributes, minted on-chain, total parse.
+{
+    var attrs = new List<(string, string)> { ("name", "Alice"), ("avatar", "cat.png"), ("bio", "plays to win") };
+    var parsed = Identity.Parse(Identity.Serialize(attrs));
+    X("identity: attributes round-trip", parsed is { Count: 3 } && parsed[0].Value == "Alice");
+    var wI = new StandaloneWallet(SHA256.HashData("ident"u8.ToArray()), "regtest");
+    wI.AddCoin(Tx.ToHex(RandomNumberGenerator.GetBytes(32)), 0, 1_000_000, 0);
+    var mint = Identity.Mint(wI, attrs, 500);
+    X("identity: minted as a 1-sat on-chain NFT card", mint.Tx.Outputs.Count >= 1 && mint.Tx.Outputs[0].Value == 1);
+    var attrs2 = new List<(string, string)>(attrs) { ("country", "BSVland") };
+    var card = Identity.Read(TxProtocol.Stamp(TxType.Identity, Identity.Serialize(attrs2)));
+    X("identity: attributes are expandable (new key added later)", card is not null && card.Get("country") == "BSVland" && card.Name == "Alice");
+    X("identity: total parse rejects garbage", Identity.Parse(new byte[] { 0xff, 0xff, 0xff }) is null);
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");

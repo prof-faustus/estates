@@ -31,6 +31,7 @@ public enum TxType : ushort
     Trade         = 13,  // a peer-to-peer NFT/asset trade (atomic swap)
     TableOpen     = 14,  // open a table
     GameStart     = 15,  // start a game
+    Identity      = 16,  // a player IDENTITY NFT card (expandable attributes; links games + history)
 }
 
 public static class TxProtocol
@@ -94,5 +95,6 @@ public static class TxProtocol
         new Descriptor(TxType.Trade,       13, "TRADE",        "Peer-to-peer NFT/asset trade (atomic swap)."),
         new Descriptor(TxType.TableOpen,   14, "TABLE-OPEN",   "Open a table."),
         new Descriptor(TxType.GameStart,   15, "GAME-START",   "Start a game."),
+        new Descriptor(TxType.Identity,    16, "IDENTITY",     "A player identity NFT card — expandable attributes; links games + history."),
     };
 }
