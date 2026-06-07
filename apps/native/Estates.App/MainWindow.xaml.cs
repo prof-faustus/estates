@@ -421,6 +421,36 @@ public partial class MainWindow : Window
             catch { }
         }
         SpvSyncNow();
+
+        // SPV Send — spend the wallet's SPV coins (FORKID-signed), broadcast the tx to the node; change returns to us.
+        info.Children.Add(L("Send (SPV) — pay to address, amount in sat"));
+        var stoAddr = F(); var samt = F(); var sout = O();
+        var ssend = Btn("Send");
+        async void DoSpvSend()
+        {
+            try
+            {
+                var pkh = Base58.CheckDecode(stoAddr.Text.Trim(), out _);
+                if (pkh is null || pkh.Length != 20) { sout.Text = "bad address"; return; }
+                if (!long.TryParse(samt.Text.Trim(), out long amt) || amt <= 0) { sout.Text = "bad amount"; return; }
+                var keymap = new Dictionary<string, (byte[] priv, byte[] pub)>();
+                for (int i = 0; i < 20; i++) { var pu = w.ChildPub(i); keymap[Tx.ToHex(NodeWallet.P2pkhScript(Recovery.Hash160(pu)))] = (w.ChildPriv(i), pu); }
+                byte[] changeScript = NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(0)));
+                var built = SpvSpend.Build(spv, keymap, NodeWallet.P2pkhScript(pkh), amt, 500, changeScript);
+                if (built is null) { sout.Text = "insufficient SPV funds"; return; }
+                int rpcPort = _network == "mainnet" ? 8332 : _network == "testnet" ? 18332 : 18443;
+                using var rpc = new BsvRpc("127.0.0.1", rpcPort, "e", "e");
+                var r = await rpc.CallAsync("sendrawtransaction", Tx.ToHex(built.Raw));
+                if (r is null) { sout.Text = "broadcast rejected by node"; return; }
+                foreach (var c in built.Tx.Inputs) spv.Spend(c.PrevTxid + ":" + c.PrevVout);
+                spv.Save(spvPath); Dispatcher.Invoke(ShowSpv);
+                sout.Text = $"SENT · txid {built.Txid[..16]}…";
+            }
+            catch (System.Exception e) { sout.Text = e.Message; }
+        }
+        ssend.Click += (_, _) => DoSpvSend();
+        samt.PreviewKeyDown += (_, e) => { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Return) { e.Handled = true; DoSpvSend(); } };
+        info.Children.Add(L("to address")); info.Children.Add(stoAddr); info.Children.Add(L("amount (sat)")); info.Children.Add(samt); info.Children.Add(ssend); info.Children.Add(sout);
         info.Children.Add(L("Recovery seed (back this up)")); var sb0 = F(); sb0.IsReadOnly = true; sb0.Text = Tx.ToHex(_walletSeed!); info.Children.Add(sb0);
         info.Children.Add(L("Address #0")); var sa0 = F(); sa0.IsReadOnly = true; sa0.Text = w.AddressAt(0); info.Children.Add(sa0);
         var lk = Btn("Lock wallet"); lk.Click += (_, _) => relock(); info.Children.Add(lk);
