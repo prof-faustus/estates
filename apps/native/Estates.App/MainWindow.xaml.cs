@@ -598,7 +598,10 @@ public partial class MainWindow : Window
     private string _displayName = "";
     private StackPanel? _chatList;
     private System.Action? _refreshChatWho;
-    private byte[]? _chatDirectTo;   // null = Broadcast (everyone); else a specific peer pub = Direct (1:1)
+    private byte[]? _chatDirectTo;   // set => Direct (1:1, ECDH symmetric to that identity)
+    // Broadcast recipients: null => everyone live; non-null => a chosen subset (e.g. 10 of 100). Broadcast
+    // uses the GB 2623780 B key-graph (broadcast encryption) — ONE ciphertext only the subset can open.
+    private List<byte[]>? _chatBroadcastSubset;
 
     private UIElement BuildChatUI()
     {
@@ -620,6 +623,7 @@ public partial class MainWindow : Window
             int keep = modeBox.SelectedIndex;
             modeBox.Items.Clear();
             modeBox.Items.Add("Broadcast (everyone)");
+            modeBox.Items.Add("Broadcast (choose recipients…)");
             foreach (var p in _node.Peers()) modeBox.Items.Add($"Direct: {p.Name}");
             modeBox.SelectedIndex = keep >= 0 && keep < modeBox.Items.Count ? keep : 0;
         }
@@ -627,9 +631,19 @@ public partial class MainWindow : Window
         modeBox.SelectionChanged += (_, _) =>
         {
             int i = modeBox.SelectedIndex;
-            if (i <= 0) { _chatDirectTo = null; return; }
+            if (i == 0) { _chatDirectTo = null; _chatBroadcastSubset = null; return; }   // Broadcast: everyone
+            if (i == 1)                                                                  // Broadcast: chosen subset (key-graph)
+            {
+                _chatDirectTo = null;
+                var picked = PickRecipients();
+                if (picked is { Count: > 0 }) _chatBroadcastSubset = picked;
+                else { _chatBroadcastSubset = null; modeBox.SelectedIndex = 0; }
+                return;
+            }
+            _chatBroadcastSubset = null;                                                 // Direct (1:1)
             var peers = _node.Peers();
-            if (i - 1 < peers.Count && peers[i - 1].WalletPub.Length > 0) { try { _chatDirectTo = Tx.FromHex(peers[i - 1].WalletPub); } catch { _chatDirectTo = null; } }
+            int pi = i - 2;
+            if (pi >= 0 && pi < peers.Count && peers[pi].WalletPub.Length > 0) { try { _chatDirectTo = Tx.FromHex(peers[pi].WalletPub); } catch { _chatDirectTo = null; } }
             else _chatDirectTo = null;
         };
         RefreshModes();
@@ -722,30 +736,77 @@ public partial class MainWindow : Window
     private void Broadcast(ChatMessage m)
     {
         _conv.Apply(m); RenderChat();
-        var directTo = _chatDirectTo;
-        var peers = directTo is not null ? new[] { directTo } : _node.PeerWalletPubs();   // Direct = one peer; Broadcast = all
-        var chatType = directTo is not null ? TxType.Chat2P : TxType.ChatGroup;
         var links = _node.LiveLinks();
         byte[] payload = Messenger.Serialize(m);
         byte[] master = _master, myPkh = Recovery.Hash160(_walletPub);
         string conv = _conv.Id;
+        var directTo = _chatDirectTo;
+
+        if (directTo is not null)
+        {
+            // DIRECT: two-person ECDH (secp256k1) to one identity — a sealed carrier inside a transaction.
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                try
+                {
+                    var ring = new KeyRing(master);
+                    long seq = System.Threading.Interlocked.Increment(ref _msgSeq);
+                    byte[] carrier = TxMessage.SealCarrier(ring.MessagePriv(directTo, conv, seq), directTo, TxType.Chat2P, payload);
+                    byte[] raw = Tx.Serialize(MsgTx(carrier, myPkh));
+                    foreach (var l in links) l.Send(raw);
+                }
+                catch (System.Exception ex) { App.CrashLog("chat-send-direct", ex); }
+            });
+            return;
+        }
+
+        // BROADCAST: the key-graph (broadcast encryption) to a chosen subset — ONE ciphertext only those
+        // recipients can open. null subset => everyone live right now. Carried AS a transaction.
+        var recipients = (_chatBroadcastSubset is { Count: > 0 } sub ? sub : _node.PeerWalletPubs().ToList());
+        if (recipients.Count == 0) return;                       // no one to broadcast to
+        string b64 = System.Convert.ToBase64String(payload);     // exact byte round-trip through the key-graph
         System.Threading.Tasks.Task.Run(() =>
         {
             try
             {
-                var ring = new KeyRing(master);
-                foreach (var peerPub in peers)
-                {
-                    long seq = System.Threading.Interlocked.Increment(ref _msgSeq);
-                    byte[] carrier = TxMessage.SealCarrier(ring.MessagePriv(peerPub, conv, seq), peerPub, chatType, payload);
-                    var tx = new NativeTx(1, new[] { new TxInputN(new string('0', 64), 0xffffffff, System.Array.Empty<byte>(), 0xffffffff) },
-                        new[] { new TxOutputN(1, TxTransport.MessageOutput(carrier, myPkh)) }, 0);
-                    byte[] raw = Tx.Serialize(tx);
-                    foreach (var l in links) l.Send(raw);            // IP-to-IP to players, AS a transaction
-                }
+                byte[]? frame = ChatCodec.Seal(master, recipients, b64);     // single broadcast-encrypted frame
+                if (frame is null) return;
+                byte[] raw = Tx.Serialize(MsgTx(frame, myPkh));              // the frame IS the carrier (already ciphertext)
+                foreach (var l in links) l.Send(raw);
             }
-            catch (System.Exception ex) { App.CrashLog("chat-send", ex); }
+            catch (System.Exception ex) { App.CrashLog("chat-send-broadcast", ex); }
         });
+    }
+
+    // A 1-output message transaction carrying `carrier` as the spendable carrier output (no OP_RETURN).
+    private static NativeTx MsgTx(byte[] carrier, byte[] ownerPkh) => new(1,
+        new[] { new TxInputN(new string('0', 64), 0xffffffff, System.Array.Empty<byte>(), 0xffffffff) },
+        new[] { new TxOutputN(1, TxTransport.MessageOutput(carrier, ownerPkh)) }, 0);
+
+    // Pick a SUBSET of live peers to broadcast-encrypt to (e.g. 10 of 100). Returns their wallet pubkeys,
+    // or null if cancelled. Multi-select via checkboxes — the human chooses exactly who can read it.
+    private List<byte[]>? PickRecipients()
+    {
+        var peers = _node.Peers().Where(p => p.WalletPub.Length > 0).ToList();
+        if (peers.Count == 0) return null;
+        var w = new Window { Title = "Broadcast to…", Width = 420, Height = 460, WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this, Background = B("#1b1d1e"), ResizeMode = ResizeMode.NoResize };
+        var sp = new StackPanel { Margin = new Thickness(14) };
+        sp.Children.Add(new TextBlock { Text = "Choose who can read this broadcast:", Foreground = B("#e6e6e6"), FontSize = 13, Margin = new Thickness(0, 0, 0, 8) });
+        var boxes = new List<(CheckBox cb, byte[] pub)>();
+        var list = new StackPanel();
+        foreach (var p in peers)
+        {
+            byte[]? pub = null; try { pub = Tx.FromHex(p.WalletPub); } catch { }
+            if (pub is null) continue;
+            var cb = new CheckBox { Content = $"{p.Name}  ·  {p.WalletPub[..Math.Min(12, p.WalletPub.Length)]}…", Foreground = B("#e6e6e6"), Margin = new Thickness(0, 4, 0, 4) };
+            boxes.Add((cb, pub)); list.Children.Add(cb);
+        }
+        sp.Children.Add(new ScrollViewer { Height = 320, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = list });
+        var ok = new Button { Content = "Broadcast to selected", Margin = new Thickness(0, 12, 0, 0), HorizontalAlignment = HorizontalAlignment.Right, Padding = new Thickness(12, 6, 12, 6) };
+        List<byte[]>? result = null;
+        ok.Click += (_, _) => { result = boxes.Where(b => b.cb.IsChecked == true).Select(b => b.pub).ToList(); w.Close(); };
+        sp.Children.Add(ok); w.Content = sp; w.ShowDialog();
+        return result is { Count: > 0 } ? result : null;
     }
 
     // A small modal text prompt (for Reply / Edit) — no external dependencies.
@@ -829,10 +890,25 @@ public partial class MainWindow : Window
             var tx = Tx.Parse(frame);
             if (tx is null) return;
             var ex = TxTransport.Extract(tx, _master);
-            if (ex is null) return;
-            if (ex.Value.type == TxType.BotRefund) { CompleteBotRefund(ex.Value.plaintext); return; }
             ChatMessage? m = null;
-            try { m = Messenger.Parse(ex.Value.plaintext); } catch { }
+            if (ex is not null)
+            {
+                if (ex.Value.type == TxType.BotRefund) { CompleteBotRefund(ex.Value.plaintext); return; }
+                try { m = Messenger.Parse(ex.Value.plaintext); } catch { }
+            }
+            else
+            {
+                // not a per-recipient sealed carrier — try the broadcast key-graph frame on each output.
+                foreach (var o in tx.Outputs)
+                {
+                    var carrier = TxTransport.ReadCarrier(o.Script);
+                    if (carrier is null) continue;
+                    var open = ChatCodec.Open(carrier, _master, _walletPub);   // only opens if I'm in the subset
+                    if (open is null) continue;
+                    try { m = Messenger.Parse(System.Convert.FromBase64String(open.Value.text)); } catch { }
+                    if (m is not null) break;
+                }
+            }
             if (m is null) return;
             _conv.Apply(m); RenderChat();
             if (m.FromPub != MyPub() && (m.Kind is ChatKind.Text or ChatKind.Reply or ChatKind.Media))
