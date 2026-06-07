@@ -1,12 +1,12 @@
 // Estates.Conformance — two jobs:
 //   (1) CROSS-VALIDATION: prove the native C# engine + on-chain primitives are byte-for-byte
 //       identical to the audited reference (same vector files: engine state hashes, tx
-//       serialization/txid, card-NFT output+transfer, BIP-143 sighash + ECDSA OP_CHECKSIG,
+//       serialization/txid, card-NFT output+transfer, FORKID sighash + ECDSA OP_CHECKSIG,
 //       dice beacon). Any divergence fails the build.
 //   (2) CRYPTO-CORE self-validation: every claim of the in-tree, LIBRARY-FREE crypto core
 //       (secp256k1, hash-chained Type-42 keys, Shamir threshold, 2-of-2 + nLockTime recovery,
-//       ECIES/key-wrap) is asserted with a POSITIVE and a HOSTILE-NEGATIVE test. No third-party
-//       library, no Ed25519, no RFC-6979 anywhere in the path.
+//       ECDH+AES key-wrap) is asserted with a POSITIVE and a HOSTILE-NEGATIVE test. No third-party
+//       library; secp256k1-only signatures, fresh CSPRNG nonces.
 using System.Security.Cryptography;
 using System.Text.Json;
 using Estates.Core;
@@ -110,7 +110,7 @@ if (File.Exists(cnPath))
     if (cfail == 0) Console.WriteLine("PASS: native card NFT output + transfer tx are byte-for-byte the reference; true move accepted, copy rejected.");
 }
 
-// ---- SCRIPTVM cross-validation: native BIP-143 sighash + ECDSA OP_CHECKSIG must
+// ---- SCRIPTVM cross-validation: native FORKID sighash + ECDSA OP_CHECKSIG must
 // equal the reference (a signed input verifies; a tampered one fails). The verify path
 // is the in-tree Secp256k1 (no library) and is fail-closed to SIGHASH_ALL|FORKID. ----
 int spass = 0, sfail = 0;
@@ -133,12 +133,12 @@ if (File.Exists(svPath))
     string pub = v.GetProperty("pub").GetString()!;
 
     void Check(string what, bool ok) { if (ok) spass++; else { Console.Error.WriteLine($"  [SCRIPTVM FAIL] {what}"); sfail++; } }
-    Check("BIP-143 sighash matches", Tx.ToHex(Scriptvm.Sighash(tx, idx, prevoutScript, prevoutValue, hashType)) == v.GetProperty("expectedSighash").GetString());
+    Check("FORKID sighash matches", Tx.ToHex(Scriptvm.Sighash(tx, idx, prevoutScript, prevoutValue, hashType)) == v.GetProperty("expectedSighash").GetString());
     Check("valid signature verifies (in-tree ECDSA OP_CHECKSIG)", Scriptvm.CheckSig(tx, idx, prevoutScript, prevoutValue, Tx.FromHex(v.GetProperty("validSig").GetString()!), pub));
     Check("tampered signature is rejected", !Scriptvm.CheckSig(tx, idx, prevoutScript, prevoutValue, Tx.FromHex(v.GetProperty("tamperedSig").GetString()!), pub));
 
     Console.WriteLine($"Estates.Conformance (scriptvm): {spass} passed, {sfail} failed");
-    if (sfail == 0) Console.WriteLine("PASS: native BIP-143 sighash + in-tree secp256k1 ECDSA verify match the reference.");
+    if (sfail == 0) Console.WriteLine("PASS: native FORKID sighash + in-tree secp256k1 ECDSA verify match the reference.");
 }
 
 // ---- BEACON cross-validation: native dice beacon (commit/reveal -> dice + chained
@@ -173,7 +173,7 @@ if (File.Exists(bcPath))
 // ============================================================================
 //  CRYPTO-CORE self-validation — the in-tree, LIBRARY-FREE primitives. Each claim
 //  gets a POSITIVE test and a HOSTILE-NEGATIVE test (a top-class attacker's forgery
-//  must be rejected). No third-party library, no Ed25519, no RFC-6979 in the path.
+//  must be rejected). No third-party library; secp256k1-only, fresh CSPRNG nonces.
 // ============================================================================
 int xpass = 0, xfail = 0;
 void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($"  [CRYPTO FAIL] {what}"); xfail++; } }
@@ -339,7 +339,7 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     string prev = Tx.ToHex(SHA256.HashData("auction-prev"u8.ToArray()));
     byte[] scriptCode = Recovery.P2pkh(gpkh);
     var sampleTx = new NativeTx(2, new[] { new TxInputN(prev, 0, Array.Empty<byte>(), 0xffffffff) }, new[] { new TxOutputN(90000, Recovery.P2pkh(bpkh)) }, 0);
-    X("pushtx: preimage double-hashes to the BIP-143 sighash (matches Scriptvm)",
+    X("pushtx: preimage double-hashes to the FORKID sighash (matches Scriptvm)",
         Tx.ToHex(Tx.Hash256(PushTx.Preimage(sampleTx, 0, scriptCode, 100000))) == Tx.ToHex(Scriptvm.Sighash(sampleTx, 0, scriptCode, 100000, 0x41)));
     X("pushtx: CheckPreimage accepts the genuine preimage", PushTx.CheckPreimage(sampleTx, 0, scriptCode, 100000, PushTx.Preimage(sampleTx, 0, scriptCode, 100000)) is not null);
     var tampered = (byte[])PushTx.Preimage(sampleTx, 0, scriptCode, 100000).Clone(); tampered[0] ^= 0xff;

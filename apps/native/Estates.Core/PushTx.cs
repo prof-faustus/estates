@@ -34,7 +34,7 @@ public static class PushTx
     }
     private static byte[] Rev(string txid) { var b = Tx.FromHex(txid); Array.Reverse(b); return b; }
 
-    /// <summary>The BIP-143 / FORKID sighash PREIMAGE for input `i` (the bytes OP_PUSH_TX reveals).
+    /// <summary>The FORKID sighash PREIMAGE for input `i` (the bytes OP_PUSH_TX reveals).
     /// double-SHA256 of this equals Scriptvm.Sighash(...) — asserted by the conformance KAT.</summary>
     public static byte[] Preimage(NativeTx tx, int i, byte[] scriptCode, long value, long sighashType = SighashAllForkId)
     {

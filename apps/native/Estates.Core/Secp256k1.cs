@@ -1,6 +1,6 @@
 // Estates.Core/Secp256k1.cs — in-tree secp256k1 (NO third-party library). Pure C# over
 // System.Numerics.BigInteger: field arithmetic mod p, affine point add/double/multiply,
-// compressed point encode/decode, ECDH, and ECDSA (CSPRNG random nonce k, low-S; NO RFC-6979).
+// compressed point encode/decode, ECDH, and ECDSA (fresh CSPRNG random nonce k, low-S).
 // This REPLACES BouncyCastle everywhere — the project depends on no crypto library.
 // (SHA-256/512, HMAC, AES-GCM, HKDF are .NET framework primitives, not a library.)
 using System.Numerics;
@@ -110,8 +110,8 @@ public static class Secp256k1
     /// <summary>ECDH shared secret = the X coordinate (32 bytes) of priv·peerPub.</summary>
     public static byte[] EcdhX(byte[] priv, byte[] peerPub) => To32(Mul(Scalar(priv), Decompress(peerPub)).X);
 
-    // ---- ECDSA (CSPRNG random nonce k, low-S). NO deterministic/RFC-6979 nonce — each signature
-    //      draws a fresh uniformly-random k in [1, n-1] from the OS CSPRNG via rejection sampling. ----
+    // ---- ECDSA (fresh CSPRNG random nonce k, low-S). Each signature draws a new uniformly-random
+    //      k in [1, n-1] from the OS CSPRNG via rejection sampling. ----
     private static BigInteger RandomK()
     {
         while (true)

@@ -10,9 +10,8 @@
 // then verified and spent locally with NO node.
 //
 // A spend is a real BSV P2PKH transaction: inputs spend our UTXOs, outputs pay the recipient + our
-// change, every input signed with SIGHASH_ALL|FORKID over the BIP-143 preimage. The resulting raw
-// tx is handed to a peer (P2P) or, for test settlement, to the faucet — the wallet itself never
-// reaches out.
+// change, every input signed with SIGHASH_ALL|FORKID over the FORKID preimage. The resulting raw
+// tx is handed to a peer (P2P) for broadcast — the wallet itself never reaches out.
 using System.Security.Cryptography;
 
 namespace Estates.Core;
@@ -72,7 +71,7 @@ public sealed class StandaloneWallet
 
     /// <summary>Build and SIGN a transaction paying `amountSats` to `toAddress`, with `feeSats` fee
     /// and change back to `changeIndex`. Selects our coins (largest-first), signs every input with
-    /// the holding child key (BIP-143 sighash, low-S ECDSA). Returns the raw tx — to be handed to a
+    /// the holding child key (FORKID sighash, low-S ECDSA). Returns the raw tx — to be handed to a
     /// peer or broadcast by the user; the wallet performs NO network action.</summary>
     public BuiltTx BuildSend(string toAddress, long amountSats, long feeSats, int changeIndex = 0)
     {

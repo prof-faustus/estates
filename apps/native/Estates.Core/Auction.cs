@@ -11,7 +11,7 @@
 //            (an outbid bidder always gets their money back; no bid can strand funds).
 // The covenant commits Hash256(win-outputs) and Hash256(refund-outputs); a spend is accepted only if
 // the genuine hashOutputs (proven by PushTx) equals one of them and the path's gate holds. This is
-// script-enforced (every node rejects a non-conforming spend) — a real contract, not OP_TRUE.
+// script-enforced (every node rejects a non-conforming spend) — a real, genuinely-constrained contract.
 using System.Security.Cryptography;
 
 namespace Estates.Core;

@@ -5,8 +5,8 @@
 // locktime. So if the counterparty vanishes (closes / never co-operates), the funder
 // broadcasts the refund after the locktime and recovers everything — unilaterally.
 //
-// Timing is the transaction's nLockTime + input nSequence ONLY (no CLTV/CSV). Sighash is
-// BIP-143 (Scriptvm.Sighash); signatures are secp256k1 ECDSA (EcdsaSign) — Bitcoin BSV.
+// Timing is the transaction's nLockTime + input nSequence ONLY (no CLTV/CSV). Sighash is the
+// BSV FORKID sighash (Scriptvm.Sighash); signatures are secp256k1 ECDSA (EcdsaSign) — Bitcoin BSV.
 using System.Security.Cryptography;
 
 namespace Estates.Core;

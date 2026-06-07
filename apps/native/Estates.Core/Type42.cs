@@ -1,7 +1,7 @@
 // Estates.Core/Type42.cs — Type-42 key derivation (the patented BSV key system), now on
 // the IN-TREE secp256k1 (no third-party library). The ROOT key is NEVER shared; every key
-// use / signed message derives a UNIQUE sub-key from a unique invoice number. NO BIP32, NO
-// "Bitcoin seed", NO mnemonic, NO library — this is BSV.
+// use / signed message derives a UNIQUE sub-key from a unique invoice number — BSV-native key
+// derivation: no hierarchical-wallet standard, no mnemonic, no third-party library.
 //
 //   shared = ECDH(rootPriv, counterpartyPub)           (compressed shared point)
 //   k      = HMAC-SHA256(key = shared, msg = invoice) mod n

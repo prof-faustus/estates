@@ -1,7 +1,7 @@
 // Estates.Core/EcdsaSign.cs — secp256k1 ECDSA (BSV), library-free: built on the in-tree
 // Secp256k1 + Microsoft .NET only (System.Numerics, System.Security.Cryptography). NO
-// third-party library. The nonce is a fresh CSPRNG random k + low-S (Secp256k1.SignHash) —
-// NOT RFC-6979 / not deterministic. (Chain txs are signed by the NODE; this is local protocol paths.)
+// third-party library. The nonce is a fresh CSPRNG random k + low-S (Secp256k1.SignHash).
+// (Chain txs are signed by the NODE; this is local protocol paths.)
 using System.Numerics;
 using System.Security.Cryptography;
 

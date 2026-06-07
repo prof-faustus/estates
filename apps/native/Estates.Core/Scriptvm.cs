@@ -19,8 +19,8 @@ public static class Scriptvm
     }
     private static byte[] RevTxid(string txid) { var b = Tx.FromHex(txid); Array.Reverse(b); return b; }
 
-    /// <summary>BIP-143 sighash for input `i` spending `prevout` (script+value)
-    /// under `hashType`. Mirrors @estates/scriptvm.sighash exactly.</summary>
+    /// <summary>The BSV FORKID sighash for input `i` spending `prevout` (script+value)
+    /// under `hashType`.</summary>
     public static byte[] Sighash(NativeTx tx, int i, byte[] prevoutScript, long prevoutValue, long hashType)
     {
         var hp = new List<byte>(); foreach (var inp in tx.Inputs) { hp.AddRange(RevTxid(inp.PrevTxid)); U32Le(hp, inp.PrevVout); }
@@ -50,7 +50,7 @@ public static class Scriptvm
     }
 
     /// <summary>OP_CHECKSIG: the scriptSig signature is DER ‖ hashType(1). Compute
-    /// the BIP-143 sighash for this input/prevout and ECDSA-verify it.</summary>
+    /// the FORKID sighash for this input/prevout and ECDSA-verify it.
     public static bool CheckSig(NativeTx tx, int i, byte[] prevoutScript, long prevoutValue, byte[] sigWithHashType, string pubHex)
     {
         if (sigWithHashType.Length < 9) return false;

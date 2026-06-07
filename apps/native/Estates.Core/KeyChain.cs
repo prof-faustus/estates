@@ -1,6 +1,6 @@
 // Estates.Core/KeyChain.cs — PLAN §2: hash-chained Type-42 key derivation (the user's patent +
 // the MANDATORY hash chain). Written from scratch on the in-tree secp256k1; Microsoft BCL only
-// (SHA-256, HMAC-SHA256, System.Numerics). NO library, NO BIP, NO RFC-6979.
+// (SHA-256, HMAC-SHA256, System.Numerics). No third-party library; BSV-native key derivation.
 //
 // WHAT: a verifiable, ordered HASH CHAIN of keys. The ROOT is never shared/used directly. Every
 //       key use / signed message is a UNIQUE sub-key on this chain; no key is ever reused.
