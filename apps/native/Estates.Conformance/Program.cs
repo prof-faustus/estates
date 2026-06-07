@@ -689,6 +689,20 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("spv: a tampered proof credits nothing", !sbad.Verify() && !new SpvWallet(new[] { ssc }).Receive(sbad));
 }
 
+// TYPE-42 PAYMENT (number-42): payer derives the PUBLIC key to pay; payee derives the matching PRIVATE
+// key to spend — without the payee ever publishing an address; a different invoice => a fresh address.
+{
+    byte[] payeePriv = Type42.UniqueKey(new byte[32] { 61, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }, "id");
+    byte[] payeePub = Secp256k1.PublicKey(payeePriv);
+    byte[] payerPriv = Type42.UniqueKey(new byte[32] { 62, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }, "id");
+    byte[] payerPub = Secp256k1.PublicKey(payerPriv);
+    byte[] payTo = Type42Payment.PayToPub(payeePub, payerPriv, "inv-1");
+    byte[] spend = Type42Payment.SpendPriv(payeePriv, payerPub, "inv-1");
+    X("type42: payee's derived key spends exactly what the payer paid to", Tx.ToHex(Secp256k1.PublicKey(spend)) == Tx.ToHex(payTo));
+    X("type42: a different invoice => a fresh address (never reused)", Tx.ToHex(Type42Payment.PayToPub(payeePub, payerPriv, "inv-2")) != Tx.ToHex(payTo));
+    X("type42: payee never publishes an address (derived address is valid mainnet P2PKH)", Type42Payment.PayToAddress(payeePub, payerPriv, "inv-1", BsvNet.Mainnet).StartsWith("1"));
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
