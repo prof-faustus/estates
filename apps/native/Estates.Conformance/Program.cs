@@ -542,6 +542,22 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("keyring: per-message keys advance (new key each message)", Tx.ToHex(ring.MessagePub(cp, "conv", 0)) != Tx.ToHex(ring.MessagePub(cp, "conv", 1)));
 }
 
+// MEMPOOL (built from scratch): accepts a valid tx; rejects duplicate, double-spend, and garbage;
+// a confirming block evicts the tx.
+{
+    var sc = NodeWallet.P2pkhScript(Recovery.Hash160(Cipher.PublicKey(new byte[32] { 4, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 })));
+    var a = new NativeTx(1, new[] { new TxInputN(new string('a', 64), 0, new byte[] { 1 }, 0xffffffff) }, new[] { new TxOutputN(100, sc) }, 0);
+    var b = new NativeTx(1, new[] { new TxInputN(new string('a', 64), 0, new byte[] { 2 }, 0xffffffff) }, new[] { new TxOutputN(50, sc) }, 0);  // same outpoint -> conflict
+    var mp = new Mempool();
+    X("mempool: accepts a valid tx", mp.Accept(Tx.Serialize(a)) is not null && mp.Count == 1);
+    X("mempool: rejects a duplicate", mp.Accept(Tx.Serialize(a)) is null);
+    X("mempool: rejects a double-spend (same outpoint)", mp.Accept(Tx.Serialize(b)) is null && mp.Count == 1);
+    X("mempool: rejects garbage", mp.Accept(new byte[] { 1, 2, 3 }) is null);
+    var hdr = new byte[80];
+    mp.OnBlock(new ParsedBlock(hdr, "x", new[] { a }));
+    X("mempool: a confirmed tx is evicted", !mp.Contains(Tx.Txid(a)) && mp.Count == 0);
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
