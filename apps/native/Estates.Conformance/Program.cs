@@ -656,6 +656,21 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("node: a bad-PoW block credits nothing", !new NodeService(nseed, 20).IngestBlock(MkBlk(false)));
 }
 
+// SPV MERKLE PROOF (instant wallet, no full sync): a tx's branch recomputes the block merkle root;
+// a wrong index, wrong root, or tampered branch is rejected.
+{
+    byte[] Leaf(byte b) { var x = new byte[32]; x[0] = b; return x; }
+    byte[] H2(byte[] a, byte[] b) { var p = new byte[64]; System.Array.Copy(a, 0, p, 0, 32); System.Array.Copy(b, 0, p, 32, 32); return Tx.Hash256(p); }
+    string Disp(byte[] x) { var r = (byte[])x.Clone(); System.Array.Reverse(r); return Tx.ToHex(r); }
+    var l0 = Leaf(1); var l1 = Leaf(2); var l2 = Leaf(3); var l3 = Leaf(4);
+    var mroot = H2(H2(l0, l1), H2(l2, l3));
+    var branch0 = new[] { Disp(l1), Disp(H2(l2, l3)) };
+    X("merkle: valid proof reconstructs the block root", MerkleProof.Verify(Disp(l0), branch0, 0, mroot));
+    X("merkle: wrong index rejected", !MerkleProof.Verify(Disp(l0), branch0, 1, mroot));
+    X("merkle: wrong root rejected", !MerkleProof.Verify(Disp(l0), branch0, 0, Leaf(9)));
+    X("merkle: tampered branch rejected", !MerkleProof.Verify(Disp(l0), new[] { Disp(l2), Disp(H2(l2, l3)) }, 0, mroot));
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");

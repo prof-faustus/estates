@@ -373,27 +373,38 @@ public partial class MainWindow : Window
         // Info — balance is the wallet's OWN UTXO set; no node is contacted.
         var info = new StackPanel();
         info.Children.Add(new TextBlock { Text = $"Network: {_network}   ·   standalone (no node)", Foreground = B("#e6e6e6"), FontSize = 14, FontWeight = FontWeights.Bold });
+        // Three balances a real wallet MUST show — spendable, pending (0-conf), immature (mined,
+        // <100 conf). Auto-refreshed live (no Refresh button). Pending/immature populate from the
+        // node-backed UTXO view; a local-only wallet legitimately reports 0 for them.
         var bal = new TextBlock { Foreground = B("#7bd88f"), FontSize = 22, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 6, 0, 2) };
-        void ShowBal() => bal.Text = w.Balance() + " sat";
+        var balPend = new TextBlock { Foreground = B("#f5a623"), FontSize = 13 };
+        var balImm = new TextBlock { Foreground = B("#8ab4f8"), FontSize = 13, Margin = new Thickness(0, 0, 0, 4) };
+        void ShowBal()
+        {
+            bal.Text = $"Spendable: {w.Balance():n0} sat";
+            balPend.Text = $"Pending (0-conf): {w.PendingSats:n0} sat";
+            balImm.Text = $"Immature (mined, <100 conf): {w.ImmatureSats:n0} sat";
+        }
         ShowBal();
-        var rb = Btn("Refresh"); rb.Click += (_, _) => ShowBal();
-        info.Children.Add(bal); info.Children.Add(rb);
+        info.Children.Add(bal); info.Children.Add(balPend); info.Children.Add(balImm);
         info.Children.Add(L("Recovery seed (back this up)")); var sb0 = F(); sb0.IsReadOnly = true; sb0.Text = Tx.ToHex(_walletSeed!); info.Children.Add(sb0);
         info.Children.Add(L("Address #0")); var sa0 = F(); sa0.IsReadOnly = true; sa0.Text = w.AddressAt(0); info.Children.Add(sa0);
         var lk = Btn("Lock wallet"); lk.Click += (_, _) => relock(); info.Children.Add(lk);
         tabs.Items.Add(Tab("Info", info));
 
-        // Fund — bring REAL coins into the standalone wallet. A coin arrives either from a peer
-        // (P2P transfer) or, for testing, by importing an outpoint you funded from the faucet. This
-        // is the ONLY place a coin enters; nothing reaches out to a node.
+        // Fund — funding is ALWAYS a real payment SENT TO YOUR ADDRESS. No manual import, no TXID entry.
+        // Copy the address, send BSV to it; it appears once the node-backed wallet sees it on-chain.
         var fund = new StackPanel();
-        fund.Children.Add(new TextBlock { Text = "Fund the wallet (import a coin you own)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
-        fund.Children.Add(L("This wallet starts EMPTY. Add a real UTXO you control — txid, output index, value (sat), and which of your address indexes holds it. No node is contacted."));
-        var ftx = F(); var fvout = F(); var fsat = F(); var fidx = F(); var fo2 = O();
-        var fbtn = Btn("Import coin");
-        fbtn.Click += (_, _) => { try { w.AddCoin(ftx.Text.Trim(), long.Parse(fvout.Text.Trim()), long.Parse(fsat.Text.Trim()), int.Parse(fidx.Text.Trim())); fo2.Text = $"imported · balance {w.Balance()} sat"; ShowBal(); } catch (Exception e) { fo2.Text = e.Message; } };
-        foreach (var f in new[] { ftx, fvout, fsat, fidx }) f.PreviewKeyDown += (_, e) => { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Return) { e.Handled = true; fbtn.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)); } };
-        fund.Children.Add(L("txid")); fund.Children.Add(ftx); fund.Children.Add(L("vout")); fund.Children.Add(fvout); fund.Children.Add(L("value (sat)")); fund.Children.Add(fsat); fund.Children.Add(L("address index holding it")); fund.Children.Add(fidx); fund.Children.Add(fbtn); fund.Children.Add(fo2);
+        fund.Children.Add(new TextBlock { Text = "Fund the wallet", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        fund.Children.Add(L("Funding is a real payment SENT TO YOUR ADDRESS below. Copy it and send BSV to it — it appears here once the node sees it on-chain. There is no manual import."));
+        fund.Children.Add(L("Your receive address (click to select; or use Copy):"));
+        var fa = F(); fa.IsReadOnly = true; fa.Text = w.AddressAt(0); fa.FontFamily = new FontFamily("Consolas");
+        fa.GotKeyboardFocus += (_, _) => fa.SelectAll();
+        fa.PreviewMouseLeftButtonUp += (_, _) => fa.SelectAll();
+        fund.Children.Add(fa);
+        var fcopy = Btn("Copy address"); var fmsg = O();
+        fcopy.Click += (_, _) => { try { System.Windows.Clipboard.SetText(w.AddressAt(0)); fmsg.Text = "address copied — send BSV to it"; } catch (System.Exception e) { fmsg.Text = e.Message; } };
+        fund.Children.Add(fcopy); fund.Children.Add(fmsg);
         tabs.Items.Add(Tab("Fund", fund));
 
         // Send — build + SIGN a real BSV tx in-process. The raw tx is shown to hand to a peer or
