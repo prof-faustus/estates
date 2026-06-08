@@ -493,6 +493,7 @@ public partial class MainWindow : Window
         //  "\pay <bot#id|name|address> <sat>", or with Send (SPV) above. The bot refunds you on close.)
 
         info.Children.Add(L("Recovery seed (back this up)")); var sb0 = F(); sb0.IsReadOnly = true; sb0.Text = Tx.ToHex(_walletSeed!); info.Children.Add(sb0);
+        var sbCopy = Btn("Copy seed"); var sbMsg = O(); sbCopy.Click += (_, _) => { try { System.Windows.Clipboard.SetText(Tx.ToHex(_walletSeed!)); sbMsg.Text = "seed copied — store it somewhere safe"; } catch (Exception e) { sbMsg.Text = e.Message; } }; info.Children.Add(sbCopy); info.Children.Add(sbMsg);
         info.Children.Add(L("Identity key (index 0 — ECDH root, NEVER an address)")); var sid = F(); sid.IsReadOnly = true; sid.Text = Tx.ToHex(w.ChildPub(0)); info.Children.Add(sid);
         info.Children.Add(L("Receive address #1 (first HMAC sub-key)")); var sa0 = F(); sa0.IsReadOnly = true; sa0.Text = w.AddressAt(FirstAddr); info.Children.Add(sa0);
         var lk = Btn("Lock wallet"); lk.Click += (_, _) => relock(); info.Children.Add(lk);
