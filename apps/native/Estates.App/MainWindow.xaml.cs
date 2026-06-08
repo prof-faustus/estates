@@ -689,7 +689,11 @@ public partial class MainWindow : Window
         LoadCoins();
         cgrid.MouseDoubleClick += (_, _) => { if (cgrid.SelectedItem is Row4 r) { if (!_frozenCoins.Add(r.D)) _frozenCoins.Remove(r.D); cmsg.Text = _frozenCoins.Contains(r.D) ? "frozen (won't be spent)" : "unfrozen"; LoadCoins(); } };
         coins.Children.Add(new TextBlock { Text = "Coins (UTXOs) — coin control (double-click a row to freeze/unfreeze)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
-        coins.Children.Add(cSum); coins.Children.Add(cgrid); coins.Children.Add(cmsg);
+        var cFreezeAll = Btn("Freeze all"); var cUnfreezeAll = Btn("Unfreeze all");
+        cFreezeAll.Click += (_, _) => { foreach (var u in LoadSpvFromDisk(w).Utxos()) _frozenCoins.Add(u.txid + ":" + u.vout); LoadCoins(); cmsg.Text = "all coins frozen (none will be spent)"; };
+        cUnfreezeAll.Click += (_, _) => { _frozenCoins.Clear(); LoadCoins(); cmsg.Text = "all coins unfrozen"; };
+        var cFrow = new StackPanel { Orientation = Orientation.Horizontal }; cFrow.Children.Add(cFreezeAll); cFrow.Children.Add(cUnfreezeAll);
+        coins.Children.Add(cSum); coins.Children.Add(cgrid); coins.Children.Add(cFrow); coins.Children.Add(cmsg);
         tabs.Items.Add(Tab("Coins", coins));
 
         // ===== DESTINATIONS — addresses WITH derivation paths (index 0 = identity, NEVER an address) =====
