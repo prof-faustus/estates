@@ -310,7 +310,7 @@ public partial class MainWindow : Window
                 TextBlock Warn(string t) => new() { Text = t, Foreground = B("#f7a8c4"), FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) };
                 TextBlock Lab(string t) => new() { Text = t, Foreground = B("#9aa0a6"), FontSize = 11 };
                 TextBox FieldBox() => new() { Background = B("#171819"), Foreground = B("#e6e6e6"), BorderThickness = new Thickness(0), Padding = new Thickness(8), FontSize = 12, FontFamily = new FontFamily("Consolas"), Margin = new Thickness(0, 2, 0, 8), TextWrapping = TextWrapping.Wrap };
-                Button Btn2(string t) => new() { Content = t, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 8) };
+                Button Btn2(string t) => new() { Content = t, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 8), Background = B("#2d2f34"), Foreground = B("#e6e6e6"), BorderBrush = B("#3a3d42"), Padding = new Thickness(12, 6, 12, 6) };
                 var pw = new PasswordBox { Background = B("#171819"), Foreground = B("#e6e6e6"), BorderThickness = new Thickness(0), Padding = new Thickness(8), FontSize = 13, Margin = new Thickness(0, 0, 0, 8) };
                 void Unlocked(byte[] s) { _walletSeed = s; _wallet = null; Render(); }
                 void LoadFile()
