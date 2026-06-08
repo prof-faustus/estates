@@ -929,6 +929,21 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("bloommatch: P2pkhPkh extracts the address hash", BloomMatch.P2pkhPkh(NodeWallet.P2pkhScript(minePkh)) is { } pk && Tx.ToHex(pk) == Tx.ToHex(minePkh));
 }
 
+// IDENTITY (P1): base ID key is reserved (never a receive sub-key); sub-keys are a deterministic HMAC
+// hash-chain from the seed; fresh receive indices advance and start at >= 1 (index 0 = identity).
+{
+    byte[] seed = Type42.UniqueKey(new byte[32] { 130, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }, "idseed");
+    var kr = new KeyRing(seed);
+    string idp = Tx.ToHex(kr.IdentityPub());
+    bool collide = false; for (int i = 1; i <= 20; i++) if (Tx.ToHex(kr.PubAt(i)) == idp) collide = true;
+    X("identity: base ID key is never a receive sub-key", !collide);
+    var kr2 = new KeyRing(seed);
+    X("identity: sub-keys are deterministic from the seed", Tx.ToHex(kr.PubAt(7)) == Tx.ToHex(kr2.PubAt(7)));
+    var (i1, _, _) = kr.NextReceive(); var (i2, _, _) = kr.NextReceive();
+    X("identity: fresh receive indices advance and start at >= 1", i1 >= 1 && i2 == i1 + 1);
+    X("identity: identity pubkey is a valid 33-byte compressed key", kr.IdentityPub().Length == 33 && (kr.IdentityPub()[0] == 0x02 || kr.IdentityPub()[0] == 0x03));
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
