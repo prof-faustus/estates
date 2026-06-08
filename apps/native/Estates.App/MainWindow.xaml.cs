@@ -929,6 +929,9 @@ public partial class MainWindow : Window
         ident.Children.Add(L("handle (your identity name)")); ident.Children.Add(idHandle); ident.Children.Add(idSave); ident.Children.Add(idMsg);
         ident.Children.Add(L("Identity key (index 0 — ECDH derivation root, NEVER an address; all addresses are HMAC hash-chain sub-keys at index ≥ 1)"));
         var idKey = F(); idKey.IsReadOnly = true; idKey.Text = Tx.ToHex(w.ChildPub(0)); ident.Children.Add(idKey);
+        var idCopy = Btn("Copy identity key"); var idCopyMsg = O();
+        idCopy.Click += (_, _) => { try { System.Windows.Clipboard.SetText(Tx.ToHex(w.ChildPub(0))); idCopyMsg.Text = "identity key copied — share it to receive pays/NFTs by identity"; } catch (Exception e) { idCopyMsg.Text = e.Message; } };
+        ident.Children.Add(idCopy); ident.Children.Add(idCopyMsg);
         ident.Children.Add(L("How it's used: pay an identity (\\pay <handle> <sat>), chat direct/broadcast to identities, and play the game as this identity. The identity is your on-chain NFT card (see NFTs tab)."));
         tabs.Items.Add(Tab("Identity", ident));
 
