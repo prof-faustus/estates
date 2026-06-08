@@ -479,6 +479,26 @@ public partial class MainWindow : Window
         // Info — balance is the wallet's OWN UTXO set; no node is contacted.
         var info = new StackPanel();
         info.Children.Add(new TextBlock { Text = $"Network: {_network}   ·   standalone (no node)", Foreground = B("#e6e6e6"), FontSize = 14, FontWeight = FontWeights.Bold });
+        // Registered identity (from the startup registration): pseudonym ↔ email ↔ wallet ↔ key, signature verified.
+        try
+        {
+            string idjson = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Estates", "identity.json");
+            if (System.IO.File.Exists(idjson))
+            {
+                var parts = System.IO.File.ReadAllText(idjson).Split('\n');
+                using var doc = System.Text.Json.JsonDocument.Parse(parts[0]);
+                var r = doc.RootElement;
+                string ps = r.TryGetProperty("pseudonym", out var p1) ? p1.GetString() ?? "" : "";
+                string pemail = r.TryGetProperty("email", out var e1) ? e1.GetString() ?? "" : "";
+                bool ok = false;
+                try { byte[] attPub = Tx.FromHex(r.GetProperty("attestation_pub").GetString()!); byte[] sig = Tx.FromHex(parts[1].Trim()); ok = EcdsaSign.Verify(attPub, System.Text.Encoding.UTF8.GetBytes(parts[0]), sig); } catch { }
+                info.Children.Add(new TextBlock { Text = "Registered identity", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 10, 0, 2) });
+                info.Children.Add(L($"pseudonym: {ps}   ·   email: {pemail}   ·   registration signature {(ok ? "VERIFIED ✓" : "unverified")}"));
+                info.Children.Add(L($"identity key: {(r.TryGetProperty("identity", out var idk) ? idk.GetString() : "")}"));
+                info.Children.Add(L($"linked wallet address: {(r.TryGetProperty("wallet_address", out var wa) ? wa.GetString() : "")}"));
+            }
+        }
+        catch { }
         // Three balances a real wallet MUST show — spendable, pending (0-conf), immature (mined,
         // <100 conf). Auto-refreshed live (no Refresh button). Pending/immature populate from the
         // node-backed UTXO view; a local-only wallet legitimately reports 0 for them.
@@ -1256,9 +1276,15 @@ public partial class MainWindow : Window
         void ShowStatus() { try { stBal.Text = $"  Balance: {Fmt(LoadSpvFromDisk(w).Balance())}"; stNet.Text = $"{_network} · SPV (IP-to-IP + Bloom) · 🔒 encrypted"; } catch { } }
         ShowStatus(); auto.Tick += (_, _) => ShowStatus();
 
+        // toolbar (ported from SVP init_toolbar): quick actions across the top
+        var toolbar = new ToolBar { Background = B("#232529"), Foreground = B("#e6e6e6") };
+        Button TBtn(string t, System.Action a) { var bn = new Button { Content = t, Margin = new Thickness(2, 0, 2, 0), Padding = new Thickness(9, 4, 9, 4), Background = B("#2d2f34"), Foreground = B("#e6e6e6"), BorderBrush = B("#3a3d42") }; bn.Click += (_, _) => { try { a(); } catch { } }; return bn; }
+        foreach (var (lbl, hh) in new[] { ("Send", "Send"), ("Receive", "Receive"), ("History", "History"), ("Coins", "Coins"), ("Destinations", "Destinations"), ("Network", "Network") }) toolbar.Items.Add(TBtn(lbl, () => Sel(hh)));
+        var tray = new ToolBarTray { Background = B("#232529") }; tray.ToolBars.Add(toolbar);
+
         var shell = new DockPanel { LastChildFill = true };
-        DockPanel.SetDock(menu, Dock.Top); DockPanel.SetDock(status, Dock.Bottom);
-        shell.Children.Add(menu); shell.Children.Add(status); shell.Children.Add(tabs);
+        DockPanel.SetDock(menu, Dock.Top); DockPanel.SetDock(tray, Dock.Top); DockPanel.SetDock(status, Dock.Bottom);
+        shell.Children.Add(menu); shell.Children.Add(tray); shell.Children.Add(status); shell.Children.Add(tabs);
         return shell;
     }
 
