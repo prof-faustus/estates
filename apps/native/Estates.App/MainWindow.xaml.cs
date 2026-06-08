@@ -421,6 +421,25 @@ public partial class MainWindow : Window
         Button Btn(string t) => new() { Content = t, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 6, 0, 0) };
         TabItem Tab(string h, StackPanel body) => new() { Header = h, Content = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = new StackPanel { Margin = new Thickness(12), Children = { body } } } };
         var tabs = new TabControl { Background = B("#1e1f22"), BorderThickness = new Thickness(0) };
+        // dark theme (A++): style tab headers + buttons + grids dark so the wallet reads like ElectrumSV.
+        var tiStyle = new Style(typeof(TabItem));
+        tiStyle.Setters.Add(new Setter(TabItem.BackgroundProperty, B("#232529")));
+        tiStyle.Setters.Add(new Setter(TabItem.ForegroundProperty, B("#cfd2d6")));
+        tiStyle.Setters.Add(new Setter(TabItem.PaddingProperty, new Thickness(11, 5, 11, 5)));
+        tiStyle.Setters.Add(new Setter(TabItem.BorderThicknessProperty, new Thickness(0)));
+        tiStyle.Setters.Add(new Setter(TabItem.FontSizeProperty, 12.0));
+        var tiSel = new Trigger { Property = TabItem.IsSelectedProperty, Value = true };
+        tiSel.Setters.Add(new Setter(TabItem.BackgroundProperty, B("#2d6cdf")));
+        tiSel.Setters.Add(new Setter(TabItem.ForegroundProperty, B("#ffffff")));
+        tiStyle.Triggers.Add(tiSel);
+        tabs.Resources.Add(typeof(TabItem), tiStyle);
+        var btnStyle = new Style(typeof(Button));
+        btnStyle.Setters.Add(new Setter(Button.BackgroundProperty, B("#2d2f34")));
+        btnStyle.Setters.Add(new Setter(Button.ForegroundProperty, B("#e6e6e6")));
+        btnStyle.Setters.Add(new Setter(Button.BorderBrushProperty, B("#3a3d42")));
+        btnStyle.Setters.Add(new Setter(Button.BorderThicknessProperty, new Thickness(1)));
+        btnStyle.Setters.Add(new Setter(Button.PaddingProperty, new Thickness(10, 5, 10, 5)));
+        tabs.Resources.Add(typeof(Button), btnStyle);
 
         // Info — balance is the wallet's OWN UTXO set; no node is contacted.
         var info = new StackPanel();
