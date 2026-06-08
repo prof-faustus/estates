@@ -546,6 +546,8 @@ public partial class MainWindow : Window
         fa.GotKeyboardFocus += (_, _) => fa.SelectAll();
         fa.PreviewMouseLeftButtonUp += (_, _) => fa.SelectAll();
         fund.Children.Add(fa);
+        var fundQr = new System.Windows.Controls.Image { Stretch = System.Windows.Media.Stretch.None, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 8, 0, 8) };
+        RenderQr(fundQr, w.AddressAt(FirstAddr)); fund.Children.Add(fundQr);
         var fcopy = Btn("Copy address"); var fmsg = O();
         fcopy.Click += (_, _) => { try { System.Windows.Clipboard.SetText(w.AddressAt(FirstAddr)); fmsg.Text = "address copied — send BSV to it"; } catch (System.Exception e) { fmsg.Text = e.Message; } };
         fund.Children.Add(fcopy); fund.Children.Add(fmsg);
