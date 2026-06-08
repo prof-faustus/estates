@@ -663,14 +663,18 @@ public partial class MainWindow : Window
         // ===== HISTORY — every transaction as a TABLE (received coins via SPV + this session's sends) =====
         var hist = new StackPanel();
         var hgrid = Grid4("Type", "Amount (sat)", "Txid", "Detail", 420);
+        var hSearch = F();
         void LoadHistory()
         {
             var rows = new List<Row4>();
             foreach (var (txid, credited, ncoins) in LoadSpvFromDisk(w).ReceivedHistory())
                 rows.Add(new Row4 { A = "received", B = "+" + credited.ToString("n0"), C = txid[..Math.Min(20, txid.Length)] + "…", D = ncoins + " coin (SPV proof)" });
             rows.AddRange(_txLog);
+            string q = hSearch.Text.Trim();
+            if (q.Length > 0) rows = rows.Where(r => (r.A + r.B + r.C + r.D + Label(r.C)).Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
             hgrid.ItemsSource = rows;
         }
+        hSearch.TextChanged += (_, _) => LoadHistory();
         LoadHistory(); var hr = Btn("Refresh"); hr.Click += (_, _) => LoadHistory();
         hgrid.MouseDoubleClick += (_, _) => { if (hgrid.SelectedItem is Row4 r) System.Windows.MessageBox.Show($"Type:    {r.A}\nAmount:  {r.B} sat\nTxid:    {r.C}\nDetail:  {r.D}", "Transaction"); };
         var hmenu = new ContextMenu();
@@ -680,6 +684,7 @@ public partial class MainWindow : Window
         hLabel.Click += (_, _) => { if (hgrid.SelectedItem is Row4 r) { if (!_labelsLoaded) { LoadLabelsDisk(); _labelsLoaded = true; } var t = Prompt("Label for " + r.C, Label(r.C)); if (t is not null) { _labels[r.C] = t; SaveLabelsDisk(); } } };
         hmenu.Items.Add(hCopy); hmenu.Items.Add(hLabel); hgrid.ContextMenu = hmenu;
         hist.Children.Add(new TextBlock { Text = "Transaction history (Craig's SPV — coins arrive IP-to-IP with their merkle proof)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        hist.Children.Add(L("search (type/amount/txid/label)")); hist.Children.Add(hSearch);
         hist.Children.Add(hr); hist.Children.Add(hgrid);
         tabs.Items.Add(Tab("History", hist));
 
