@@ -683,10 +683,25 @@ public partial class MainWindow : Window
         invb.Click += async (_, _) => { invo.Text = "fetching invoice…"; invo.Text = await PayBip270(w, inv.Text.Trim()); };
         tools.Children.Add(L("payment URL or bitcoin: URI")); tools.Children.Add(inv); tools.Children.Add(invb); tools.Children.Add(invo);
 
-        tools.Children.Add(new TextBlock { Text = "Load / broadcast a raw transaction", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 12, 0, 0) });
-        var lrt = F(); var lro = O(); var lrb = Btn("Broadcast raw tx");
+        tools.Children.Add(new TextBlock { Text = "Load transaction — decode / preview / broadcast a raw tx", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 12, 0, 0) });
+        var lrt = F(); var lro = O(); var lrb = Btn("Broadcast raw tx"); var ldec = Btn("Decode / preview");
+        ldec.Click += (_, _) =>
+        {
+            try
+            {
+                var t = Tx.Parse(Tx.FromHex(lrt.Text.Trim()));
+                if (t is null) { lro.Text = "not a valid transaction"; return; }
+                var s = new System.Text.StringBuilder();
+                s.AppendLine($"txid {Tx.Txid(t)}");
+                s.AppendLine($"version {t.Version}  ·  {t.Inputs.Count} input(s)  ·  {t.Outputs.Count} output(s)  ·  locktime {t.LockTime}");
+                for (int i = 0; i < t.Outputs.Count; i++) s.AppendLine($"  out[{i}] {t.Outputs[i].Value,14:n0} sat → {AddrOfScript(t.Outputs[i].Script)}");
+                lro.Text = s.ToString();
+            }
+            catch (Exception e) { lro.Text = e.Message; }
+        };
         lrb.Click += async (_, _) => { try { using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e"); var r = await rpc.CallAsync("sendrawtransaction", lrt.Text.Trim()); lro.Text = r is null ? "rejected by node" : "broadcast: " + r.Value.ToString(); } catch (Exception e) { lro.Text = e.Message; } };
-        tools.Children.Add(L("raw tx (hex)")); tools.Children.Add(lrt); tools.Children.Add(lrb); tools.Children.Add(lro);
+        var lrow = new StackPanel { Orientation = Orientation.Horizontal }; lrow.Children.Add(ldec); lrow.Children.Add(lrb);
+        tools.Children.Add(L("raw tx (hex)")); tools.Children.Add(lrt); tools.Children.Add(lrow); tools.Children.Add(lro);
         tabs.Items.Add(Tab("Tools", tools));
 
         // ===== TRANSACTIONS — this session's unpublished/just-sent transactions (ElectrumSV's 2nd tab) =====
