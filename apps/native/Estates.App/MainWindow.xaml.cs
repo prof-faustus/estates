@@ -855,7 +855,35 @@ public partial class MainWindow : Window
         if (!_nftsLoaded) { LoadNftsDisk(); _nftsLoaded = true; LoadNfts(); }
         LoadNfts(); var nrb = Btn("Refresh"); nrb.Click += (_, _) => LoadNfts();
         var mintName = F(); var mintBtn = Btn("Mint NFT to my identity"); var mintMsg = O();
-        mintBtn.Click += (_, _) => { var nm = mintName.Text.Trim(); if (nm.Length == 0) { mintMsg.Text = "enter a name"; return; } int id = (_heldNfts.Count > 0 ? _heldNfts.Max(x => x.id) : 0) + 1; _heldNfts.Add((id, nm, "local")); SaveNftsDisk(); LoadNfts(); mintMsg.Text = $"minted '{nm}' (#{id}) — owned by your identity"; mintName.Clear(); };
+        mintBtn.Click += async (_, _) =>
+        {
+            var nm = mintName.Text.Trim(); if (nm.Length == 0) { mintMsg.Text = "enter a name"; return; }
+            int id = (_heldNfts.Count > 0 ? _heldNfts.Max(x => x.id) : 0) + 1;
+            string txidRec = "local";
+            try
+            {
+                var spv2 = LoadSpvFromDisk(w);
+                byte[] idPub = w.ChildPub(0); byte[] ownerPkh = Recovery.Hash160(w.ChildPub(FirstAddr));
+                var ring = new KeyRing(_walletSeed!);
+                byte[] payload = System.Text.Encoding.ASCII.GetBytes($"nft|{id}|{nm}");
+                byte[] carrier = TxMessage.SealCarrier(ring.MessagePriv(idPub, "nft", id), idPub, TxType.NftMint, payload);
+                byte[] script = TxTransport.MessageOutput(carrier, ownerPkh);
+                byte[] change = NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(FirstAddr)));
+                var built = SpvSpend.BuildMany(spv2, SpvKeymap(w), new List<(byte[], long)> { (script, 1) }, 500, change, _frozenCoins);
+                if (built is not null)
+                {
+                    using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e");
+                    var r = await rpc.CallAsync("sendrawtransaction", Tx.ToHex(built.Raw));
+                    foreach (var l in _node.LiveLinks()) { try { l.Send(built.Raw); } catch { } }
+                    if (r is not null) { foreach (var c in built.Tx.Inputs) spv2.Spend(c.PrevTxid + ":" + c.PrevVout); spv2.Save(SpvPathFor()); txidRec = built.Txid; }
+                }
+            }
+            catch { }
+            _heldNfts.Add((id, nm, txidRec)); SaveNftsDisk(); LoadNfts();
+            _txLog.Insert(0, new Row4 { A = "nft-mint", B = "#" + id, C = nm, D = txidRec == "local" ? "local" : txidRec[..16] + "…" });
+            mintMsg.Text = txidRec == "local" ? $"minted '{nm}' (#{id}) locally (no SPV funds to anchor on-chain)" : $"minted '{nm}' (#{id}) ON-CHAIN · txid {txidRec[..16]}…";
+            mintName.Clear();
+        };
         nft.Children.Add(L("mint a new NFT (name)")); nft.Children.Add(mintName); nft.Children.Add(mintBtn); nft.Children.Add(mintMsg);
         var xferId = F(); var xferTo = F(); var xferBtn = Btn("Transfer NFT to an identity/address"); var xferMsg = O();
         xferBtn.Click += (_, _) => { if (!int.TryParse(xferId.Text.Trim(), out int id)) { xferMsg.Text = "enter the NFT #id"; return; } var item = _heldNfts.FirstOrDefault(n => n.id == id); if (item.name is null) { xferMsg.Text = "you don't hold that NFT"; return; } string to = xferTo.Text.Trim(); if (to.Length == 0) { xferMsg.Text = "enter recipient"; return; } _heldNfts.RemoveAll(n => n.id == id); SaveNftsDisk(); LoadNfts(); _txLog.Insert(0, new Row4 { A = "nft-xfer", B = "#" + id, C = item.name, D = "→ " + to }); xferMsg.Text = $"transferred '{item.name}' (#{id}) to {to}"; };
