@@ -716,7 +716,12 @@ public partial class MainWindow : Window
         var dgrid = Grid4("Derivation path", "Index", "Address", "Type", 420);
         var drows = new List<Row4>();
         for (int i = FirstAddr; i <= 30; i++) drows.Add(new Row4 { A = "estates/wallet/" + i, B = i.ToString(), C = w.AddressAt(i), D = i == FirstAddr ? "receiving/change" : "receiving" });
-        dgrid.ItemsSource = drows; dest.Children.Add(dgrid);
+        dgrid.ItemsSource = drows;
+        var dMenu = new ContextMenu();
+        var dCopy = new MenuItem { Header = "Copy address" }; dCopy.Click += (_, _) => { if (dgrid.SelectedItem is Row4 r) { try { System.Windows.Clipboard.SetText(r.C); } catch { } } };
+        var dPath = new MenuItem { Header = "Copy derivation path" }; dPath.Click += (_, _) => { if (dgrid.SelectedItem is Row4 r) { try { System.Windows.Clipboard.SetText(r.A); } catch { } } };
+        dMenu.Items.Add(dCopy); dMenu.Items.Add(dPath); dgrid.ContextMenu = dMenu;
+        dest.Children.Add(dgrid);
         tabs.Items.Add(Tab("Destinations", dest));
 
         // ===== COINSPLIT — split your balance into many fresh UTXOs (fixed or randomized) =====
