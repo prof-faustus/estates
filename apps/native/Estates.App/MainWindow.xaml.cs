@@ -469,7 +469,7 @@ public partial class MainWindow : Window
                 if (r is null) { sout.Text = "broadcast rejected by node"; return; }
                 foreach (var c in built.Tx.Inputs) spv.Spend(c.PrevTxid + ":" + c.PrevVout);
                 spv.Save(spvPath); Dispatcher.Invoke(ShowSpv);
-                _txLog.Add($"{"(sent)",-20}{("-" + amt.ToString("n0")),16}  {built.Txid[..Math.Min(20, built.Txid.Length)]}…  → {target[..Math.Min(12, target.Length)]}…");
+                _txLog.Insert(0, new Row4 { A = "sent", B = "-" + amt.ToString("n0"), C = built.Txid[..Math.Min(20, built.Txid.Length)] + "…", D = "→ " + target[..Math.Min(16, target.Length)] + "…" });
                 sout.Text = $"SENT · txid {built.Txid[..16]}…";
             }
             catch (System.Exception e) { sout.Text = e.Message; }
@@ -541,7 +541,7 @@ public partial class MainWindow : Window
                 if (r is null) { so.Text = "built + signed (txid " + built.Txid[..16] + "…); node did not accept — raw below"; return; }
                 foreach (var c in built.Tx.Inputs) spv2.Spend(c.PrevTxid + ":" + c.PrevVout);
                 spv2.Save(SpvPathFor()); ShowSpv();
-                _txLog.Add($"{"(sent)",-20}{("-" + (outs.Sum(o => o.amount)).ToString("n0")),16}  {built.Txid[..Math.Min(20, built.Txid.Length)]}…  ({outs.Count} payee, fee {fee})");
+                _txLog.Insert(0, new Row4 { A = "sent", B = "-" + outs.Sum(o => o.amount).ToString("n0"), C = built.Txid[..Math.Min(20, built.Txid.Length)] + "…", D = outs.Count + " payee, fee " + fee });
                 so.Text = $"SENT · {outs.Count} payee(s) · fee {fee} sat · txid {built.Txid}";
             }
             catch (Exception e) { so.Text = e.Message; }
@@ -572,22 +572,20 @@ public partial class MainWindow : Window
         // (Addresses are listed in the Destinations tab, with derivation paths, starting at index 1 —
         //  index 0 is the identity/base key and is never shown as an address.)
 
-        // ===== HISTORY — every transaction the SPV wallet knows (received coins + this session's sends) =====
-        var hist = new StackPanel(); var hl = Mono(420);
+        // ===== HISTORY — every transaction as a TABLE (received coins via SPV + this session's sends) =====
+        var hist = new StackPanel();
+        var hgrid = Grid4("Type", "Amount (sat)", "Txid", "Detail", 420);
         void LoadHistory()
         {
-            var s = new System.Text.StringBuilder();
-            s.AppendLine($"{"date",-20}{"amount (sat)",16}  txid / note");
-            s.AppendLine(new string('-', 70));
+            var rows = new List<Row4>();
             foreach (var (txid, credited, ncoins) in LoadSpvFromDisk(w).ReceivedHistory())
-                s.AppendLine($"{"(confirmed)",-20}{("+" + credited.ToString("n0")),16}  {txid[..Math.Min(20, txid.Length)]}…  ({ncoins} coin)");
-            foreach (var line in _txLog) s.AppendLine(line);
-            if (LoadSpvFromDisk(w).CoinCount == 0 && _txLog.Count == 0) s.AppendLine("no transactions yet — receive a payment or pay someone.");
-            hl.Text = s.ToString();
+                rows.Add(new Row4 { A = "received", B = "+" + credited.ToString("n0"), C = txid[..Math.Min(20, txid.Length)] + "…", D = ncoins + " coin (SPV proof)" });
+            rows.AddRange(_txLog);
+            hgrid.ItemsSource = rows;
         }
         LoadHistory(); var hr = Btn("Refresh"); hr.Click += (_, _) => LoadHistory();
         hist.Children.Add(new TextBlock { Text = "Transaction history (Craig's SPV — coins arrive IP-to-IP with their merkle proof)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
-        hist.Children.Add(hr); hist.Children.Add(hl);
+        hist.Children.Add(hr); hist.Children.Add(hgrid);
         tabs.Items.Add(Tab("History", hist));
 
         // ===== COINS — every UTXO as a TABLE; freeze/unfreeze (coin control); double-click toggles freeze =====
@@ -810,7 +808,7 @@ public partial class MainWindow : Window
 
     // frozen coins (coin control) + a session transaction log for the History tab.
     private readonly HashSet<string> _frozenCoins = new();
-    private readonly List<string> _txLog = new();
+    private readonly List<Row4> _txLog = new();
 
     // A 4-column table row + a styled DataGrid factory — the ElectrumSV list/table look (sortable columns).
     private sealed class Row4 { public string A { get; set; } = ""; public string B { get; set; } = ""; public string C { get; set; } = ""; public string D { get; set; } = ""; }
@@ -880,7 +878,7 @@ public partial class MainWindow : Window
             foreach (var l in _node.LiveLinks()) { try { l.Send(built.Raw); } catch { } }
             foreach (var c in built.Tx.Inputs) spv2.Spend(c.PrevTxid + ":" + c.PrevVout);
             spv2.Save(SpvPathFor());
-            _txLog.Add($"{"(invoice)",-20}{("-" + outs.Sum(o => o.amount).ToString("n0")),16}  {built.Txid[..Math.Min(20, built.Txid.Length)]}…");
+            _txLog.Insert(0, new Row4 { A = "invoice", B = "-" + outs.Sum(o => o.amount).ToString("n0"), C = built.Txid[..Math.Min(20, built.Txid.Length)] + "…", D = "BIP270 paid" });
             if (!string.IsNullOrEmpty(payUrl))
             {
                 var payment = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object> { ["transaction"] = Tx.ToHex(built.Raw), ["merchantData"] = merchantData });
