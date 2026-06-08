@@ -915,6 +915,20 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("merkleblock: a tampered hash yields a different root", badRoot is null || Tx.ToHex(badRoot) != Tx.ToHex(fullRoot));
 }
 
+// BLOOM MATCH (BIP37 find): a wallet filter over its address pkh matches a tx paying that address, and
+// (no false negatives) a tx paying an UNwatched address overwhelmingly does not match.
+{
+    var f = new BloomFilter(8, 0.0001, 1234);
+    byte[] minePkh = Recovery.Hash160(Secp256k1.PublicKey(Type42.UniqueKey(new byte[32] { 110, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }, "mine")));
+    BloomMatch.InsertAddress(f, minePkh);
+    var payMe = new NativeTx(2, new[] { new TxInputN(new string('1', 64), 0, System.Array.Empty<byte>(), 0xffffffff) }, new[] { new TxOutputN(1000, NodeWallet.P2pkhScript(minePkh)) }, 0);
+    X("bloommatch: a tx paying my watched address matches", BloomMatch.Matches(payMe, Tx.Hash256(new byte[] { 1 }), f));
+    byte[] otherPkh = Recovery.Hash160(Secp256k1.PublicKey(Type42.UniqueKey(new byte[32] { 111, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }, "other")));
+    var payOther = new NativeTx(2, new[] { new TxInputN(new string('2', 64), 0, System.Array.Empty<byte>(), 0xffffffff) }, new[] { new TxOutputN(1000, NodeWallet.P2pkhScript(otherPkh)) }, 0);
+    X("bloommatch: a tx paying an unwatched address does not match", !BloomMatch.Matches(payOther, Tx.Hash256(new byte[] { 2 }), f));
+    X("bloommatch: P2pkhPkh extracts the address hash", BloomMatch.P2pkhPkh(NodeWallet.P2pkhScript(minePkh)) is { } pk && Tx.ToHex(pk) == Tx.ToHex(minePkh));
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
