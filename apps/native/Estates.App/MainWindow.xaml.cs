@@ -620,13 +620,15 @@ public partial class MainWindow : Window
         var cgrid = Grid4("Value (sat)", "Frozen", "Address", "Outpoint", 260);
         void LoadCoins()
         {
+            if (!_labelsLoaded) { LoadLabelsDisk(); _labelsLoaded = true; }
             var rows = new List<Row4>();
             long total = 0, frozenSat = 0; int frozenN = 0;
             foreach (var u in LoadSpvFromDisk(w).Utxos())
             {
                 string op = u.txid + ":" + u.vout; bool fr = _frozenCoins.Contains(op);
+                string addr = AddrOfScript(u.script); string lbl = Label(addr);
                 total += u.value; if (fr) { frozenSat += u.value; frozenN++; }
-                rows.Add(new Row4 { A = u.value.ToString("n0"), B = fr ? "FROZEN" : "", C = AddrOfScript(u.script), D = op });
+                rows.Add(new Row4 { A = u.value.ToString("n0"), B = fr ? "FROZEN" : "", C = addr + (lbl.Length > 0 ? "  (" + lbl + ")" : ""), D = op });
             }
             cgrid.ItemsSource = rows;
             cSum.Text = $"{rows.Count} coin(s) · {total:n0} sat total · {frozenN} frozen ({frozenSat:n0} sat) · spendable {(total - frozenSat):n0} sat";
@@ -767,6 +769,18 @@ public partial class MainWindow : Window
         ctAdd.Click += (_, _) => { string nm = ctName.Text.Trim(); string ad = ctAddr.Text.Trim(); if (nm.Length == 0 || Base58.CheckDecode(ad, out _) is not { Length: 20 }) { ctMsg.Text = "enter a name + a valid address"; return; } _contacts.Add((nm, ad)); SaveContactsDisk(); LoadContacts(); ctMsg.Text = $"added contact '{nm}' (saved)"; ctName.Clear(); ctAddr.Clear(); };
         contacts.Children.Add(ctGrid); contacts.Children.Add(L("name")); contacts.Children.Add(ctName); contacts.Children.Add(L("address")); contacts.Children.Add(ctAddr); contacts.Children.Add(ctAdd); contacts.Children.Add(ctMsg);
         tabs.Items.Add(Tab("Contacts", contacts));
+
+        // ===== LABELS — name your addresses & transactions (persisted; shown in Coins) =====
+        var labp = new StackPanel();
+        labp.Children.Add(new TextBlock { Text = "Labels — name your addresses & transactions", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        if (!_labelsLoaded) { LoadLabelsDisk(); _labelsLoaded = true; }
+        var labGrid = Grid4("Key (txid / address)", "Label", "", "", 240);
+        void LoadLab() { labGrid.ItemsSource = _labels.Select(kv => new Row4 { A = kv.Key, B = kv.Value }).ToList(); }
+        LoadLab();
+        var labKey = F(); var labVal = F(); var labMsg = O(); var labAdd = Btn("Set label");
+        labAdd.Click += (_, _) => { var k = labKey.Text.Trim(); if (k.Length == 0) { labMsg.Text = "enter a key (txid or address)"; return; } _labels[k] = labVal.Text.Trim(); SaveLabelsDisk(); LoadLab(); LoadCoins(); labMsg.Text = "label saved"; labKey.Clear(); labVal.Clear(); };
+        labp.Children.Add(labGrid); labp.Children.Add(L("key (txid or address)")); labp.Children.Add(labKey); labp.Children.Add(L("label")); labp.Children.Add(labVal); labp.Children.Add(labAdd); labp.Children.Add(labMsg);
+        tabs.Items.Add(Tab("Labels", labp));
 
         // ===== CONSOLE — type any in-wallet command (\help lists them) =====
         var con = new StackPanel(); var conOut = Mono(360); var conIn = F(); var conBtn = Btn("Run");
@@ -910,6 +924,14 @@ public partial class MainWindow : Window
     // frozen coins (coin control) + a session transaction log for the History tab.
     private readonly HashSet<string> _frozenCoins = new();
     private readonly List<Row4> _txLog = new();
+
+    // Persistent labels (txid/address → human label) at %APPDATA%/Estates/labels.txt — "key\tlabel".
+    private readonly Dictionary<string, string> _labels = new();
+    private bool _labelsLoaded;
+    private static string LabelsPath() { string d = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Estates"); System.IO.Directory.CreateDirectory(d); return System.IO.Path.Combine(d, "labels.txt"); }
+    private void LoadLabelsDisk() { try { if (!System.IO.File.Exists(LabelsPath())) return; foreach (var ln in System.IO.File.ReadAllLines(LabelsPath())) { var p = ln.Split('\t'); if (p.Length == 2) _labels[p[0]] = p[1]; } } catch { } }
+    private void SaveLabelsDisk() { try { System.IO.File.WriteAllLines(LabelsPath(), _labels.Select(kv => kv.Key + "\t" + kv.Value)); } catch { } }
+    private string Label(string key) => _labels.TryGetValue(key, out var v) ? v : "";
 
     // Persistent payment requests at %APPDATA%/Estates/requests.txt — "address\tsat\tmemo" per line.
     private readonly List<(string addr, long sat, string memo)> _requests = new();
