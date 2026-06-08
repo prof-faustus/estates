@@ -167,7 +167,7 @@ public sealed class WalletWizard : Window
                 string h = _restoreSeed.Text.Trim();
                 if (h.Length != 64) { _msg.Text = "seed must be 64 hex characters"; return; }
                 byte[] s; try { s = Tx.FromHex(h); } catch { _msg.Text = "seed is not valid hex"; return; }
-                Finish(s, _restorePw.Password); break;
+                _pending = s; Password = _restorePw.Password; _step = Step.Register; Render(); break;   // restore ALSO registers a pseudonym
             }
         }
     }
