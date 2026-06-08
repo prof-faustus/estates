@@ -611,6 +611,37 @@ public partial class MainWindow : Window
         dl.Text = ds.ToString(); dest.Children.Add(dl);
         tabs.Items.Add(Tab("Destinations", dest));
 
+        // ===== COINSPLIT — split your balance into many fresh UTXOs (fixed or randomized) =====
+        var csplit = new StackPanel(); var csN = F(); csN.Text = "10"; var csEach = F(); csEach.Text = "10000";
+        var csR = new CheckBox { Content = "randomized amounts", Foreground = B("#cfd2d6"), Margin = new Thickness(0, 6, 0, 0) };
+        var csOut = O(); var csb = Btn("Split");
+        async void DoSplit()
+        {
+            try
+            {
+                if (!int.TryParse(csN.Text.Trim(), out int n) || n < 1 || n > RecvWatch - FirstAddr) { csOut.Text = $"count 1..{RecvWatch - FirstAddr}"; return; }
+                if (!long.TryParse(csEach.Text.Trim(), out long each) || each <= 0) { csOut.Text = "bad amount"; return; }
+                var spv2 = LoadSpvFromDisk(w); var rnd = new Random();
+                var outs = new List<(byte[] script, long amount)>();
+                for (int i = 0; i < n; i++) { long a = csR.IsChecked == true ? System.Math.Max(1000, each / 2 + rnd.Next((int)each)) : each; outs.Add((NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(FirstAddr + i))), a)); }
+                byte[] change = NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(FirstAddr)));
+                var built = SpvSpend.BuildMany(spv2, SpvKeymap(w), outs, 500, change, _frozenCoins);
+                if (built is null) { csOut.Text = "insufficient funds"; return; }
+                using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e");
+                var r = await rpc.CallAsync("sendrawtransaction", Tx.ToHex(built.Raw));
+                if (r is null) { csOut.Text = "node rejected the split"; return; }
+                foreach (var c in built.Tx.Inputs) spv2.Spend(c.PrevTxid + ":" + c.PrevVout); spv2.Save(SpvPathFor()); ShowSpv();
+                csOut.Text = $"split into {n} coins · txid {built.Txid[..16]}…";
+            }
+            catch (Exception e) { csOut.Text = e.Message; }
+        }
+        csb.Click += (_, _) => DoSplit();
+        csplit.Children.Add(new TextBlock { Text = "Coinsplit — split your balance into many UTXOs", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        csplit.Children.Add(L("number of pieces")); csplit.Children.Add(csN);
+        csplit.Children.Add(L("sat each (base, if randomized)")); csplit.Children.Add(csEach);
+        csplit.Children.Add(csR); csplit.Children.Add(csb); csplit.Children.Add(csOut);
+        tabs.Items.Add(Tab("Coinsplit", csplit));
+
         // ===== TOOLS — sign/verify, encrypt/decrypt, sweep a private key, load/broadcast a raw tx =====
         var tools = new StackPanel();
         tools.Children.Add(new TextBlock { Text = "Sign a message (identity key)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
