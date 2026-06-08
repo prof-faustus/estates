@@ -866,6 +866,23 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("qr: bitcoin URI encodes without error", QrCode.Encode("bitcoin:1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2?amount=0.5", QrCode.Medium).Size >= 21);
 }
 
+// VAULT — the mandatory pre-signed nLockTime recovery: both parties sign at funding; it verifies, is
+// time-locked, pays 100% (minus fee) to the owner, finalizes to a broadcastable tx; a forged sig fails.
+{
+    byte[] oPriv = Type42.UniqueKey(new byte[32] { 101, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }, "owner"); byte[] oPub = Secp256k1.PublicKey(oPriv);
+    byte[] xPriv = Type42.UniqueKey(new byte[32] { 102, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }, "other"); byte[] xPub = Secp256k1.PublicKey(xPriv);
+    byte[] ePriv = Type42.UniqueKey(new byte[32] { 103, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }, "eve3");
+    byte[] ownerRefund = NodeWallet.P2pkhScript(Recovery.Hash160(oPub));
+    var rec = Vault.BuildRecovery(new string('b', 64), 0, 1_000_000, oPub, xPub, ownerRefund, 800_000, oPriv, xPriv, 500);
+    X("vault: recovery verifies (both signed, time-locked, reclaimable)", Vault.VerifyRecovery(rec, oPub, xPub));
+    X("vault: recovery is time-locked (nLockTime set, input non-final)", rec.LockTime == 800_000 && rec.Tx.Inputs[0].Sequence < 0xffffffff);
+    X("vault: recovery pays 100% (minus fee) to the owner", rec.Tx.Outputs[0].Value == 999_500 && Tx.ToHex(rec.Tx.Outputs[0].Script) == Tx.ToHex(ownerRefund));
+    var fin = Vault.Finalize(rec);
+    X("vault: finalizes to a broadcastable tx (OP_0 + 2 sigs)", fin.Inputs[0].ScriptSig.Length > 100 && fin.Inputs[0].ScriptSig[0] == 0x00 && fin.LockTime == 800_000);
+    byte[] forged = Multisig.Sign(rec.Tx, 0, rec.LockScript, rec.Value, ePriv);
+    X("vault: a forged co-signer signature is rejected", !Vault.VerifyRecovery(rec with { OtherSig = forged }, oPub, xPub));
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
