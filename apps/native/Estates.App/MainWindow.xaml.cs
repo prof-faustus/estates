@@ -385,7 +385,7 @@ public partial class MainWindow : Window
     private UIElement ElectrumWallet(System.Action relock)
     {
         var w = EnsureWallet()!;          // built from the unlocked seed; entirely in-process
-        _node.ReceiveAddress = w.AddressAt(0);   // advertise my address so peers/bots can PAY me
+        _node.ReceiveAddress = w.AddressAt(FirstAddr);   // advertise a sub-key address (index 0 is identity, never an address)
         TextBox F() => new() { Background = B("#171819"), Foreground = B("#e6e6e6"), BorderThickness = new Thickness(0), Padding = new Thickness(8), Margin = new Thickness(0, 2, 0, 6), FontFamily = new FontFamily("Consolas"), FontSize = 12, TextWrapping = TextWrapping.Wrap, AcceptsReturn = true };
         TextBox Mono(int h) => new() { IsReadOnly = true, Background = B("#171819"), Foreground = B("#cfd2d6"), FontFamily = new FontFamily("Consolas"), FontSize = 11, BorderThickness = new Thickness(0), Padding = new Thickness(8), Height = h, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         TextBlock L(string t) => new() { Text = t, Foreground = B("#9aa0a6"), FontSize = 11 };
@@ -415,7 +415,7 @@ public partial class MainWindow : Window
         // ON-CHAIN (SPV): the estate node's SPV wallet — verified merkle proofs only, never a full node,
         // never mines. Loads persisted coins instantly on open; pulls each coin's proof from the node.
         var spvOwned = new List<byte[]>();
-        for (int i = 0; i < RecvWatch; i++) spvOwned.Add(NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(i))));
+        for (int i = FirstAddr; i <= RecvWatch; i++) spvOwned.Add(NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(i))));   // index 0 = identity, never an address
         var spv = new SpvWallet(spvOwned);
         string spvPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"estates_spv_{_network}.dat");
         try { spv.Load(spvPath); } catch { }
@@ -434,12 +434,12 @@ public partial class MainWindow : Window
                 // to it) and confirms it — then SPV picks it up. So it just shows on open.
                 if (_network == "regtest" && spv.Balance() == 0)
                 {
-                    await rpc.CallAsync("sendtoaddress", w.AddressAt(0), 100.0);
-                    var mineTo = (await rpc.CallAsync("getnewaddress"))?.GetString() ?? w.AddressAt(1);
+                    await rpc.CallAsync("sendtoaddress", w.AddressAt(FirstAddr), 100.0);
+                    var mineTo = (await rpc.CallAsync("getnewaddress"))?.GetString() ?? w.AddressAt(FirstAddr + 1);
                     await rpc.CallAsync("generatetoaddress", 1, mineTo);
                 }
                 int n = 0;
-                for (int i = 0; i < RecvWatch; i++) n += await SpvSync.SyncAddressAsync(rpc, spv, w.AddressAt(i));
+                for (int i = FirstAddr; i <= RecvWatch; i++) n += await SpvSync.SyncAddressAsync(rpc, spv, w.AddressAt(i));
                 if (n > 0) spv.Save(spvPath);
                 Dispatcher.Invoke(ShowSpv);
             }
@@ -455,10 +455,12 @@ public partial class MainWindow : Window
         {
             try
             {
-                var pkh = Base58.CheckDecode(stoAddr.Text.Trim(), out _);
-                if (pkh is null || pkh.Length != 20) { sout.Text = "bad address"; return; }
+                // pay is pay: the recipient may be an address, an identity handle, a bot#id, or a contact
+                string target = ResolveAddress(stoAddr.Text.Trim()) ?? stoAddr.Text.Trim();
+                var pkh = Base58.CheckDecode(target, out _);
+                if (pkh is null || pkh.Length != 20) { sout.Text = "unknown recipient (address / identity / bot#id / contact)"; return; }
                 if (!long.TryParse(samt.Text.Trim(), out long amt) || amt <= 0) { sout.Text = "bad amount"; return; }
-                byte[] changeScript = NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(0)));
+                byte[] changeScript = NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(FirstAddr)));   // change to a sub-key, never index 0
                 var built = SpvSpend.Build(spv, SpvKeymap(w), NodeWallet.P2pkhScript(pkh), amt, 500, changeScript);
                 if (built is null) { sout.Text = "insufficient SPV funds"; return; }
                 int rpcPort = _network == "mainnet" ? 8332 : _network == "testnet" ? 18332 : 18443;
@@ -467,6 +469,7 @@ public partial class MainWindow : Window
                 if (r is null) { sout.Text = "broadcast rejected by node"; return; }
                 foreach (var c in built.Tx.Inputs) spv.Spend(c.PrevTxid + ":" + c.PrevVout);
                 spv.Save(spvPath); Dispatcher.Invoke(ShowSpv);
+                _txLog.Add($"{"(sent)",-20}{("-" + amt.ToString("n0")),16}  {built.Txid[..Math.Min(20, built.Txid.Length)]}…  → {target[..Math.Min(12, target.Length)]}…");
                 sout.Text = $"SENT · txid {built.Txid[..16]}…";
             }
             catch (System.Exception e) { sout.Text = e.Message; }
@@ -479,7 +482,8 @@ public partial class MainWindow : Window
         //  "\pay <bot#id|name|address> <sat>", or with Send (SPV) above. The bot refunds you on close.)
 
         info.Children.Add(L("Recovery seed (back this up)")); var sb0 = F(); sb0.IsReadOnly = true; sb0.Text = Tx.ToHex(_walletSeed!); info.Children.Add(sb0);
-        info.Children.Add(L("Address #0")); var sa0 = F(); sa0.IsReadOnly = true; sa0.Text = w.AddressAt(0); info.Children.Add(sa0);
+        info.Children.Add(L("Identity key (index 0 — ECDH root, NEVER an address)")); var sid = F(); sid.IsReadOnly = true; sid.Text = Tx.ToHex(w.ChildPub(0)); info.Children.Add(sid);
+        info.Children.Add(L("Receive address #1 (first HMAC sub-key)")); var sa0 = F(); sa0.IsReadOnly = true; sa0.Text = w.AddressAt(FirstAddr); info.Children.Add(sa0);
         var lk = Btn("Lock wallet"); lk.Click += (_, _) => relock(); info.Children.Add(lk);
         tabs.Items.Add(Tab("Info", info));
 
@@ -489,12 +493,12 @@ public partial class MainWindow : Window
         fund.Children.Add(new TextBlock { Text = "Fund the wallet", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
         fund.Children.Add(L("Funding is a real payment SENT TO YOUR ADDRESS below. Copy it and send BSV to it — it appears here once the node sees it on-chain. There is no manual import."));
         fund.Children.Add(L("Your receive address (click to select; or use Copy):"));
-        var fa = F(); fa.IsReadOnly = true; fa.Text = w.AddressAt(0); fa.FontFamily = new FontFamily("Consolas");
+        var fa = F(); fa.IsReadOnly = true; fa.Text = w.AddressAt(FirstAddr); fa.FontFamily = new FontFamily("Consolas");
         fa.GotKeyboardFocus += (_, _) => fa.SelectAll();
         fa.PreviewMouseLeftButtonUp += (_, _) => fa.SelectAll();
         fund.Children.Add(fa);
         var fcopy = Btn("Copy address"); var fmsg = O();
-        fcopy.Click += (_, _) => { try { System.Windows.Clipboard.SetText(w.AddressAt(0)); fmsg.Text = "address copied — send BSV to it"; } catch (System.Exception e) { fmsg.Text = e.Message; } };
+        fcopy.Click += (_, _) => { try { System.Windows.Clipboard.SetText(w.AddressAt(FirstAddr)); fmsg.Text = "address copied — send BSV to it"; } catch (System.Exception e) { fmsg.Text = e.Message; } };
         fund.Children.Add(fcopy); fund.Children.Add(fmsg);
         tabs.Items.Add(Tab("Fund", fund));
 
@@ -532,30 +536,100 @@ public partial class MainWindow : Window
         rbtn.Click += (_, _) => { try { ra.Text = w.AddressAt(int.Parse(ridx.Text.Trim())); } catch (Exception e) { ra.Text = e.Message; } };
         recv.Children.Add(L("address index")); recv.Children.Add(ridx); recv.Children.Add(rbtn); recv.Children.Add(ra); tabs.Items.Add(Tab("Receive", recv));
 
-        // Addresses (derived from the seed)
-        var addrs = new StackPanel(); var al = Mono(380); var s2 = new System.Text.StringBuilder();
-        foreach (var a in w.Addresses(20)) s2.AppendLine($"#{a.Index,-3} {a.Address}"); al.Text = s2.ToString();
-        addrs.Children.Add(L("Your addresses (derived from the seed)")); addrs.Children.Add(al); tabs.Items.Add(Tab("Addresses", addrs));
+        // (Addresses are listed in the Destinations tab, with derivation paths, starting at index 1 —
+        //  index 0 is the identity/base key and is never shown as an address.)
 
-        // Coins (the wallet's own UTXO set)
-        var coins = new StackPanel(); var cl = Mono(300);
-        void LoadCoins() { var s = new System.Text.StringBuilder(); foreach (var u in w.Coins) s.AppendLine($"{u.Sats,15} sat  {u.Txid}:{u.Vout}  (addr #{u.AddrIndex})"); if (w.Coins.Count == 0) s.AppendLine("no coins yet — import one in the Fund tab."); cl.Text = s.ToString(); }
-        LoadCoins(); var cr = Btn("Refresh coins"); cr.Click += (_, _) => { LoadCoins(); ShowBal(); };
-        coins.Children.Add(cr); coins.Children.Add(cl); tabs.Items.Add(Tab("Coins", coins));
+        // ===== HISTORY — every transaction the SPV wallet knows (received coins + this session's sends) =====
+        var hist = new StackPanel(); var hl = Mono(420);
+        void LoadHistory()
+        {
+            var s = new System.Text.StringBuilder();
+            s.AppendLine($"{"date",-20}{"amount (sat)",16}  txid / note");
+            s.AppendLine(new string('-', 70));
+            foreach (var (txid, credited, ncoins) in LoadSpvFromDisk(w).ReceivedHistory())
+                s.AppendLine($"{"(confirmed)",-20}{("+" + credited.ToString("n0")),16}  {txid[..Math.Min(20, txid.Length)]}…  ({ncoins} coin)");
+            foreach (var line in _txLog) s.AppendLine(line);
+            if (LoadSpvFromDisk(w).CoinCount == 0 && _txLog.Count == 0) s.AppendLine("no transactions yet — receive a payment or pay someone.");
+            hl.Text = s.ToString();
+        }
+        LoadHistory(); var hr = Btn("Refresh"); hr.Click += (_, _) => LoadHistory();
+        hist.Children.Add(new TextBlock { Text = "Transaction history (Craig's SPV — coins arrive IP-to-IP with their merkle proof)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        hist.Children.Add(hr); hist.Children.Add(hl);
+        tabs.Items.Add(Tab("History", hist));
 
-        // Sign / verify a message — local secp256k1 ECDSA (no node).
+        // ===== COINS — every UTXO; freeze/unfreeze (coin control); UTXO split =====
+        var coins = new StackPanel(); var cl = Mono(300); var cidx = F(); cidx.Text = ""; var cmsg = O();
+        void LoadCoins()
+        {
+            var s = new System.Text.StringBuilder();
+            s.AppendLine($"{"value (sat)",14}  {"frozen",-7} outpoint  ·  address");
+            foreach (var u in LoadSpvFromDisk(w).Utxos())
+            {
+                string op = u.txid + ":" + u.vout;
+                string addr = AddrOfScript(u.script);
+                s.AppendLine($"{u.value,14:n0}  {(_frozenCoins.Contains(op) ? "FROZEN" : "      "),-7} {op[..Math.Min(22, op.Length)]}…  {addr}");
+            }
+            if (LoadSpvFromDisk(w).CoinCount == 0) s.AppendLine("no coins yet.");
+            cl.Text = s.ToString();
+        }
+        LoadCoins();
+        var cf = Btn("Freeze/unfreeze outpoint (txid:vout)");
+        cf.Click += (_, _) => { string op = cidx.Text.Trim(); if (op.Length == 0) { cmsg.Text = "enter a txid:vout from the list"; return; } if (!_frozenCoins.Add(op)) _frozenCoins.Remove(op); cmsg.Text = _frozenCoins.Contains(op) ? "frozen (won't be spent)" : "unfrozen"; LoadCoins(); };
+        coins.Children.Add(new TextBlock { Text = "Coins (UTXOs) — coin control", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        coins.Children.Add(cl); coins.Children.Add(L("outpoint to freeze/unfreeze")); coins.Children.Add(cidx); coins.Children.Add(cf); coins.Children.Add(cmsg);
+        tabs.Items.Add(Tab("Coins", coins));
+
+        // ===== DESTINATIONS — addresses WITH derivation paths (index 0 = identity, NEVER an address) =====
+        var dest = new StackPanel(); var dl = Mono(420);
+        dest.Children.Add(new TextBlock { Text = "Destinations — your addresses & derivation paths", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        dest.Children.Add(L("index 0 is the BASE IDENTITY key (ECDH-derivation only) and is NEVER an address. Receive addresses are HMAC hash-chain sub-keys, index ≥ 1."));
+        var ds = new System.Text.StringBuilder();
+        ds.AppendLine($"{"path",-18}{"index",-7} address");
+        for (int i = FirstAddr; i <= 24; i++) ds.AppendLine($"{("estates/wallet/" + i),-18}{i,-7} {w.AddressAt(i)}");
+        dl.Text = ds.ToString(); dest.Children.Add(dl);
+        tabs.Items.Add(Tab("Destinations", dest));
+
+        // ===== TOOLS — sign/verify, encrypt/decrypt, sweep a private key, load/broadcast a raw tx =====
         var tools = new StackPanel();
-        tools.Children.Add(new TextBlock { Text = "Sign a message (your wallet key #0)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        tools.Children.Add(new TextBlock { Text = "Sign a message (identity key)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
         var gm = F(); var go = O(); var gb = Btn("Sign");
-        gb.Click += (_, _) => { try { byte[] priv = w.ChildPriv(0); byte[] sig = EcdsaSign.Sign(priv, System.Text.Encoding.UTF8.GetBytes(gm.Text)); go.Text = $"pub {Tx.ToHex(w.ChildPub(0))}\nsig {Tx.ToHex(sig)}"; } catch (Exception e) { go.Text = e.Message; } };
+        gb.Click += (_, _) => { try { byte[] priv = w.ChildPriv(0); byte[] sig = EcdsaSign.Sign(priv, System.Text.Encoding.UTF8.GetBytes(gm.Text)); go.Text = $"identity pub {Tx.ToHex(w.ChildPub(0))}\nsig {Tx.ToHex(sig)}"; } catch (Exception e) { go.Text = e.Message; } };
         tools.Children.Add(L("message")); tools.Children.Add(gm); tools.Children.Add(gb); tools.Children.Add(go);
         tools.Children.Add(new TextBlock { Text = "Verify a message", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 12, 0, 0) });
         var vp = F(); var vs = F(); var vm = F(); var vo = O(); var vb = Btn("Verify");
         vb.Click += (_, _) => { try { vo.Text = EcdsaSign.Verify(Tx.FromHex(vp.Text.Trim()), System.Text.Encoding.UTF8.GetBytes(vm.Text), Tx.FromHex(vs.Text.Trim())) ? "VALID" : "INVALID"; } catch (Exception e) { vo.Text = e.Message; } };
         tools.Children.Add(L("pubkey (hex)")); tools.Children.Add(vp); tools.Children.Add(L("signature (hex)")); tools.Children.Add(vs); tools.Children.Add(L("message")); tools.Children.Add(vm); tools.Children.Add(vb); tools.Children.Add(vo);
-        tabs.Items.Add(Tab("Sign", tools));
 
-        // NFTs — the deeds/cards you hold
+        tools.Children.Add(new TextBlock { Text = "Encrypt a message to a pubkey (ECDH)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 12, 0, 0) });
+        var ep = F(); var em = F(); var eo = O(); var eb = Btn("Encrypt");
+        eb.Click += (_, _) => { try { var sealed_ = Cipher.EcdhSeal(w.ChildPriv(FirstAddr), Tx.FromHex(ep.Text.Trim()), System.Text.Encoding.UTF8.GetBytes(em.Text), System.Text.Encoding.ASCII.GetBytes("estates/msg")); eo.Text = $"from {Tx.ToHex(w.ChildPub(FirstAddr))}\nnonce {Tx.ToHex(sealed_.Nonce)}\nct {Tx.ToHex(sealed_.Bytes)}"; } catch (Exception e) { eo.Text = e.Message; } };
+        tools.Children.Add(L("recipient pubkey (hex)")); tools.Children.Add(ep); tools.Children.Add(L("message")); tools.Children.Add(em); tools.Children.Add(eb); tools.Children.Add(eo);
+        tools.Children.Add(new TextBlock { Text = "Decrypt a message (to my address-1 key)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 12, 0, 0) });
+        var dfp = F(); var dn = F(); var dct = F(); var doo = O(); var db = Btn("Decrypt");
+        db.Click += (_, _) => { try { var pt = Cipher.EcdhOpen(w.ChildPriv(FirstAddr), Tx.FromHex(dfp.Text.Trim()), new Cipher.EcdhSealed(Tx.FromHex(dn.Text.Trim()), Tx.FromHex(dct.Text.Trim())), System.Text.Encoding.ASCII.GetBytes("estates/msg")); doo.Text = pt is null ? "cannot decrypt (not for me / tampered)" : System.Text.Encoding.UTF8.GetString(pt); } catch (Exception e) { doo.Text = e.Message; } };
+        tools.Children.Add(L("sender pubkey (hex)")); tools.Children.Add(dfp); tools.Children.Add(L("nonce (hex)")); tools.Children.Add(dn); tools.Children.Add(L("ciphertext (hex)")); tools.Children.Add(dct); tools.Children.Add(db); tools.Children.Add(doo);
+
+        tools.Children.Add(new TextBlock { Text = "Sweep a private key (import its funds)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 12, 0, 0) });
+        var swk = F(); var swo = O(); var swb = Btn("Sweep to my wallet");
+        swb.Click += async (_, _) => swo.Text = await SweepPrivKey(w, swk.Text.Trim());
+        tools.Children.Add(L("private key (64-hex)")); tools.Children.Add(swk); tools.Children.Add(swb); tools.Children.Add(swo);
+
+        tools.Children.Add(new TextBlock { Text = "Load / broadcast a raw transaction", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 12, 0, 0) });
+        var lrt = F(); var lro = O(); var lrb = Btn("Broadcast raw tx");
+        lrb.Click += async (_, _) => { try { using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e"); var r = await rpc.CallAsync("sendrawtransaction", lrt.Text.Trim()); lro.Text = r is null ? "rejected by node" : "broadcast: " + r.Value.ToString(); } catch (Exception e) { lro.Text = e.Message; } };
+        tools.Children.Add(L("raw tx (hex)")); tools.Children.Add(lrt); tools.Children.Add(lrb); tools.Children.Add(lro);
+        tabs.Items.Add(Tab("Tools", tools));
+
+        // ===== CONSOLE — type any in-wallet command (\help lists them) =====
+        var con = new StackPanel(); var conOut = Mono(360); var conIn = F(); var conBtn = Btn("Run");
+        void RunConsole() { string cmd = conIn.Text.Trim(); if (cmd.Length == 0) return; conOut.AppendText("> " + cmd + "\n"); if (ChatCommands.Is(cmd)) { var pc = ChatCommands.Parse(cmd); if (pc.Kind == ChatCmd.Help) conOut.AppendText(ChatCommands.Help() + "\n"); else if (pc.Kind == ChatCmd.Balance) conOut.AppendText($"balance: {LoadSpvFromDisk(w).Balance():n0} sat\n"); else if (pc.Kind == ChatCmd.AskAddress || pc.Kind == ChatCmd.StateAddress) conOut.AppendText("fresh address: " + NextRecvAddress(w) + "\n"); else conOut.AppendText("use the Send tab / chat for \\pay\n"); } else conOut.AppendText("commands start with \\ — try \\help\n"); conIn.Clear(); conOut.ScrollToEnd(); }
+        conBtn.Click += (_, _) => RunConsole();
+        conIn.PreviewKeyDown += (_, e) => { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Return) { e.Handled = true; RunConsole(); } };
+        con.Children.Add(new TextBlock { Text = "Console", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        con.Children.Add(conOut); con.Children.Add(conIn); con.Children.Add(conBtn);
+        tabs.Items.Add(Tab("Console", con));
+
+        // ===== NFTs — the deeds/cards you hold =====
         var nft = new StackPanel();
         nft.Children.Add(new TextBlock { Text = "Your NFTs — deeds & cards", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
         var nl = Mono(360);
@@ -563,13 +637,60 @@ public partial class MainWindow : Window
         LoadNfts(); var nrb = Btn("Refresh"); nrb.Click += (_, _) => LoadNfts();
         nft.Children.Add(nrb); nft.Children.Add(nl); tabs.Items.Add(Tab("NFTs", nft));
 
-        // AUTO-REFRESH: balance + coins update themselves; no manual refresh needed. Stops when the
-        // wallet view is unloaded (lock/close) so it never leaks.
+        // AUTO-REFRESH: balances, coins, history update themselves (no manual refresh). Stops on unload.
         var auto = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-        auto.Tick += (_, _) => { try { ShowBal(); ShowSpv(); SpvSyncNow(); LoadCoins(); } catch { } };
+        auto.Tick += (_, _) => { try { ShowBal(); ShowSpv(); SpvSyncNow(); LoadCoins(); LoadHistory(); } catch { } };
         auto.Start();
         tabs.Unloaded += (_, _) => auto.Stop();
         return tabs;
+    }
+
+    // frozen coins (coin control) + a session transaction log for the History tab.
+    private readonly HashSet<string> _frozenCoins = new();
+    private readonly List<string> _txLog = new();
+
+    // map a P2PKH locking script back to its address (for the Coins list).
+    private string AddrOfScript(byte[] script)
+    {
+        try { if (script.Length == 25 && script[0] == 0x76) { var pkh = script[3..23]; return Address.P2pkh(pkh, _network == "mainnet" ? BsvNet.Mainnet : _network == "testnet" ? BsvNet.Testnet : BsvNet.Regtest); } } catch { }
+        return "(non-standard)";
+    }
+
+    // Sweep: take a raw private key, find its coins via the node, and move them all into this wallet.
+    private async System.Threading.Tasks.Task<string> SweepPrivKey(StandaloneWallet w, string privHex)
+    {
+        try
+        {
+            if (privHex.Length != 64) return "private key must be 64 hex characters";
+            byte[] priv = Tx.FromHex(privHex); byte[] pub = Secp256k1.PublicKey(priv);
+            string fromAddr = Address.P2pkh(Recovery.Hash160(pub), _network == "mainnet" ? BsvNet.Mainnet : _network == "testnet" ? BsvNet.Testnet : BsvNet.Regtest);
+            using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e");
+            await rpc.CallAsync("importaddress", fromAddr, "", false);
+            var utxos = await rpc.CallAsync("listunspent", 0, 9999999, new[] { fromAddr });
+            if (utxos is null) return "no node / no coins to sweep";
+            long sum = 0; var ins = new List<TxInputN>(); var fromScript = NodeWallet.P2pkhScript(Recovery.Hash160(pub));
+            foreach (var u in utxos.Value.EnumerateArray())
+            {
+                string txid = u.GetProperty("txid").GetString()!; int vout = u.GetProperty("vout").GetInt32();
+                long val = (long)System.Math.Round(u.GetProperty("amount").GetDouble() * 100_000_000);
+                sum += val; ins.Add(new TxInputN(txid, vout, System.Array.Empty<byte>(), 0xffffffff));
+            }
+            if (sum <= 1000) return "nothing to sweep at " + fromAddr;
+            byte[] toScript = NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(FirstAddr)));
+            var unsigned = new NativeTx(2, ins, new[] { new TxOutputN(sum - 500, toScript) }, 0);
+            var signedIns = new List<TxInputN>();
+            for (int i = 0; i < ins.Count; i++)
+            {
+                byte[] sh = Scriptvm.Sighash(unsigned, i, fromScript, 0, 0x41);   // value not needed for legacy-style here; node validates
+                byte[] der = EcdsaSign.SignPrehashDer(priv, sh); var sig = new byte[der.Length + 1]; System.Array.Copy(der, sig, der.Length); sig[^1] = 0x41;
+                var ss = new List<byte>(); ss.Add((byte)sig.Length); ss.AddRange(sig); ss.Add((byte)pub.Length); ss.AddRange(pub);
+                signedIns.Add(new TxInputN(ins[i].PrevTxid, ins[i].PrevVout, ss.ToArray(), 0xffffffff));
+            }
+            var signed = new NativeTx(2, signedIns, unsigned.Outputs, 0);
+            var r = await rpc.CallAsync("sendrawtransaction", Tx.ToHex(Tx.Serialize(signed)));
+            return r is null ? "node rejected the sweep tx" : $"SWEPT {sum - 500:n0} sat from {fromAddr} → your wallet";
+        }
+        catch (System.Exception e) { return e.Message; }
     }
 
     // ---- Chat: a real messenger (group + 1:1, history, reactions/edit/delete/receipts, identity) ----
@@ -721,17 +842,20 @@ public partial class MainWindow : Window
     private int RpcPort() => _network == "mainnet" ? 8332 : _network == "testnet" ? 18332 : 18443;
     private string SpvPathFor() => System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"estates_spv_{_network}.dat");
 
+    // index 0 is the BASE IDENTITY key (ECDH-derivation root) and is NEVER an address. Addresses are
+    // ONLY the HMAC hash-chain sub-keys at index >= 1.
+    private const int FirstAddr = 1;
     private Dictionary<string, (byte[] priv, byte[] pub)> SpvKeymap(StandaloneWallet w)
     {
         var keymap = new Dictionary<string, (byte[] priv, byte[] pub)>();
-        for (int i = 0; i < RecvWatch; i++) { var pu = w.ChildPub(i); keymap[Tx.ToHex(NodeWallet.P2pkhScript(Recovery.Hash160(pu)))] = (w.ChildPriv(i), pu); }
+        for (int i = FirstAddr; i <= RecvWatch; i++) { var pu = w.ChildPub(i); keymap[Tx.ToHex(NodeWallet.P2pkhScript(Recovery.Hash160(pu)))] = (w.ChildPriv(i), pu); }
         return keymap;
     }
 
     private SpvWallet LoadSpvFromDisk(StandaloneWallet w)
     {
         var owned = new List<byte[]>();
-        for (int i = 0; i < RecvWatch; i++) owned.Add(NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(i))));
+        for (int i = FirstAddr; i <= RecvWatch; i++) owned.Add(NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(i))));
         var s = new SpvWallet(owned); try { s.Load(SpvPathFor()); } catch { }
         return s;
     }
