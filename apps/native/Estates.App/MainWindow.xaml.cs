@@ -840,6 +840,10 @@ public partial class MainWindow : Window
         var ctGrid = Grid4("Name", "Address", "", "", 220);
         void LoadContacts() { var rows = new List<Row4>(); foreach (var c in _contacts) rows.Add(new Row4 { A = c.name, B = c.address }); ctGrid.ItemsSource = rows; }
         LoadContacts();
+        var ctMenu = new ContextMenu();
+        var ctCopy = new MenuItem { Header = "Copy address" }; ctCopy.Click += (_, _) => { if (ctGrid.SelectedItem is Row4 r) { try { System.Windows.Clipboard.SetText(r.B); } catch { } } };
+        var ctDel = new MenuItem { Header = "Delete contact" }; ctDel.Click += (_, _) => { if (ctGrid.SelectedItem is Row4 r) { _contacts.RemoveAll(c => c.name == r.A); SaveContactsDisk(); LoadContacts(); } };
+        ctMenu.Items.Add(ctCopy); ctMenu.Items.Add(ctDel); ctGrid.ContextMenu = ctMenu;
         var ctName = F(); var ctAddr = F(); var ctMsg = O(); var ctAdd = Btn("Add contact");
         ctAdd.Click += (_, _) => { string nm = ctName.Text.Trim(); string ad = ctAddr.Text.Trim(); if (nm.Length == 0 || Base58.CheckDecode(ad, out _) is not { Length: 20 }) { ctMsg.Text = "enter a name + a valid address"; return; } _contacts.Add((nm, ad)); SaveContactsDisk(); LoadContacts(); ctMsg.Text = $"added contact '{nm}' (saved)"; ctName.Clear(); ctAddr.Clear(); };
         contacts.Children.Add(ctGrid); contacts.Children.Add(L("name")); contacts.Children.Add(ctName); contacts.Children.Add(L("address")); contacts.Children.Add(ctAddr); contacts.Children.Add(ctAdd); contacts.Children.Add(ctMsg);
