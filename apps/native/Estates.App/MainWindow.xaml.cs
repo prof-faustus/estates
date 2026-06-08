@@ -896,8 +896,10 @@ public partial class MainWindow : Window
                 var hashEl = await rpc.CallAsync("getblockhash", h); if (hashEl is null) { scanO.Text = "no such block"; return; }
                 var rawEl = await rpc.CallAsync("getblock", hashEl.Value.GetString()!, 0); if (rawEl is null) { scanO.Text = "getblock failed"; return; }
                 var parsed = Block.Parse(Tx.FromHex(rawEl.Value.GetString()!)); if (parsed is null) { scanO.Text = "block parse failed"; return; }
-                var filter = new BloomFilter(RecvWatch + 5, 0.0001, (uint)h);
-                for (int i = FirstAddr; i <= RecvWatch; i++) filter.Insert(Recovery.Hash160(w.ChildPub(i)));
+                var myCoins = LoadSpvFromDisk(w).Utxos();
+                var filter = new BloomFilter(RecvWatch + myCoins.Count + 5, 0.0001, (uint)h);
+                for (int i = FirstAddr; i <= RecvWatch; i++) filter.Insert(Recovery.Hash160(w.ChildPub(i)));   // my addresses (receives)
+                foreach (var u in myCoins) filter.Insert(BloomMatch.Outpoint(u.txid, u.vout));                  // my outpoints (spends)
                 var ids = new List<byte[]>(); var matches = new List<bool>(); int found = 0;
                 foreach (var t in parsed.Txs)
                 {
