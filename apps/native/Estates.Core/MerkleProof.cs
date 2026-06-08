@@ -32,11 +32,22 @@ public static class MerkleProof
         try
         {
             if (index < 0 || merkleRootInternal is null || merkleRootInternal.Length != 32) return false;
-            var txid = Tx.FromHex(txidDisplay); if (txid.Length != 32) return false; System.Array.Reverse(txid);
-            var branch = new List<byte[]>(branchDisplay.Count);
-            foreach (var b in branchDisplay) { var x = Tx.FromHex(b); if (x.Length != 32) return false; System.Array.Reverse(x); branch.Add(x); }
-            var root = Root(txid, branch, index);
-            return root.AsSpan().SequenceEqual(merkleRootInternal);
+            var h = Tx.FromHex(txidDisplay); if (h.Length != 32) return false; System.Array.Reverse(h);
+            long idx = index;
+            foreach (var bd in branchDisplay)
+            {
+                // A "*" (or empty) sibling is the TSC "duplicate" marker: at this level the sibling is the
+                // working hash itself (right-edge of an odd row). Otherwise it is a display-order hash.
+                byte[] sib;
+                if (bd == "*" || bd.Length == 0) sib = (byte[])h.Clone();
+                else { sib = Tx.FromHex(bd); if (sib.Length != 32) return false; System.Array.Reverse(sib); }
+                var pair = new byte[64];
+                if ((idx & 1) == 0) { System.Array.Copy(h, 0, pair, 0, 32); System.Array.Copy(sib, 0, pair, 32, 32); }
+                else { System.Array.Copy(sib, 0, pair, 0, 32); System.Array.Copy(h, 0, pair, 32, 32); }
+                h = Tx.Hash256(pair);
+                idx >>= 1;
+            }
+            return h.AsSpan().SequenceEqual(merkleRootInternal);
         }
         catch { return false; }
     }

@@ -777,6 +777,40 @@ public partial class MainWindow : Window
         recv.Children.Add(L("block header (160 hex = 80 bytes)")); recv.Children.Add(imHdr);
         recv.Children.Add(L("tx index in block")); recv.Children.Add(imIdx);
         recv.Children.Add(imBtn); recv.Children.Add(imOut);
+
+        // FIND A CONFIRMED PAYMENT BY TXID — fetch the SPV proof from the BSV network (P2P primary; public
+        // proof as backup), build the envelope, VERIFY it locally (PoW + merkle), and credit if it pays you.
+        // The source is never trusted: only a proof that meets proof-of-work is accepted.
+        recv.Children.Add(new TextBlock { Text = "Find a confirmed payment by txid (network proof — verified locally)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 12, 0, 2) });
+        recv.Children.Add(L("enter a confirmed txid; the wallet fetches its merkle proof (P2P first, public proof as backup), verifies proof-of-work + merkle locally, and credits any output paying one of YOUR addresses — no balance is trusted from the source"));
+        var fxTxid = F(); fxTxid.FontFamily = new FontFamily("Consolas"); var fxOut = O(); var fxBtn = Btn("Fetch proof + verify + credit");
+        fxBtn.Click += async (_, _) =>
+        {
+            string tx = fxTxid.Text.Trim().ToLowerInvariant();
+            if (tx.Length != 64) { fxOut.Text = "enter a 64-hex txid"; return; }
+            fxBtn.IsEnabled = false; fxOut.Text = "fetching proof from the BSV network…";
+            try
+            {
+                BsvNet net = _network == "mainnet" ? BsvNet.Mainnet : _network == "testnet" ? BsvNet.Testnet : BsvNet.Regtest;
+                var res = await SpvFetch.FetchAsync(tx, net, _http);
+                if (res.Env is null) { fxOut.Text = "could not get a verifiable proof: " + res.Detail; return; }
+                var spv2 = LoadSpvFromDisk(w); long before = spv2.Balance();
+                bool got = spv2.Receive(res.Env);   // re-verifies PoW + merkle, credits owned outputs
+                if (got && spv2.Balance() > before)
+                {
+                    spv2.Save(SpvPathFor()); ShowSpv();
+                    long credited = spv2.Balance() - before;
+                    LogEvent("received", credited.ToString("n0") + " sat via " + res.Source + " txid " + tx);
+                    fxOut.Text = "VERIFIED + credited " + Fmt(credited) + " — " + res.Detail + " [" + res.Source + "]";
+                }
+                else fxOut.Text = got
+                    ? "proof VERIFIED locally (" + res.Detail + "), but no output pays an address in THIS wallet — these funds are not yours/this seed"
+                    : "proof did not verify — not credited";
+            }
+            catch (Exception e) { fxOut.Text = e.Message; }
+            finally { fxBtn.IsEnabled = true; }
+        };
+        recv.Children.Add(L("confirmed txid (64 hex)")); recv.Children.Add(fxTxid); recv.Children.Add(fxBtn); recv.Children.Add(fxOut);
         tabs.Items.Add(Tab("Receive", recv));
 
         // ===== REQUESTS — saved payment requests (address / amount / memo) =====

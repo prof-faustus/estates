@@ -17,7 +17,15 @@ public enum BsvNet { Mainnet, Testnet, Regtest }
 public static class BsvWire
 {
     public const int ProtocolVersion = 70016;
-    public const ulong NodeNetwork = 1;          // NODE_NETWORK service bit
+    public const ulong NodeNetwork = 1;          // NODE_NETWORK service bit (bit 0)
+    // Services we advertise. CRITICAL on BSV: bit 0x20 = NODE_BITCOIN_CASH, the FORK MARKER. Strict BSV
+    // mainnet nodes DROP any inbound peer that does not set it (that is how the BSV network refuses BTC
+    // peers after the fork). A lenient/regtest node ignores it, which is why a peer that handshakes fine
+    // locally is silently dropped by every public mainnet node. We also set NODE_BLOOM (0x04) because we
+    // are an SPV/bloom client. Services = NODE_NETWORK | NODE_BLOOM | NODE_BITCOIN_CASH.
+    public const ulong NodeBloom = 0x04;
+    public const ulong NodeBitcoinCash = 0x20;
+    public const ulong Services = NodeNetwork | NodeBloom | NodeBitcoinCash;   // 0x25
     public const int MaxPayload = 32 * 1024 * 1024;  // 32 MiB hard ceiling on any single message
 
     /// <summary>pchMessageStart for each network (BSV chainparams), written as 4 bytes in order.</summary>
@@ -82,10 +90,10 @@ public static class BsvWire
     {
         var w = new List<byte>(128);
         WriteI32(w, ProtocolVersion);
-        WriteU64(w, NodeNetwork);
+        WriteU64(w, Services);                            // advertise NODE_NETWORK|NODE_BLOOM|NODE_BITCOIN_CASH
         WriteI64(w, nowUnix);
-        NetAddr(w, NodeNetwork, peerIpv4, peerPort);     // addr_recv (the peer)
-        NetAddr(w, NodeNetwork, new byte[4], 0);         // addr_from (us; unspecified)
+        NetAddr(w, Services, peerIpv4, peerPort);         // addr_recv (the peer)
+        NetAddr(w, Services, new byte[4], 0);             // addr_from (us; unspecified)
         WriteU64(w, nonce);
         VarStr(w, userAgent);
         WriteI32(w, startHeight);
