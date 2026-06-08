@@ -14,20 +14,30 @@ public static class SpvSpend
     /// maps each owned P2PKH script (hex) to its (priv, pub). null on insufficient funds.</summary>
     public static Built? Build(SpvWallet w, Dictionary<string, (byte[] priv, byte[] pub)> scriptToKey,
                                byte[] toScript, long amount, long fee, byte[] changeScript)
+        => BuildMany(w, scriptToKey, new List<(byte[], long)> { (toScript, amount) }, fee, changeScript, null);
+
+    /// <summary>PAY-TO-MANY: build + sign a spend with multiple recipient outputs. `frozen` outpoints
+    /// (txid:vout) are excluded from coin selection (coin control). null on insufficient funds.</summary>
+    public static Built? BuildMany(SpvWallet w, Dictionary<string, (byte[] priv, byte[] pub)> scriptToKey,
+                                   IReadOnlyList<(byte[] script, long amount)> recipients, long fee, byte[] changeScript,
+                                   System.Collections.Generic.HashSet<string>? frozen)
     {
-        if (amount <= 0 || fee < 0) return null;
+        if (fee < 0 || recipients.Count == 0) return null;
+        long amount = 0; foreach (var r in recipients) { if (r.amount <= 0) return null; amount += r.amount; }
         long need = amount + fee, sum = 0;
         var chosen = new List<(string txid, int vout, long value, byte[] script)>();
         foreach (var u in System.Linq.Enumerable.OrderByDescending(w.Utxos(), x => x.value))
         {
             if (!scriptToKey.ContainsKey(Tx.ToHex(u.script))) continue;   // must own the key
+            if (frozen is not null && frozen.Contains(u.txid + ":" + u.vout)) continue;   // coin control: skip frozen
             chosen.Add(u); sum += u.value;
             if (sum >= need) break;
         }
         if (sum < need) return null;
         long change = sum - need;
 
-        var outs = new List<TxOutputN> { new(amount, toScript) };
+        var outs = new List<TxOutputN>();
+        foreach (var r in recipients) outs.Add(new TxOutputN(r.amount, r.script));
         if (change > 0) outs.Add(new TxOutputN(change, changeScript));
 
         // unsigned skeleton (empty scriptSigs) — the FORKID sighash uses each prevout's script+value, not scriptSigs

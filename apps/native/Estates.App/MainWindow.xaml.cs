@@ -502,33 +502,55 @@ public partial class MainWindow : Window
         fund.Children.Add(fcopy); fund.Children.Add(fmsg);
         tabs.Items.Add(Tab("Fund", fund));
 
-        // Send — build + SIGN a real BSV tx in-process. The raw tx is shown to hand to a peer or
-        // broadcast yourself; the wallet performs no network action.
-        var send = new StackPanel(); var to = F(); var amt = F(); var fee = F(); fee.Text = "500"; var so = O(); var raw = Mono(120);
-        var peer = F(); peer.Text = _network == "regtest" ? "127.0.0.1:18444" : "";
+        // ===== SEND — PAY-TO-MANY, fee in sat/kB, coin control (frozen coins excluded), SPV-signed,
+        // broadcast to the node + IP-to-IP. Recipients are one per line: "<address|identity|bot#id> <sat>".
+        var send = new StackPanel();
+        send.Children.Add(new TextBlock { Text = "Send — pay to many (one per line: recipient amount-sat)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        send.Children.Add(L("recipient may be an address, an identity handle, a bot#id, or a contact"));
+        var many = F(); many.MinHeight = 90; many.Text = "";
+        var feekb = F(); feekb.Text = "1000";   // sat/kB
+        var so = O(); var raw = Mono(120);
         var sbtn = Btn("Send (build, sign + broadcast)");
-        sbtn.Click += async (_, _) =>
+        async void DoMany()
         {
             try
             {
-                var built = w.BuildSend(to.Text.Trim(), long.Parse(amt.Text.Trim()), long.Parse(fee.Text.Trim()));
-                if (!w.VerifySpend(built)) { so.Text = "internal error: signatures invalid"; return; }
-                raw.Text = built.RawHex;
-                var hp = peer.Text.Trim().Split(':');
-                if (hp.Length != 2 || !int.TryParse(hp[1], out int port)) { so.Text = "to broadcast, enter a peer as host:port"; return; }
-                var net = _network == "mainnet" ? BsvNet.Mainnet : _network == "testnet" ? BsvNet.Testnet : BsvNet.Regtest;
-                so.Text = $"broadcasting {built.Txid[..16]}… to {peer.Text.Trim()} …"; sbtn.IsEnabled = false;
-                bool ok = await Broadcaster.BroadcastAsync(net, hp[0], port, Tx.FromHex(built.RawHex), 15000);
-                sbtn.IsEnabled = true;
-                if (ok) { w.SpendCoins(built.Spent); ShowBal(); so.Text = $"SENT · txid {built.Txid} · accepted by peer · change {built.Change} sat"; }
-                else so.Text = $"built + signed (txid {built.Txid}) but the peer did not accept/pull it — check the host:port. Raw tx below to broadcast elsewhere.";
+                if (!long.TryParse(feekb.Text.Trim(), out long satPerKb) || satPerKb < 0) { so.Text = "bad fee rate (sat/kB)"; return; }
+                var outs = new List<(byte[] script, long amount)>();
+                foreach (var lineRaw in many.Text.Split('\n'))
+                {
+                    var ln = lineRaw.Trim(); if (ln.Length == 0) continue;
+                    var p = ln.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+                    if (p.Length < 2 || !long.TryParse(p[^1], out long a) || a <= 0) { so.Text = $"bad line: {ln}"; return; }
+                    string who = string.Join(' ', p[..^1]);
+                    string? addr = ResolveAddress(who);
+                    var pkh = addr is null ? null : Base58.CheckDecode(addr, out _);
+                    if (pkh is null || pkh.Length != 20) { so.Text = $"unknown recipient: {who}"; return; }
+                    outs.Add((NodeWallet.P2pkhScript(pkh), a));
+                }
+                if (outs.Count == 0) { so.Text = "add at least one recipient"; return; }
+                var spv2 = LoadSpvFromDisk(w);
+                long est = 200 + outs.Count * 34 + 150 * 8; long fee = System.Math.Max(500, satPerKb * est / 1000);   // sat/kB → fee
+                byte[] change = NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(FirstAddr)));
+                var built = SpvSpend.BuildMany(spv2, SpvKeymap(w), outs, fee, change, _frozenCoins);
+                if (built is null) { so.Text = "insufficient funds (after excluding frozen coins)"; return; }
+                raw.Text = Tx.ToHex(built.Raw);
+                using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e");
+                var r = await rpc.CallAsync("sendrawtransaction", Tx.ToHex(built.Raw));
+                foreach (var l in _node.LiveLinks()) { try { l.Send(built.Raw); } catch { } }   // IP-to-IP too
+                if (r is null) { so.Text = "built + signed (txid " + built.Txid[..16] + "…); node did not accept — raw below"; return; }
+                foreach (var c in built.Tx.Inputs) spv2.Spend(c.PrevTxid + ":" + c.PrevVout);
+                spv2.Save(SpvPathFor()); ShowSpv();
+                _txLog.Add($"{"(sent)",-20}{("-" + (outs.Sum(o => o.amount)).ToString("n0")),16}  {built.Txid[..Math.Min(20, built.Txid.Length)]}…  ({outs.Count} payee, fee {fee})");
+                so.Text = $"SENT · {outs.Count} payee(s) · fee {fee} sat · txid {built.Txid}";
             }
-            catch (Exception e) { sbtn.IsEnabled = true; so.Text = e.Message; }
-        };
-        foreach (var f in new[] { to, amt, fee, peer }) f.PreviewKeyDown += (_, e) => { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Return) { e.Handled = true; sbtn.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)); } };
-        send.Children.Add(L("Pay to (address)")); send.Children.Add(to); send.Children.Add(L("Amount (sat)")); send.Children.Add(amt); send.Children.Add(L("Fee (sat)")); send.Children.Add(fee);
-        send.Children.Add(L("Broadcast peer (host:port)")); send.Children.Add(peer); send.Children.Add(sbtn); send.Children.Add(so);
-        send.Children.Add(L("Signed raw transaction")); send.Children.Add(raw);
+            catch (Exception e) { so.Text = e.Message; }
+        }
+        sbtn.Click += (_, _) => DoMany();
+        send.Children.Add(L("recipients (one per line)")); send.Children.Add(many);
+        send.Children.Add(L("fee rate (sat/kB)")); send.Children.Add(feekb);
+        send.Children.Add(sbtn); send.Children.Add(so);
+        send.Children.Add(L("signed raw transaction")); send.Children.Add(raw);
         tabs.Items.Add(Tab("Send", send));
 
         // Receive
