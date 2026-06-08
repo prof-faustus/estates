@@ -83,6 +83,25 @@ public partial class MainWindow : Window
         catch { }
     }
 
+    // Preferences dialog (ported from SVP preferences_dialog / on_base_unit_changed): base unit selection.
+    private void ShowPreferences()
+    {
+        var w = new Window { Title = "Preferences", Width = 360, Height = 240, Owner = this, Background = B("#1b1d1e"), ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        var sp = new StackPanel { Margin = new Thickness(16) };
+        sp.Children.Add(new TextBlock { Text = "Base unit", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        foreach (var u in new[] { "sat", "BSV", "mBSV" })
+        {
+            var uu = u; var rb = new RadioButton { Content = u, Foreground = B("#cfd2d6"), IsChecked = _unit == u, Margin = new Thickness(0, 5, 0, 0) };
+            rb.Checked += (_, _) => { _unit = uu; };
+            sp.Children.Add(rb);
+        }
+        sp.Children.Add(new TextBlock { Text = "Network", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 12, 0, 2) });
+        sp.Children.Add(new TextBlock { Text = $"{_network} (change in the global Network selector)", Foreground = B("#9aa0a6"), FontSize = 12 });
+        var ok = new Button { Content = "Close", Width = 90, Margin = new Thickness(0, 16, 0, 0), HorizontalAlignment = HorizontalAlignment.Right, Background = B("#2d2f34"), Foreground = B("#e6e6e6") };
+        ok.Click += (_, _) => w.Close();
+        sp.Children.Add(ok); w.Content = sp; w.ShowDialog();
+    }
+
     private static SolidColorBrush B(string hex) => new((Color)ColorConverter.ConvertFromString(hex));
 
     // ---- Lobby: only peers alive right now ------------------------------------------
@@ -1250,7 +1269,7 @@ public partial class MainWindow : Window
         var view = MI("_View");
         foreach (TabItem t in tabs.Items) { string hh = t.Header as string ?? ""; view.Items.Add(MI(hh, () => Sel(hh))); }
         var toolsMenu = MI("_Tools");
-        toolsMenu.Items.Add(MI("_Preferences", () => Sel("Network"))); toolsMenu.Items.Add(MI("_Network", () => Sel("Network")));
+        toolsMenu.Items.Add(MI("_Preferences", ShowPreferences)); toolsMenu.Items.Add(MI("_Network", () => Sel("Network")));
         toolsMenu.Items.Add(new Separator());
         toolsMenu.Items.Add(MI("_Sign / verify message", () => Sel("Tools"))); toolsMenu.Items.Add(MI("_Encrypt / decrypt message", () => Sel("Tools")));
         toolsMenu.Items.Add(new Separator());
