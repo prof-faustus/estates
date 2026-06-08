@@ -662,10 +662,10 @@ public partial class MainWindow : Window
         db.Click += (_, _) => { try { var pt = Cipher.EcdhOpen(w.ChildPriv(FirstAddr), Tx.FromHex(dfp.Text.Trim()), new Cipher.EcdhSealed(Tx.FromHex(dn.Text.Trim()), Tx.FromHex(dct.Text.Trim())), System.Text.Encoding.ASCII.GetBytes("estates/msg")); doo.Text = pt is null ? "cannot decrypt (not for me / tampered)" : System.Text.Encoding.UTF8.GetString(pt); } catch (Exception e) { doo.Text = e.Message; } };
         tools.Children.Add(L("sender pubkey (hex)")); tools.Children.Add(dfp); tools.Children.Add(L("nonce (hex)")); tools.Children.Add(dn); tools.Children.Add(L("ciphertext (hex)")); tools.Children.Add(dct); tools.Children.Add(db); tools.Children.Add(doo);
 
-        tools.Children.Add(new TextBlock { Text = "Sweep a private key (import its funds)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 12, 0, 0) });
-        var swk = F(); var swo = O(); var swb = Btn("Sweep to my wallet");
-        swb.Click += async (_, _) => swo.Text = await SweepPrivKey(w, swk.Text.Trim());
-        tools.Children.Add(L("private key (64-hex)")); tools.Children.Add(swk); tools.Children.Add(swb); tools.Children.Add(swo);
+        tools.Children.Add(new TextBlock { Text = "Sweep a private key (import its funds) — raw 64-hex or a BIP38 6P… key", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 12, 0, 0) });
+        var swk = F(); var swpp = F(); var swo = O(); var swb = Btn("Sweep to my wallet");
+        swb.Click += async (_, _) => swo.Text = await SweepPrivKey(w, swk.Text.Trim(), swpp.Text);
+        tools.Children.Add(L("private key (64-hex) or BIP38 (6P…)")); tools.Children.Add(swk); tools.Children.Add(L("BIP38 passphrase (only for 6P… keys)")); tools.Children.Add(swpp); tools.Children.Add(swb); tools.Children.Add(swo);
 
         tools.Children.Add(new TextBlock { Text = "Pay a BIP270 invoice (Anypay / Centi) — paste the payment URL", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 12, 0, 0) });
         var inv = F(); var invo = O(); var invb = Btn("Fetch + pay invoice");
@@ -686,6 +686,28 @@ public partial class MainWindow : Window
         con.Children.Add(new TextBlock { Text = "Console", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
         con.Children.Add(conOut); con.Children.Add(conIn); con.Children.Add(conBtn);
         tabs.Items.Add(Tab("Console", con));
+
+        // ===== NETWORK / SPV — Craig's SPV: IP-to-IP envelopes + a BIP37 Bloom filter over my addresses =====
+        var netp = new StackPanel();
+        netp.Children.Add(new TextBlock { Text = "Network / SPV", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        var bf = new BloomFilter(RecvWatch, 0.0001, (uint)Environment.TickCount);
+        for (int i = FirstAddr; i <= RecvWatch; i++) bf.Insert(Recovery.Hash160(w.ChildPub(i)));
+        var netInfo = Mono(240);
+        netInfo.Text =
+            "Model: Craig's SPV — coins arrive IP-to-IP as (transaction + merkle proof + block header);\n" +
+            "the wallet verifies the proof and STORES it. No chain scan, no header IBD; the node is only\n" +
+            "a proof source. A Bloom filter tells a serving peer which addresses to match without\n" +
+            "revealing the exact set.\n\n" +
+            "Bloom filter (BIP37, MurmurHash3 x86_32):\n" +
+            $"  watched addresses : {RecvWatch}\n" +
+            $"  filter size       : {bf.ByteLength} bytes\n" +
+            $"  hash functions    : {bf.HashFuncs}\n" +
+            $"  tweak             : {bf.Tweak}\n" +
+            $"  filterload payload: {bf.FilterLoad().Length} bytes\n\n" +
+            $"Network: {_network}   ·   proof source 127.0.0.1:{RpcPort()}\n" +
+            $"Stored proofs (coins): {LoadSpvFromDisk(w).CoinCount}";
+        netp.Children.Add(netInfo);
+        tabs.Items.Add(Tab("Network", netp));
 
         // ===== NFTs — the deeds/cards you hold =====
         var nft = new StackPanel();
@@ -769,11 +791,19 @@ public partial class MainWindow : Window
     }
 
     // Sweep: take a raw private key, find its coins via the node, and move them all into this wallet.
-    private async System.Threading.Tasks.Task<string> SweepPrivKey(StandaloneWallet w, string privHex)
+    private async System.Threading.Tasks.Task<string> SweepPrivKey(StandaloneWallet w, string keyText, string bip38Pass)
     {
         try
         {
-            if (privHex.Length != 64) return "private key must be 64 hex characters";
+            string privHex;
+            if (keyText.StartsWith("6P", StringComparison.Ordinal))            // BIP38 encrypted key
+            {
+                var dec = Bip38.Decrypt(keyText, bip38Pass ?? "");
+                if (dec is null) return "BIP38 decrypt failed (wrong passphrase or unsupported key)";
+                privHex = Tx.ToHex(dec.Value.priv);
+            }
+            else privHex = keyText;
+            if (privHex.Length != 64) return "private key must be 64 hex characters (or a BIP38 6P… key)";
             byte[] priv = Tx.FromHex(privHex); byte[] pub = Secp256k1.PublicKey(priv);
             string fromAddr = Address.P2pkh(Recovery.Hash160(pub), _network == "mainnet" ? BsvNet.Mainnet : _network == "testnet" ? BsvNet.Testnet : BsvNet.Regtest);
             using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e");

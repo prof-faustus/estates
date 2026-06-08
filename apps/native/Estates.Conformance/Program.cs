@@ -830,6 +830,27 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("botfunding: a forged bot signature is rejected", BotFunding.CompleteRefund(refund with { BotSig = forged }, aPriv, aPub, bPub) is null);
 }
 
+// BIP38 (scrypt) — the canonical no-EC-multiply, uncompressed test vector. Proves scrypt + decrypt.
+{
+    var r = Bip38.Decrypt("6PRVWUbkzzsbcVac2qwfssoUJAN1Xhrg6bNk8J7Nzm5H7kxEbn2Nh2ZoGg", "TestingOneTwoThree");
+    X("bip38: decrypts the canonical vector", r is not null);
+    X("bip38: recovers the exact private key", r is not null && Tx.ToHex(r.Value.priv).ToUpperInvariant() == "CBF4B9F70470856BB4F40F80B87EDB90865997FFEE6DF315AB166D713AF433A5");
+    X("bip38: a wrong passphrase is rejected", Bip38.Decrypt("6PRVWUbkzzsbcVac2qwfssoUJAN1Xhrg6bNk8J7Nzm5H7kxEbn2Nh2ZoGg", "wrong") is null);
+}
+
+// BLOOM filter (BIP37 MurmurHash3) — inserted items always match (no false negatives); an absent item
+// is overwhelmingly a non-match at a tiny filter fp rate; filterload payload is well-formed.
+{
+    var bf = new BloomFilter(10, 0.0001, 0);
+    var hashes = new List<byte[]>();
+    for (int i = 0; i < 10; i++) { var h = Recovery.Hash160(Secp256k1.PublicKey(Type42.UniqueKey(new byte[32] { (byte)(120 + i), 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }, "bloom"))); hashes.Add(h); bf.Insert(h); }
+    bool allIn = true; foreach (var h in hashes) if (!bf.Contains(h)) allIn = false;
+    X("bloom: every inserted item matches (no false negatives)", allIn);
+    int fp = 0; for (int i = 0; i < 200; i++) { var h = Recovery.Hash160(Secp256k1.PublicKey(Type42.UniqueKey(new byte[32] { 7, (byte)i, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }, "absent"))); if (bf.Contains(h)) fp++; }
+    X("bloom: absent items mostly miss (low false-positive rate)", fp <= 2);
+    X("bloom: filterload payload is well-formed", bf.FilterLoad()[0] == bf.ByteLength && bf.FilterLoad().Length == 1 + bf.ByteLength + 9);
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
