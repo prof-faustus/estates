@@ -697,8 +697,36 @@ public partial class MainWindow : Window
             catch (Exception e) { so.Text = e.Message; }
         }
         sprev.Click += (_, _) => DoPreview();
+        // Send MAX — sweep all spendable to a single recipient (minus fee). ElectrumSV's "Max".
+        var smax = Btn("Max (sweep all to one recipient)");
+        smax.Click += (_, _) =>
+        {
+            try
+            {
+                var lines = many.Text.Split('\n').Select(x => x.Trim()).Where(x => x.Length > 0).ToList();
+                if (lines.Count != 1) { so.Text = "Max needs exactly ONE recipient line first"; return; }
+                var p = lines[0].Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+                string who = (p.Length >= 2 && long.TryParse(p[^1], out _)) ? string.Join(' ', p[..^1]) : lines[0];
+                if (ResolveAddress(who) is null) { so.Text = "unknown recipient: " + who; return; }
+                if (!long.TryParse(feekb.Text.Trim(), out long satkb) || satkb < 0) satkb = 1000;
+                long bal = LoadSpvFromDisk(w).Balance();
+                long est = 200 + 34 + 150 * 8; long fee = System.Math.Max(500, satkb * est / 1000);
+                long maxAmt = bal - fee;
+                if (maxAmt <= 0) { so.Text = "balance too low to send after fee (" + Fmt(bal) + ")"; return; }
+                many.Text = who + " " + maxAmt;
+                so.Text = "filled MAX: " + Fmt(maxAmt) + "  (balance " + Fmt(bal) + " − fee " + Fmt(fee) + ")";
+            }
+            catch (Exception e) { so.Text = e.Message; }
+        };
         send.Children.Add(L("recipients (one per line)")); send.Children.Add(many);
         send.Children.Add(L("fee rate (sat/kB)")); send.Children.Add(feekb);
+        var feeRow = new StackPanel { Orientation = Orientation.Horizontal };
+        var fSlow = Btn("Slow (250)"); var fNorm = Btn("Normal (1000)"); var fFast = Btn("Fast (5000)");
+        fSlow.Click += (_, _) => { feekb.Text = "250"; DoPreview(); };
+        fNorm.Click += (_, _) => { feekb.Text = "1000"; DoPreview(); };
+        fFast.Click += (_, _) => { feekb.Text = "5000"; DoPreview(); };
+        feeRow.Children.Add(fSlow); feeRow.Children.Add(fNorm); feeRow.Children.Add(fFast); feeRow.Children.Add(smax);
+        send.Children.Add(feeRow);
         var srow = new StackPanel { Orientation = Orientation.Horizontal }; srow.Children.Add(sprev); srow.Children.Add(sbtn);
         send.Children.Add(srow); send.Children.Add(so);
         send.Children.Add(L("signed raw transaction")); send.Children.Add(raw);
