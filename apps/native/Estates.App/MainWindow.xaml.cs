@@ -35,6 +35,7 @@ public partial class MainWindow : Window
         _node.OnPeerLost += _ => Dispatcher.Invoke(RefreshNodes);
         _node.OnLink += link => link.OnFrame += (l, f) => Dispatcher.Invoke(() => OnChatFrame(l, f));
         Closing += OnHumanClosing;                       // bots close + refund me FIRST, then I close
+        Loaded += (_, _) => StartupGate();               // the program STARTS at identity+wallet registration
         Closed += (_, _) => { try { _node.Dispose(); } catch { } };
 
         RefreshNodes();
@@ -60,6 +61,27 @@ public partial class MainWindow : Window
     }
 
     private static string NetworkPath() { string d = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Estates"); System.IO.Directory.CreateDirectory(d); return System.IO.Path.Combine(d, "network.txt"); }
+
+    // The program cannot just start — on launch it goes through identity + wallet REGISTRATION (the wizard).
+    // Nothing (lobby/game/wallet) is usable until a pseudonym is registered + the wallet is created/opened.
+    private bool _startupGated;
+    private void StartupGate()
+    {
+        if (_startupGated || _walletSeed is not null) return;
+        _startupGated = true;
+        try
+        {
+            var wz = new WalletWizard { Owner = this };
+            if (wz.ShowDialog() == true && wz.Seed is not null)
+            {
+                _walletSeed = wz.Seed; _wallet = null;
+                if (wz.Pseudonym.Length > 0) { _displayName = wz.Pseudonym; SaveHandle(_displayName); _node.Name = _displayName; }
+                WalletHost.Content = BuildWalletUI();   // wallet is now registered/unlocked
+                RefreshNodes();
+            }
+        }
+        catch { }
+    }
 
     private static SolidColorBrush B(string hex) => new((Color)ColorConverter.ConvertFromString(hex));
 
@@ -313,7 +335,6 @@ public partial class MainWindow : Window
                 openBtn.Click += (_, _) => LaunchWizard();
                 wsp.Children.Add(openBtn);
                 host.Content = wsp;
-                Dispatcher.BeginInvoke(new System.Action(LaunchWizard));   // auto-open the wizard on first show
                 return;
 #pragma warning disable CS0162
                 string path = WalletStore.DefaultPath();

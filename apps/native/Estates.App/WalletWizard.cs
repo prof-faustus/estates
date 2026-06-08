@@ -17,10 +17,14 @@ public sealed class WalletWizard : Window
 {
     public byte[]? Seed { get; private set; }
     public string Password { get; private set; } = "";
+    public string Pseudonym { get; private set; } = "";
 
-    private enum Step { Splash, Choose, NewPassword, SeedShow, SeedConfirm, Restore }
+    private enum Step { Splash, Choose, NewPassword, SeedShow, SeedConfirm, Register, Restore }
     private Step _step = Step.Splash;
     private byte[] _pending = System.Array.Empty<byte>();
+    private readonly TextBox _pseudonym = new();
+    private readonly TextBox _email = new();
+    private readonly TextBox _realname = new();
 
     private static SolidColorBrush B(string h) => new((Color)ColorConverter.ConvertFromString(h));
     private readonly TextBlock _title = new() { Foreground = B("#e6e6e6"), FontSize = 20, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 4) };
@@ -42,7 +46,7 @@ public sealed class WalletWizard : Window
     {
         Title = "ESTATES — wallet setup"; Width = 560; Height = 460;
         WindowStartupLocation = WindowStartupLocation.CenterScreen; Background = B("#1b1d1e"); ResizeMode = ResizeMode.NoResize;
-        foreach (var f in new Control[] { _pw, _pw2, _seedShow, _seedConfirm, _restoreSeed, _restorePw })
+        foreach (var f in new Control[] { _pw, _pw2, _seedShow, _seedConfirm, _restoreSeed, _restorePw, _pseudonym, _email, _realname })
         { f.Background = B("#171819"); f.Foreground = B("#e6e6e6"); f.BorderThickness = new Thickness(0); f.Padding = new Thickness(8); f.Margin = new Thickness(0, 4, 0, 8); f.FontSize = 13; }
         _seedShow.FontFamily = _seedConfirm.FontFamily = _restoreSeed.FontFamily = new FontFamily("Consolas");
         _seedShow.TextWrapping = _seedConfirm.TextWrapping = _restoreSeed.TextWrapping = TextWrapping.Wrap;
@@ -102,7 +106,15 @@ public sealed class WalletWizard : Window
             case Step.SeedConfirm:
                 _title.Text = "Confirm your seed"; _subtitle.Text = "Re-enter the seed you just wrote down, to prove you have a backup.";
                 _seedConfirm.Text = ""; _body.Children.Add(Lab("re-enter your seed")); _body.Children.Add(_seedConfirm);
-                _next.Content = "Create wallet";
+                _next.Content = "Next ›";
+                break;
+            case Step.Register:
+                _title.Text = "Register your identity";
+                _subtitle.Text = "Your IDENTITY is the key everything links to — payments, chat, NFTs, the game. Choose a pseudonym (required); enter an email (checked: valid format + the domain must resolve). The identity is signed and bound to your key.";
+                _body.Children.Add(Lab("pseudonym / handle (required)")); _body.Children.Add(_pseudonym);
+                _body.Children.Add(Lab("email (checked)")); _body.Children.Add(_email);
+                _body.Children.Add(Lab("real name (optional)")); _body.Children.Add(_realname);
+                _next.Content = "Register + create wallet";
                 break;
             case Step.Restore:
                 _title.Text = "Restore from seed"; _subtitle.Text = "Enter your 64-hex recovery seed and set a password for this device.";
@@ -121,6 +133,7 @@ public sealed class WalletWizard : Window
             Step.NewPassword => Step.Choose,
             Step.SeedShow => Step.NewPassword,
             Step.SeedConfirm => Step.SeedShow,
+            Step.Register => Step.SeedConfirm,
             Step.Restore => Step.Choose,
             _ => Step.Splash,
         };
@@ -138,7 +151,17 @@ public sealed class WalletWizard : Window
             case Step.SeedShow: _step = Step.SeedConfirm; Render(); break;
             case Step.SeedConfirm:
                 if (_seedConfirm.Text.Trim().ToLowerInvariant() != Tx.ToHex(_pending)) { _msg.Text = "that does not match the seed — check your backup"; return; }
-                Finish(_pending, Password); break;
+                _step = Step.Register; Render(); break;
+            case Step.Register:
+            {
+                string ps = _pseudonym.Text.Trim();
+                if (ps.Length == 0) { _msg.Text = "a PSEUDONYM is required — this is your identity (not your real name)"; return; }
+                string em = _email.Text.Trim();
+                if (!EmailOk(em)) { _msg.Text = "enter a valid email — format must be name@domain.tld and the domain must resolve"; return; }
+                Pseudonym = ps;
+                FinishRegistered(_pending, Password, ps, em, _realname.Text.Trim());
+                break;
+            }
             case Step.Restore:
             {
                 string h = _restoreSeed.Text.Trim();
@@ -168,6 +191,42 @@ public sealed class WalletWizard : Window
         try { WalletStore.Create(WalletStore.DefaultPath(), seed, password); Seed = seed; Password = password; DialogResult = true; Close(); }
         catch (System.Exception e) { _msg.Text = e.Message; }
     }
+
+    // a real email CHECK with no server: valid format AND the domain actually resolves (DNS).
+    private static bool EmailOk(string e)
+    {
+        if (!System.Text.RegularExpressions.Regex.IsMatch(e, @"^[^@\s]+@[^@\s]+\.[^@\s]+$")) return false;
+        try { var domain = e.Split('@')[1]; return System.Net.Dns.GetHostAddresses(domain).Length > 0; }
+        catch { return false; }
+    }
+
+    // REGISTER: create the wallet, then bind the PSEUDONYM ↔ email ↔ wallet ↔ identity key into a signed
+    // identity profile (self-sovereign; no server). The identity = index-0 key; the profile is signed by a
+    // sub-key (the base identity key never signs). Persisted to %APPDATA%/Estates/identity.json (+ handle).
+    private void FinishRegistered(byte[] seed, string password, string pseudonym, string email, string realname)
+    {
+        try
+        {
+            WalletStore.Create(WalletStore.DefaultPath(), seed, password);
+            byte[] identityPub = Secp256k1.PublicKey(Wallet.ChildPriv(seed, 0));       // index 0 = identity (matches the wallet)
+            byte[] attPriv = Wallet.ChildPriv(seed, 1);                                // a sub-key attests (base never signs)
+            string firstAddr = Address.P2pkh(Recovery.Hash160(Secp256k1.PublicKey(attPriv)), BsvNet.Mainnet);
+            string profile = "{" +
+                $"\"pseudonym\":{J(pseudonym)},\"email\":{J(email)},\"realname\":{J(realname)}," +
+                $"\"identity\":\"{Tx.ToHex(identityPub)}\",\"wallet_address\":\"{firstAddr}\"," +
+                $"\"attestation_pub\":\"{Tx.ToHex(Secp256k1.PublicKey(attPriv))}\",\"created\":\"{System.DateTime.UtcNow:o}\"" +
+                "}";
+            byte[] sig = EcdsaSign.Sign(attPriv, System.Text.Encoding.UTF8.GetBytes(profile));
+            string dir = System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData), "Estates");
+            System.IO.Directory.CreateDirectory(dir);
+            System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "identity.json"), profile + "\n" + Tx.ToHex(sig));
+            System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "identity.txt"), pseudonym);   // handle for the wallet/chat/game
+            Seed = seed; Password = password; Pseudonym = pseudonym; DialogResult = true; Close();
+        }
+        catch (System.Exception e) { _msg.Text = e.Message; }
+    }
+
+    private static string J(string s) => "\"" + (s ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
 
     // a tiny password prompt for opening an existing wallet
     private sealed class PromptPw : Window
