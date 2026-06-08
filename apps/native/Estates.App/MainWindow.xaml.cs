@@ -1127,6 +1127,13 @@ public partial class MainWindow : Window
             AlternatingRowBackground = B("#202225"), BorderThickness = new Thickness(0), Height = height,
             FontFamily = new FontFamily("Consolas"), FontSize = 11,
         };
+        var hdr = new Style(typeof(System.Windows.Controls.Primitives.DataGridColumnHeader));
+        hdr.Setters.Add(new Setter(System.Windows.Controls.Control.BackgroundProperty, B("#2b2d31")));
+        hdr.Setters.Add(new Setter(System.Windows.Controls.Control.ForegroundProperty, B("#cfd2d6")));
+        hdr.Setters.Add(new Setter(System.Windows.Controls.Control.PaddingProperty, new Thickness(6, 4, 6, 4)));
+        hdr.Setters.Add(new Setter(System.Windows.Controls.Control.BorderThicknessProperty, new Thickness(0)));
+        hdr.Setters.Add(new Setter(System.Windows.Controls.Control.FontWeightProperty, FontWeights.SemiBold));
+        g.ColumnHeaderStyle = hdr;
         void Col(string header, string path) => g.Columns.Add(new System.Windows.Controls.DataGridTextColumn { Header = header, Binding = new System.Windows.Data.Binding(path), Width = new System.Windows.Controls.DataGridLength(1, System.Windows.Controls.DataGridLengthUnitType.Star) });
         Col(h1, "A"); Col(h2, "B"); Col(h3, "C"); Col(h4, "D");
         return g;
