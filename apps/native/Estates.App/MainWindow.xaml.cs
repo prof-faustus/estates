@@ -720,7 +720,24 @@ public partial class MainWindow : Window
         cFreezeAll.Click += (_, _) => { foreach (var u in LoadSpvFromDisk(w).Utxos()) _frozenCoins.Add(u.txid + ":" + u.vout); LoadCoins(); cmsg.Text = "all coins frozen (none will be spent)"; };
         cUnfreezeAll.Click += (_, _) => { _frozenCoins.Clear(); LoadCoins(); cmsg.Text = "all coins unfrozen"; };
         cSendFrom.Click += (_, _) => { if (cgrid.SelectedItem is Row4 r) { _frozenCoins.Clear(); foreach (var u in LoadSpvFromDisk(w).Utxos()) { var op = u.txid + ":" + u.vout; if (op != r.D) _frozenCoins.Add(op); } LoadCoins(); cmsg.Text = "frozen all but the selected coin — Send will spend only it (coin control)"; } else cmsg.Text = "select a coin row first"; };
-        var cFrow = new StackPanel { Orientation = Orientation.Horizontal }; cFrow.Children.Add(cFreezeAll); cFrow.Children.Add(cUnfreezeAll); cFrow.Children.Add(cSendFrom);
+        var cConsolidate = Btn("Consolidate to one coin");
+        cConsolidate.Click += async (_, _) =>
+        {
+            try
+            {
+                var spv2 = LoadSpvFromDisk(w); long bal = spv2.Balance(); if (bal <= 1000) { cmsg.Text = "nothing to consolidate"; return; }
+                byte[] to = NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(FirstAddr + 2)));
+                var built = SpvSpend.BuildMany(spv2, SpvKeymap(w), new List<(byte[], long)> { (to, bal - 1000) }, 1000, to, null);
+                if (built is null) { cmsg.Text = "build failed"; return; }
+                using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e");
+                var r = await rpc.CallAsync("sendrawtransaction", Tx.ToHex(built.Raw));
+                if (r is null) { cmsg.Text = "node rejected"; return; }
+                foreach (var c in built.Tx.Inputs) spv2.Spend(c.PrevTxid + ":" + c.PrevVout); spv2.Save(SpvPathFor()); ShowSpv(); LoadCoins();
+                cmsg.Text = $"consolidated {Fmt(bal - 1000)} into one coin · txid {built.Txid[..16]}…";
+            }
+            catch (Exception e) { cmsg.Text = e.Message; }
+        };
+        var cFrow = new StackPanel { Orientation = Orientation.Horizontal }; cFrow.Children.Add(cFreezeAll); cFrow.Children.Add(cUnfreezeAll); cFrow.Children.Add(cSendFrom); cFrow.Children.Add(cConsolidate);
         cSearch.TextChanged += (_, _) => LoadCoins();
         coins.Children.Add(cSum); coins.Children.Add(L("search (address / outpoint)")); coins.Children.Add(cSearch); coins.Children.Add(cgrid); coins.Children.Add(cFrow); coins.Children.Add(cmsg);
         tabs.Items.Add(Tab("Coins", coins));
