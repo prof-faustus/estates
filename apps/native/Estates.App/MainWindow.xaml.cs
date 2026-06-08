@@ -930,7 +930,26 @@ public partial class MainWindow : Window
                 var (root, _) = PartialMerkleTree.Extract(parsed.Txs.Count, flags, hashes);
                 byte[] hdrRoot = parsed.Header80[36..68];
                 bool ok = root is not null && Tx.ToHex(root) == Tx.ToHex(hdrRoot);
-                scanO.Text = $"block {h}: {parsed.Txs.Count} txs · {found} match my wallet · merkleblock VERIFIED={ok}";
+                int credited = 0;
+                if (ok)
+                {
+                    var spv2 = LoadSpvFromDisk(w);
+                    var owned = new HashSet<string>(); for (int i = FirstAddr; i <= RecvWatch; i++) owned.Add(Tx.ToHex(NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(i)))));
+                    var displayIds = parsed.Txs.Select(t => Tx.Txid(t)).ToList();
+                    for (int ti = 0; ti < parsed.Txs.Count; ti++)
+                    {
+                        if (!matches[ti]) continue;
+                        var t = parsed.Txs[ti];
+                        bool paysMe = false; foreach (var o in t.Outputs) if (owned.Contains(Tx.ToHex(o.Script))) paysMe = true;
+                        if (!paysMe) continue;
+                        var bf = BlockMerkle.BranchFor(displayIds, Tx.Txid(t));
+                        if (bf is null) continue;
+                        var env = new SpvEnvelope(Tx.Serialize(t), parsed.Header80, bf.Value.branch, bf.Value.index);
+                        if (spv2.Receive(env)) credited++;
+                    }
+                    if (credited > 0) { spv2.Save(SpvPathFor()); ShowSpv(); }
+                }
+                scanO.Text = $"block {h}: {parsed.Txs.Count} txs · {found} match · merkleblock VERIFIED={ok} · credited {credited} coin(s)";
             }
             catch (Exception e) { scanO.Text = e.Message; }
         }
