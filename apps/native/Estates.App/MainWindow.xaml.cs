@@ -722,9 +722,11 @@ public partial class MainWindow : Window
         var dest = new StackPanel();
         dest.Children.Add(new TextBlock { Text = "Destinations — your addresses & derivation paths", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
         dest.Children.Add(L("index 0 is the BASE IDENTITY key (ECDH-derivation only) and is NEVER an address. Receive addresses are HMAC hash-chain sub-keys, index ≥ 1."));
-        var dgrid = Grid4("Derivation path", "Index", "Address", "Type", 420);
+        var dgrid = Grid4("Derivation path", "Index", "Address", "Balance / used", 420);
         var drows = new List<Row4>();
-        for (int i = FirstAddr; i <= 30; i++) drows.Add(new Row4 { A = "estates/wallet/" + i, B = i.ToString(), C = w.AddressAt(i), D = i == FirstAddr ? "receiving/change" : "receiving" });
+        var coinsByScript = new Dictionary<string, long>();
+        foreach (var u in LoadSpvFromDisk(w).Utxos()) { var k = Tx.ToHex(u.script); coinsByScript[k] = coinsByScript.TryGetValue(k, out var s) ? s + u.value : u.value; }
+        for (int i = FirstAddr; i <= 30; i++) { string scr = Tx.ToHex(NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(i)))); long addrBal = coinsByScript.TryGetValue(scr, out var b) ? b : 0; drows.Add(new Row4 { A = "estates/wallet/" + i, B = i.ToString(), C = w.AddressAt(i), D = addrBal > 0 ? Fmt(addrBal) : "unused" }); }
         dgrid.ItemsSource = drows;
         var dMenu = new ContextMenu();
         var dCopy = new MenuItem { Header = "Copy address" }; dCopy.Click += (_, _) => { if (dgrid.SelectedItem is Row4 r) { try { System.Windows.Clipboard.SetText(r.C); } catch { } } };
