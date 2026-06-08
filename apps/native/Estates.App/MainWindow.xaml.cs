@@ -695,6 +695,11 @@ public partial class MainWindow : Window
         }
         LoadCoins();
         cgrid.MouseDoubleClick += (_, _) => { if (cgrid.SelectedItem is Row4 r) { if (!_frozenCoins.Add(r.D)) _frozenCoins.Remove(r.D); cmsg.Text = _frozenCoins.Contains(r.D) ? "frozen (won't be spent)" : "unfrozen"; LoadCoins(); } };
+        var coMenu = new ContextMenu();
+        var coAddr = new MenuItem { Header = "Copy address" }; coAddr.Click += (_, _) => { if (cgrid.SelectedItem is Row4 r) { try { System.Windows.Clipboard.SetText(r.C.Split(' ')[0]); } catch { } } };
+        var coOp = new MenuItem { Header = "Copy outpoint" }; coOp.Click += (_, _) => { if (cgrid.SelectedItem is Row4 r) { try { System.Windows.Clipboard.SetText(r.D); } catch { } } };
+        var coFreeze = new MenuItem { Header = "Freeze / unfreeze" }; coFreeze.Click += (_, _) => { if (cgrid.SelectedItem is Row4 r) { if (!_frozenCoins.Add(r.D)) _frozenCoins.Remove(r.D); LoadCoins(); } };
+        coMenu.Items.Add(coAddr); coMenu.Items.Add(coOp); coMenu.Items.Add(coFreeze); cgrid.ContextMenu = coMenu;
         coins.Children.Add(new TextBlock { Text = "Coins (UTXOs) — coin control (double-click a row to freeze/unfreeze)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
         var cFreezeAll = Btn("Freeze all"); var cUnfreezeAll = Btn("Unfreeze all"); var cSendFrom = Btn("Send from selected (freeze others)");
         cFreezeAll.Click += (_, _) => { foreach (var u in LoadSpvFromDisk(w).Utxos()) _frozenCoins.Add(u.txid + ":" + u.vout); LoadCoins(); cmsg.Text = "all coins frozen (none will be spent)"; };
