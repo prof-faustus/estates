@@ -884,6 +884,37 @@ public partial class MainWindow : Window
             $"Network: {_network}   ·   proof source 127.0.0.1:{RpcPort()}\n" +
             $"Stored proofs (coins): {LoadSpvFromDisk(w).CoinCount}";
         netp.Children.Add(netInfo);
+        // Real SPV find: fetch a block from the node, match its txs against my Bloom filter, and VERIFY the
+        // matches with a BIP37 merkleblock against the header's merkle root (bloom → merkleblock → find).
+        var scanH = F(); var scanO = O(); var scanBtn = Btn("Scan a block for my coins (by height)");
+        async void DoScan()
+        {
+            try
+            {
+                if (!long.TryParse(scanH.Text.Trim(), out long h)) { scanO.Text = "bad height"; return; }
+                using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e");
+                var hashEl = await rpc.CallAsync("getblockhash", h); if (hashEl is null) { scanO.Text = "no such block"; return; }
+                var rawEl = await rpc.CallAsync("getblock", hashEl.Value.GetString()!, 0); if (rawEl is null) { scanO.Text = "getblock failed"; return; }
+                var parsed = Block.Parse(Tx.FromHex(rawEl.Value.GetString()!)); if (parsed is null) { scanO.Text = "block parse failed"; return; }
+                var filter = new BloomFilter(RecvWatch + 5, 0.0001, (uint)h);
+                for (int i = FirstAddr; i <= RecvWatch; i++) filter.Insert(Recovery.Hash160(w.ChildPub(i)));
+                var ids = new List<byte[]>(); var matches = new List<bool>(); int found = 0;
+                foreach (var t in parsed.Txs)
+                {
+                    var internalId = Tx.FromHex(Tx.Txid(t)); System.Array.Reverse(internalId);
+                    bool m = BloomMatch.Matches(t, internalId, filter);
+                    ids.Add(internalId); matches.Add(m); if (m) found++;
+                }
+                var (flags, hashes) = PartialMerkleTree.Build(ids, matches);
+                var (root, _) = PartialMerkleTree.Extract(parsed.Txs.Count, flags, hashes);
+                byte[] hdrRoot = parsed.Header80[36..68];
+                bool ok = root is not null && Tx.ToHex(root) == Tx.ToHex(hdrRoot);
+                scanO.Text = $"block {h}: {parsed.Txs.Count} txs · {found} match my wallet · merkleblock VERIFIED={ok}";
+            }
+            catch (Exception e) { scanO.Text = e.Message; }
+        }
+        scanBtn.Click += (_, _) => DoScan();
+        netp.Children.Add(L("scan a block for my coins (height)")); netp.Children.Add(scanH); netp.Children.Add(scanBtn); netp.Children.Add(scanO);
         tabs.Items.Add(Tab("Network", netp));
 
         // ===== IDENTITY — your handle + identity key; used to pay, chat, and play as one identity =====
