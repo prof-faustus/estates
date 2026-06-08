@@ -1145,7 +1145,7 @@ public partial class MainWindow : Window
         file.Items.Add(new Separator());
         file.Items.Add(MI("_Quit", () => relock()));
         var wallet = MI("_Wallet");
-        wallet.Items.Add(MI("_Information", () => Sel("Info")));
+        wallet.Items.Add(MI("_Information", () => { var s = LoadSpvFromDisk(w); System.Windows.MessageBox.Show($"Network:        {_network}\nIdentity key:   {Tx.ToHex(w.ChildPub(0))}\n  (index 0 — ECDH root, never an address)\nFirst address:  {w.AddressAt(FirstAddr)}\nOn-chain (SPV): {s.Balance():n0} sat · {s.CoinCount} coin(s)\nKeys:           encrypted at rest (AES-256-GCM + PBKDF2)", "Wallet information"); }));
         wallet.Items.Add(MI("_Password…", () => { var np = Prompt("New wallet password (blank = none)", ""); if (np is null) return; try { WalletStore.Create(WalletStore.DefaultPath(), _walletSeed!, np); System.Windows.MessageBox.Show("Wallet password changed — your keys are re-encrypted under the new password.", "Password"); } catch (Exception e) { System.Windows.MessageBox.Show(e.Message, "Password"); } }));
         var contactsMenu = MI("Contacts"); contactsMenu.Items.Add(MI("_New…", () => Sel("Contacts") )); wallet.Items.Add(contactsMenu);
         wallet.Items.Add(MI("_Find", () => Sel("History")));
