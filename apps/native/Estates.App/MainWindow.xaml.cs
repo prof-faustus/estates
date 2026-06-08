@@ -462,11 +462,8 @@ public partial class MainWindow : Window
 
         // ON-CHAIN (SPV): the estate node's SPV wallet — verified merkle proofs only, never a full node,
         // never mines. Loads persisted coins instantly on open; pulls each coin's proof from the node.
-        var spvOwned = new List<byte[]>();
-        for (int i = FirstAddr; i <= RecvWatch; i++) spvOwned.Add(NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(i))));   // index 0 = identity, never an address
-        var spv = new SpvWallet(spvOwned);
-        string spvPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"estates_spv_{_network}.dat");
-        try { spv.Load(spvPath); } catch { }
+        var spv = LoadSpvFromDisk(w);            // ONE cached, already-verified instance (fast open, no reload churn)
+        string spvPath = SpvPathFor();
         var spvBal = new TextBlock { Foreground = B("#8ab4f8"), FontSize = 16, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 2, 0, 6) };
         void ShowSpv() => spvBal.Text = $"On-chain (SPV): {Fmt(spv.Balance())}   ·   {spv.CoinCount} coin(s)";
         ShowSpv();
@@ -480,8 +477,9 @@ public partial class MainWindow : Window
                 using var rpc = new BsvRpc("127.0.0.1", rpcPort, "e", "e");
                 // regtest bring-up: if empty, the local node pays the wallet's OWN address (a real payment
                 // to it) and confirms it — then SPV picks it up. So it just shows on open.
-                if (_network == "regtest" && spv.Balance() == 0)
+                if (_network == "regtest" && spv.Balance() == 0 && !_regtestFunded)
                 {
+                    _regtestFunded = true;       // self-fund ONCE on regtest, never every tick
                     await rpc.CallAsync("sendtoaddress", w.AddressAt(FirstAddr), 100.0);
                     var mineTo = (await rpc.CallAsync("getnewaddress"))?.GetString() ?? w.AddressAt(FirstAddr + 1);
                     await rpc.CallAsync("generatetoaddress", 1, mineTo);
@@ -493,7 +491,6 @@ public partial class MainWindow : Window
             }
             catch { }
         }
-        SpvSyncNow();
 
         // SPV Send — spend the wallet's SPV coins (FORKID-signed), broadcast the tx to the node; change returns to us.
         info.Children.Add(L("Send (SPV) — pay to address, amount in sat"));
@@ -1147,8 +1144,28 @@ public partial class MainWindow : Window
         nft.Children.Add(nrb); nft.Children.Add(nftHost); tabs.Items.Add(Tab("NFTs", nft));
 
         // AUTO-REFRESH: balances, coins, history update themselves (no manual refresh). Stops on unload.
-        var auto = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-        auto.Tick += (_, _) => { try { ShowBal(); ShowSpv(); SpvSyncNow(); LoadCoins(); LoadHistory(); LoadTxs(); LoadNotif(); long sp = LoadSpvFromDisk(w).Balance(); long fz = 0; foreach (var u in LoadSpvFromDisk(w).Utxos()) if (_frozenCoins.Contains(u.txid + ":" + u.vout)) fz += u.value; sSpendable.Text = $"spendable: {Fmt(sp - fz)}" + (fz > 0 ? $"  ({Fmt(fz)} frozen)" : ""); } catch { } };
+        // LIGHT refresh: only the active tab's cheap labels every 4s; the node sync (RPC) runs once on open
+        // and then only every ~8th tick (~32s). No per-tick reload/reverify of the SPV wallet (it's cached).
+        int _tick = 0;
+        var auto = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
+        auto.Tick += (_, _) =>
+        {
+            try
+            {
+                ShowBal(); ShowSpv();
+                if (_tick % 8 == 0) SpvSyncNow();            // node RPC only occasionally
+                var sv = LoadSpvFromDisk(w); long fz = 0; foreach (var u in sv.Utxos()) if (_frozenCoins.Contains(u.txid + ":" + u.vout)) fz += u.value;
+                sSpendable.Text = $"spendable: {Fmt(sv.Balance() - fz)}" + (fz > 0 ? $"  ({Fmt(fz)} frozen)" : "");
+                if (tabs.SelectedItem is TabItem ti)        // refresh ONLY the visible table, not all of them
+                {
+                    string hh = ti.Header as string ?? "";
+                    if (hh == "Coins") LoadCoins(); else if (hh == "History") LoadHistory(); else if (hh == "Transactions") LoadTxs(); else if (hh == "Notifications") LoadNotif();
+                }
+                _tick++;
+            }
+            catch { }
+        };
+        SpvSyncNow();                                        // one sync on open
         auto.Start();
         tabs.Unloaded += (_, _) => auto.Stop();
 
@@ -1559,11 +1576,16 @@ public partial class MainWindow : Window
         return keymap;
     }
 
+    // CACHED SPV wallet: loaded (and proof-verified) ONCE per network, then reused. Reloading on every UI
+    // call + every refresh tick re-verified every coin's PoW+merkle, which made login crawl. One instance.
+    private SpvWallet? _spvCache; private string _spvCacheNet = ""; private bool _regtestFunded;
     private SpvWallet LoadSpvFromDisk(StandaloneWallet w)
     {
+        if (_spvCache is not null && _spvCacheNet == _network) return _spvCache;
         var owned = new List<byte[]>();
         for (int i = FirstAddr; i <= RecvWatch; i++) owned.Add(NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(i))));
         var s = new SpvWallet(owned); try { s.Load(SpvPathFor()); } catch { }
+        _spvCache = s; _spvCacheNet = _network;
         return s;
     }
 
