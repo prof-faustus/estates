@@ -631,7 +631,7 @@ public partial class MainWindow : Window
                 rows.Add(new Row4 { A = u.value.ToString("n0"), B = fr ? "FROZEN" : "", C = addr + (lbl.Length > 0 ? "  (" + lbl + ")" : ""), D = op });
             }
             cgrid.ItemsSource = rows;
-            cSum.Text = $"{rows.Count} coin(s) · {total:n0} sat total · {frozenN} frozen ({frozenSat:n0} sat) · spendable {(total - frozenSat):n0} sat";
+            cSum.Text = $"{rows.Count} coin(s) · {Fmt(total)} total · {frozenN} frozen ({Fmt(frozenSat)}) · spendable {Fmt(total - frozenSat)}";
         }
         LoadCoins();
         cgrid.MouseDoubleClick += (_, _) => { if (cgrid.SelectedItem is Row4 r) { if (!_frozenCoins.Add(r.D)) _frozenCoins.Remove(r.D); cmsg.Text = _frozenCoins.Contains(r.D) ? "frozen (won't be spent)" : "unfrozen"; LoadCoins(); } };
@@ -862,7 +862,7 @@ public partial class MainWindow : Window
 
         // AUTO-REFRESH: balances, coins, history update themselves (no manual refresh). Stops on unload.
         var auto = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-        auto.Tick += (_, _) => { try { ShowBal(); ShowSpv(); SpvSyncNow(); LoadCoins(); LoadHistory(); LoadTxs(); LoadNotif(); long sp = LoadSpvFromDisk(w).Balance(); long fz = 0; foreach (var u in LoadSpvFromDisk(w).Utxos()) if (_frozenCoins.Contains(u.txid + ":" + u.vout)) fz += u.value; sSpendable.Text = $"spendable: {(sp - fz):n0} sat" + (fz > 0 ? $"  ({fz:n0} frozen)" : ""); } catch { } };
+        auto.Tick += (_, _) => { try { ShowBal(); ShowSpv(); SpvSyncNow(); LoadCoins(); LoadHistory(); LoadTxs(); LoadNotif(); long sp = LoadSpvFromDisk(w).Balance(); long fz = 0; foreach (var u in LoadSpvFromDisk(w).Utxos()) if (_frozenCoins.Contains(u.txid + ":" + u.vout)) fz += u.value; sSpendable.Text = $"spendable: {Fmt(sp - fz)}" + (fz > 0 ? $"  ({Fmt(fz)} frozen)" : ""); } catch { } };
         auto.Start();
         tabs.Unloaded += (_, _) => auto.Stop();
 
