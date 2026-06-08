@@ -21,6 +21,7 @@ public sealed class WalletWizard : Window
 
     private enum Step { Splash, Choose, NewPassword, SeedShow, SeedConfirm, Register, Restore }
     private Step _step = Step.Splash;
+    private Step _registerFrom = Step.SeedConfirm;   // where the Register page was reached FROM (for correct Back)
     private byte[] _pending = System.Array.Empty<byte>();
     private readonly TextBox _pseudonym = new();
     private readonly TextBox _email = new();
@@ -133,7 +134,7 @@ public sealed class WalletWizard : Window
             Step.NewPassword => Step.Choose,
             Step.SeedShow => Step.NewPassword,
             Step.SeedConfirm => Step.SeedShow,
-            Step.Register => Step.SeedConfirm,
+            Step.Register => _registerFrom,
             Step.Restore => Step.Choose,
             _ => Step.Splash,
         };
@@ -151,7 +152,7 @@ public sealed class WalletWizard : Window
             case Step.SeedShow: _step = Step.SeedConfirm; Render(); break;
             case Step.SeedConfirm:
                 if (_seedConfirm.Text.Trim().ToLowerInvariant() != Tx.ToHex(_pending)) { _msg.Text = "that does not match the seed — check your backup"; return; }
-                _step = Step.Register; Render(); break;
+                _registerFrom = Step.SeedConfirm; _step = Step.Register; Render(); break;
             case Step.Register:
             {
                 string ps = _pseudonym.Text.Trim();
@@ -167,7 +168,7 @@ public sealed class WalletWizard : Window
                 string h = _restoreSeed.Text.Trim();
                 if (h.Length != 64) { _msg.Text = "seed must be 64 hex characters"; return; }
                 byte[] s; try { s = Tx.FromHex(h); } catch { _msg.Text = "seed is not valid hex"; return; }
-                _pending = s; Password = _restorePw.Password; _step = Step.Register; Render(); break;   // restore ALSO registers a pseudonym
+                _pending = s; Password = _restorePw.Password; _registerFrom = Step.Restore; _step = Step.Register; Render(); break;   // restore ALSO registers a pseudonym
             }
         }
     }
@@ -188,7 +189,7 @@ public sealed class WalletWizard : Window
             if (s is null) { _msg.Text = "wrong password, or not a wallet file"; return; }
             // EXISTING wallet but NOT yet registered → force identity registration (pseudonym + email).
             string idjson = System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData), "Estates", "identity.json");
-            if (!System.IO.File.Exists(idjson)) { _pending = s; Password = pwWin.Value; _step = Step.Register; Render(); return; }
+            if (!System.IO.File.Exists(idjson)) { _pending = s; Password = pwWin.Value; _registerFrom = Step.Choose; _step = Step.Register; Render(); return; }
             Seed = s; Password = pwWin.Value; DialogResult = true; Close();
         }
         catch (System.Exception e) { _msg.Text = e.Message; }
