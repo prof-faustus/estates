@@ -537,22 +537,26 @@ public partial class MainWindow : Window
         var bal = new TextBlock { Foreground = B("#7bd88f"), FontSize = 22, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 6, 0, 2) };
         var balPend = new TextBlock { Foreground = B("#f5a623"), FontSize = 13 };
         var balImm = new TextBlock { Foreground = B("#8ab4f8"), FontSize = 13, Margin = new Thickness(0, 0, 0, 4) };
-        void ShowBal()
-        {
-            bal.Text = $"Spendable: {Fmt(w.Balance())}";
-            balPend.Text = $"Pending (0-conf): {Fmt(w.PendingSats)}";
-            balImm.Text = $"Immature (mined, <100 conf): {Fmt(w.ImmatureSats)}";
-        }
-        ShowBal();
-        info.Children.Add(bal); info.Children.Add(balPend); info.Children.Add(balImm);
 
         // ON-CHAIN (SPV): the estate node's SPV wallet — verified merkle proofs only, never a full node,
-        // never mines. Loads persisted coins instantly on open; pulls each coin's proof from the node.
+        // never mines. Loads persisted coins instantly on open. THIS is the wallet's real money.
         var spv = LoadSpvFromDisk(w);            // ONE cached, already-verified instance (fast open, no reload churn)
         string spvPath = SpvPathFor();
         var spvBal = new TextBlock { Foreground = B("#8ab4f8"), FontSize = 16, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 2, 0, 6) };
-        void ShowSpv() => spvBal.Text = $"On-chain (SPV): {Fmt(spv.Balance())}   ·   {spv.CoinCount} coin(s)";
+        // SINGLE SOURCE OF TRUTH: Spendable = the SPV wallet's verified coins minus anything frozen —
+        // exactly what Coins and Send spend. The headline can never again disagree with "1 coin on-chain".
+        void ShowSpv()
+        {
+            long total = spv.Balance();
+            long frozen = 0; foreach (var u in spv.Utxos()) if (_frozenCoins.Contains(u.txid + ":" + u.vout)) frozen += u.value;
+            bal.Text = $"Spendable: {Fmt(total - frozen)}";
+            balPend.Text = $"Pending (0-conf): {Fmt(0)}";              // SPV coins carry a buried proof → confirmed
+            balImm.Text = frozen > 0 ? $"Frozen: {Fmt(frozen)}" : "Frozen: 0";
+            spvBal.Text = $"On-chain (SPV): {Fmt(total)}   ·   {spv.CoinCount} coin(s)";
+        }
+        void ShowBal() => ShowSpv();             // unified alias (legacy call sites)
         ShowSpv();
+        info.Children.Add(bal); info.Children.Add(balPend); info.Children.Add(balImm);
         info.Children.Add(spvBal);
         async void SpvSyncNow()
         {
