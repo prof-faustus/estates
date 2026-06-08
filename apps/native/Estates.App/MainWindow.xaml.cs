@@ -1421,8 +1421,26 @@ public partial class MainWindow : Window
         file.Items.Add(new Separator());
         file.Items.Add(MI("_Quit", () => relock()));
         var wallet = MI("_Wallet");
-        wallet.Items.Add(MI("_Information", () => { var s = LoadSpvFromDisk(w); System.Windows.MessageBox.Show($"Network:        {_network}\nIdentity key:   {Tx.ToHex(w.ChildPub(0))}\n  (index 0 — ECDH root, never an address)\nFirst address:  {w.AddressAt(FirstAddr)}\nOn-chain (SPV): {s.Balance():n0} sat · {s.CoinCount} coin(s)\nKeys:           encrypted at rest (AES-256-GCM + PBKDF2)", "Wallet information"); }));
-        wallet.Items.Add(MI("_Password…", () => { var np = Prompt("New wallet password (blank = none)", ""); if (np is null) return; try { WalletStore.Create(WalletStore.DefaultPath(), _walletSeed!, np); System.Windows.MessageBox.Show("Wallet password changed — your keys are re-encrypted under the new password.", "Password"); } catch (Exception e) { System.Windows.MessageBox.Show(e.Message, "Password"); } }));
+        wallet.Items.Add(MI("_Information", () => { var s = LoadSpvFromDisk(w); System.Windows.MessageBox.Show($"Identity:       {(_displayName.Length > 0 ? _displayName : "(not registered)")}\nNetwork:        {_network}\nIdentity key:   {Tx.ToHex(w.ChildPub(0))}\n  (index 0 — ECDH root, never an address)\nFirst address:  {w.AddressAt(FirstAddr)}\nOn-chain (SPV): {s.Balance():n0} sat · {s.CoinCount} coin(s)\nDerivation:     32-byte seed → HMAC hash-chain sub-keys (Type-42), index 0 = identity, index ≥ 1 = addresses\nKeys:           encrypted at rest (AES-256-GCM + PBKDF2)\nWallet file:    {WalletStore.DefaultPath()}\nIdentity file:  {System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Estates", "identity.json")}", "Wallet information"); }));
+        wallet.Items.Add(MI("_Password…", () =>
+        {
+            try
+            {
+                string? oldp = PromptPassword("Enter your CURRENT password");
+                if (oldp is null) return;
+                var seed = WalletStore.Open(WalletStore.DefaultPath(), oldp);
+                if (seed is null) { System.Windows.MessageBox.Show("Current password is wrong.", "Password"); return; }
+                string? n1 = PromptPassword("Choose a NEW password");
+                if (n1 is null) return;
+                string? n2 = PromptPassword("Confirm the NEW password");
+                if (n2 is null) return;
+                if (n1.Length == 0) { System.Windows.MessageBox.Show("The new password cannot be empty.", "Password"); return; }
+                if (n1 != n2) { System.Windows.MessageBox.Show("The new passwords do not match.", "Password"); return; }
+                WalletStore.Create(WalletStore.DefaultPath(), seed, n1);
+                System.Windows.MessageBox.Show("Wallet password changed — your keys are re-encrypted under the new password.", "Password");
+            }
+            catch (Exception e) { System.Windows.MessageBox.Show(e.Message, "Password"); }
+        }));
         var contactsMenu = MI("Contacts"); contactsMenu.Items.Add(MI("_New…", () => Sel("Contacts") )); wallet.Items.Add(contactsMenu);
         wallet.Items.Add(MI("_Find", () => Sel("History")));
         var view = MI("_View");
