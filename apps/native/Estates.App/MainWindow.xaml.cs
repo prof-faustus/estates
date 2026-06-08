@@ -456,6 +456,20 @@ public partial class MainWindow : Window
         return _wallet;
     }
 
+    // A scrollable, COPYABLE monospace dialog — for full transaction detail (a MessageBox can't scroll or copy).
+    private void ShowTextDialog(string title, string text)
+    {
+        var win = new Window { Title = title, Width = 680, Height = 540, Background = B("#1b1d1e"), Owner = this, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        var tb = new TextBox
+        {
+            Text = text, IsReadOnly = true, Background = B("#171819"), Foreground = B("#e6e6e6"),
+            FontFamily = new FontFamily("Consolas"), FontSize = 12, BorderThickness = new Thickness(0), Padding = new Thickness(12),
+            TextWrapping = TextWrapping.NoWrap, AcceptsReturn = true,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto
+        };
+        win.Content = tb; win.Show();
+    }
+
     private string? PromptPassword(string title)
     {
         var w = new Window { Title = title, Width = 380, Height = 170, Background = B("#1e1f22"), WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this, ResizeMode = ResizeMode.NoResize };
@@ -843,7 +857,7 @@ public partial class MainWindow : Window
         {
             var rows = new List<Row4>();
             foreach (var (txid, credited, ncoins) in LoadSpvFromDisk(w).ReceivedHistory())
-                rows.Add(new Row4 { A = "received", B = "+" + credited.ToString("n0"), C = txid[..Math.Min(20, txid.Length)] + "…", D = ncoins + " coin (SPV proof)" });
+                rows.Add(new Row4 { A = "received", B = "+" + credited.ToString("n0"), C = txid[..Math.Min(20, txid.Length)] + "…", D = ncoins + " coin (SPV proof)", Full = txid });
             rows.AddRange(_txLog);
             string q = hSearch.Text.Trim();
             if (q.Length > 0) rows = rows.Where(r => (r.A + r.B + r.C + r.D + Label(r.C)).Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -867,7 +881,14 @@ public partial class MainWindow : Window
             }
             catch (Exception e) { System.Windows.MessageBox.Show(e.Message); }
         };
-        hgrid.MouseDoubleClick += (_, _) => { if (hgrid.SelectedItem is Row4 r) System.Windows.MessageBox.Show($"Type:    {r.A}\nAmount:  {r.B} sat\nTxid:    {r.C}\nDetail:  {r.D}", "Transaction"); };
+        hgrid.MouseDoubleClick += (_, _) =>
+        {
+            if (hgrid.SelectedItem is not Row4 r) return;
+            string detail = r.Full.Length == 64
+                ? TxDetailText(LoadSpvFromDisk(w), r.Full)
+                : $"Type:    {r.A}\nAmount:  {r.B} sat\nTxid:    {r.C}\nDetail:  {r.D}";
+            ShowTextDialog("Transaction detail", detail);
+        };
         var hmenu = new ContextMenu();
         var hCopy = new MenuItem { Header = "Copy txid" };
         hCopy.Click += (_, _) => { if (hgrid.SelectedItem is Row4 r) { try { System.Windows.Clipboard.SetText(r.C.TrimEnd('…', ' ')); } catch { } } };
@@ -906,7 +927,8 @@ public partial class MainWindow : Window
         var coOp = new MenuItem { Header = "Copy outpoint" }; coOp.Click += (_, _) => { if (cgrid.SelectedItem is Row4 r) { try { System.Windows.Clipboard.SetText(r.D); } catch { } } };
         var coFreeze = new MenuItem { Header = "Freeze / unfreeze" }; coFreeze.Click += (_, _) => { if (cgrid.SelectedItem is Row4 r) { if (!_frozenCoins.Add(r.D)) _frozenCoins.Remove(r.D); LoadCoins(); } };
         var coVerify = new MenuItem { Header = "Verify SPV proof" }; coVerify.Click += (_, _) => { if (cgrid.SelectedItem is Row4 r) { var pr = LoadSpvFromDisk(w).ProofFor(r.D); cmsg.Text = pr is null ? "no stored proof for this coin" : (pr.Verify() ? "SPV proof VALID (proof-of-work + merkle branch verify)" : "SPV proof INVALID"); } };
-        coMenu.Items.Add(coAddr); coMenu.Items.Add(coOp); coMenu.Items.Add(coFreeze); coMenu.Items.Add(coVerify); cgrid.ContextMenu = coMenu;
+        var coDetails = new MenuItem { Header = "Transaction details" }; coDetails.Click += (_, _) => { if (cgrid.SelectedItem is Row4 r) { int c = r.D.LastIndexOf(':'); string txid = c > 0 ? r.D[..c] : r.D; ShowTextDialog("Transaction detail", TxDetailText(LoadSpvFromDisk(w), txid)); } };
+        coMenu.Items.Add(coAddr); coMenu.Items.Add(coOp); coMenu.Items.Add(coFreeze); coMenu.Items.Add(coVerify); coMenu.Items.Add(coDetails); cgrid.ContextMenu = coMenu;
         coins.Children.Add(new TextBlock { Text = "Coins (UTXOs) — coin control (double-click a row to freeze/unfreeze)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
         var cFreezeAll = Btn("Freeze all"); var cUnfreezeAll = Btn("Unfreeze all"); var cSendFrom = Btn("Send from selected (freeze others)");
         cFreezeAll.Click += (_, _) => { foreach (var u in LoadSpvFromDisk(w).Utxos()) _frozenCoins.Add(u.txid + ":" + u.vout); LoadCoins(); cmsg.Text = "all coins frozen (none will be spent)"; };
@@ -1581,7 +1603,45 @@ public partial class MainWindow : Window
     }
 
     // A 4-column table row + a styled DataGrid factory — the ElectrumSV list/table look (sortable columns).
-    private sealed class Row4 { public string A { get; set; } = ""; public string B { get; set; } = ""; public string C { get; set; } = ""; public string D { get; set; } = ""; }
+    private sealed class Row4 { public string A { get; set; } = ""; public string B { get; set; } = ""; public string C { get; set; } = ""; public string D { get; set; } = ""; public string Full { get; set; } = ""; }
+
+    // Full, decoded transaction detail (ElectrumSV-class) from a stored SPV envelope: every output with its
+    // address + amount (yours marked), the block it's in, and live proof status (PoW + merkle).
+    private string TxDetailText(SpvWallet spv, string fullTxid)
+    {
+        SpvEnvelope? env = null;
+        foreach (var u in spv.Utxos()) if (u.txid == fullTxid) { env = spv.ProofFor(u.txid + ":" + u.vout); break; }
+        if (env is null) return "txid " + fullTxid + "\n(no stored proof for this transaction)";
+        var tx = Tx.Parse(env.RawTx); if (tx is null) return "txid " + fullTxid + "\n(unparseable)";
+        var hdr = BsvHeaders.Parse(env.Header80);
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("Transaction  " + Tx.Txid(tx));
+        sb.AppendLine($"version {tx.Version}   locktime {tx.LockTime}   size {env.RawTx.Length} bytes   index in block {env.Index}");
+        sb.AppendLine($"{tx.Inputs.Count} input(s)   ·   {tx.Outputs.Count} output(s)");
+        sb.AppendLine();
+        long mine = 0;
+        for (int i = 0; i < tx.Outputs.Count; i++)
+        {
+            string a = AddrOfScript(tx.Outputs[i].Script);
+            bool isMine = false; foreach (var u in spv.Utxos()) if (u.txid == fullTxid && u.vout == i) { isMine = true; break; }
+            if (isMine) mine += tx.Outputs[i].Value;
+            sb.AppendLine($"  out[{i}]  {tx.Outputs[i].Value,15:n0} sat  →  {a}{(isMine ? "   ◀ YOURS" : "")}");
+        }
+        sb.AppendLine();
+        sb.AppendLine($"credited to you: {mine:n0} sat");
+        if (hdr is not null)
+        {
+            sb.AppendLine();
+            sb.AppendLine("Block header (the proof this was mined):");
+            sb.AppendLine($"  block {hdr.Id()}");
+            sb.AppendLine($"  merkle root {Tx.ToHex(hdr.MerkleRoot)}");
+            sb.AppendLine($"  bits {hdr.Bits:x8}   time {DateTimeOffset.FromUnixTimeSeconds(hdr.Time).UtcDateTime:u}");
+        }
+        sb.AppendLine();
+        sb.AppendLine($"proof-of-work : {(hdr is not null && BsvHeaders.MeetsProofOfWork(hdr) ? "VALID" : "INVALID")}");
+        sb.AppendLine($"merkle proof  : {(env.Verify() ? "VALID — this tx is provably in the block" : "INVALID")}");
+        return sb.ToString();
+    }
     private System.Windows.Controls.DataGrid Grid4(string h1, string h2, string h3, string h4, int height)
     {
         var g = new System.Windows.Controls.DataGrid
