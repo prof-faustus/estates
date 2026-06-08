@@ -812,7 +812,8 @@ public partial class MainWindow : Window
         file.Items.Add(MI("_Save Copy (backup seed)", () => Sel("Info"))); file.Items.Add(new Separator());
         file.Items.Add(MI("_Quit", () => relock()));
         var wallet = MI("_Wallet");
-        wallet.Items.Add(MI("_Information", () => Sel("Info"))); wallet.Items.Add(MI("_Password…", () => Sel("Info")));
+        wallet.Items.Add(MI("_Information", () => Sel("Info")));
+        wallet.Items.Add(MI("_Password…", () => { var np = Prompt("New wallet password (blank = none)", ""); if (np is null) return; try { WalletStore.Create(WalletStore.DefaultPath(), _walletSeed!, np); System.Windows.MessageBox.Show("Wallet password changed — your keys are re-encrypted under the new password.", "Password"); } catch (Exception e) { System.Windows.MessageBox.Show(e.Message, "Password"); } }));
         var contactsMenu = MI("Contacts"); contactsMenu.Items.Add(MI("_New…", () => Sel("Contacts") )); wallet.Items.Add(contactsMenu);
         wallet.Items.Add(MI("_Find", () => Sel("History")));
         var view = MI("_View");
