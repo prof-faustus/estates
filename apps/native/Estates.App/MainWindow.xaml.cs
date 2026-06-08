@@ -303,6 +303,19 @@ public partial class MainWindow : Window
             var sp = new StackPanel { Margin = new Thickness(4) };
             if (_walletSeed is null)
             {
+                // ElectrumSV-style startup WIZARD: Splash → Choose wallet → Password → New seed/Restore →
+                // DISPLAY seed → CONFIRM seed → open. (Ported from wallet_wizard.py / account_wizard.py.)
+                var wsp = new StackPanel { Margin = new Thickness(20) };
+                wsp.Children.Add(new TextBlock { Text = "Welcome to ESTATES", Foreground = B("#e6e6e6"), FontSize = 18, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 6) });
+                wsp.Children.Add(new TextBlock { Text = "Set up or open your wallet to begin.", Foreground = B("#9aa0a6"), FontSize = 12, Margin = new Thickness(0, 0, 0, 12) });
+                var openBtn = new Button { Content = "Open wallet setup…", Padding = new Thickness(14, 8, 14, 8), Background = B("#2d6cdf"), Foreground = B("#ffffff"), HorizontalAlignment = HorizontalAlignment.Left };
+                void LaunchWizard() { try { var wz = new WalletWizard { Owner = System.Windows.Window.GetWindow(host) }; if (wz.ShowDialog() == true && wz.Seed is not null) { _walletSeed = wz.Seed; _wallet = null; Render(); } } catch { } }
+                openBtn.Click += (_, _) => LaunchWizard();
+                wsp.Children.Add(openBtn);
+                host.Content = wsp;
+                Dispatcher.BeginInvoke(new System.Action(LaunchWizard));   // auto-open the wizard on first show
+                return;
+#pragma warning disable CS0162
                 string path = WalletStore.DefaultPath();
                 bool exists = WalletStore.Exists(path);
                 var msg = Out();
