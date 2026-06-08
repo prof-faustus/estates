@@ -372,7 +372,8 @@ public partial class MainWindow : Window
         }
 
         Render();
-        return new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MaxHeight = 640, Content = host, Margin = new Thickness(0, 12, 0, 0) };
+        host.Background = B("#1b1d1e");
+        return new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MaxHeight = 640, Content = host, Margin = new Thickness(0, 12, 0, 0), Background = B("#1b1d1e") };
     }
 
     // ---- network: real (default) / testnet / regtest (password-gated, test-only) ------
