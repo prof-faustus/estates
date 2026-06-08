@@ -982,6 +982,9 @@ public partial class MainWindow : Window
         ident.Children.Add(idCopy); ident.Children.Add(idCopyMsg);
         var idQr = new System.Windows.Controls.Image { Stretch = System.Windows.Media.Stretch.None, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 8, 0, 8) };
         RenderQr(idQr, Tx.ToHex(w.ChildPub(0))); ident.Children.Add(L("identity QR (scan to add me as a contact / pay me by identity)")); ident.Children.Add(idQr);
+        var idProveMsg = F(); var idProveOut = O(); var idProve = Btn("Prove identity (sign a challenge)");
+        idProve.Click += (_, _) => { try { byte[] sig = EcdsaSign.Sign(w.ChildPriv(0), System.Text.Encoding.UTF8.GetBytes(idProveMsg.Text)); idProveOut.Text = $"identity {Tx.ToHex(w.ChildPub(0))}\nsig {Tx.ToHex(sig)}\n(anyone can verify this proves you control this identity)"; } catch (Exception e) { idProveOut.Text = e.Message; } };
+        ident.Children.Add(L("prove ownership — sign a challenge with your identity key")); ident.Children.Add(idProveMsg); ident.Children.Add(idProve); ident.Children.Add(idProveOut);
         ident.Children.Add(L("How it's used: pay an identity (\\pay <handle> <sat>), chat direct/broadcast to identities, and play the game as this identity. The identity is your on-chain NFT card (see NFTs tab)."));
         tabs.Items.Add(Tab("Identity", ident));
 
