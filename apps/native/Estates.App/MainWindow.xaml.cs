@@ -980,6 +980,8 @@ public partial class MainWindow : Window
         var idCopy = Btn("Copy identity key"); var idCopyMsg = O();
         idCopy.Click += (_, _) => { try { System.Windows.Clipboard.SetText(Tx.ToHex(w.ChildPub(0))); idCopyMsg.Text = "identity key copied — share it to receive pays/NFTs by identity"; } catch (Exception e) { idCopyMsg.Text = e.Message; } };
         ident.Children.Add(idCopy); ident.Children.Add(idCopyMsg);
+        var idQr = new System.Windows.Controls.Image { Stretch = System.Windows.Media.Stretch.None, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 8, 0, 8) };
+        RenderQr(idQr, Tx.ToHex(w.ChildPub(0))); ident.Children.Add(L("identity QR (scan to add me as a contact / pay me by identity)")); ident.Children.Add(idQr);
         ident.Children.Add(L("How it's used: pay an identity (\\pay <handle> <sat>), chat direct/broadcast to identities, and play the game as this identity. The identity is your on-chain NFT card (see NFTs tab)."));
         tabs.Items.Add(Tab("Identity", ident));
 
