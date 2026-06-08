@@ -17,7 +17,9 @@ public partial class BotWindow : Window
 {
     private readonly P2PNode _node;
     private readonly int _botId;                  // FIXED bot id — its persistent identity across restarts
-    private readonly byte[] _master;              // this bot's OWN persistent seed (separate per bot id)
+    private readonly string _owner;               // the human OWNER's handle (e.g. "Alice") — the bot is theirs
+    private readonly byte[]? _ownerPub;           // the owner's identity pubkey — only the owner controls this bot
+    private readonly byte[] _master;              // this bot's seed — DERIVED from the owner, keyed per owner+id
     private readonly byte[] _pub;                 // chat/identity pubkey (same scheme as the player client)
     private readonly DispatcherTimer _poll = new();
     private bool _greeted;
@@ -29,40 +31,43 @@ public partial class BotWindow : Window
     private const int BotWatch = 50;              // addresses the bot watches/derives (fresh per request)
     private int _recvIndex = 1;                   // next fresh receive address (index 0 = primary)
 
-    // Each bot's seed lives in its own file, so bot #N always reloads the SAME wallet + identity. Spawning
-    // 10 bots = 10 fixed ids = 10 separate persistent wallets. Created once (32 random bytes), then reused.
-    private static byte[] LoadOrCreateBotSeed(int id)
+    // The bot's seed is keyed by OWNER + id, so a bot belongs to exactly one human. The owner's client
+    // writes the (owner-derived) seed before launch; here we load it (or create one for a solo/test run).
+    private static byte[] LoadOrCreateBotSeed(int id, string ownerPub)
     {
         string dir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Estates", "bots");
         System.IO.Directory.CreateDirectory(dir);
-        string path = System.IO.Path.Combine(dir, $"bot_{id}.seed");
+        string key = string.IsNullOrEmpty(ownerPub) ? "solo" : (ownerPub.Length >= 8 ? ownerPub[..8] : ownerPub);
+        string path = System.IO.Path.Combine(dir, $"bot_{key}_{id}.seed");
         if (System.IO.File.Exists(path)) { var b = System.IO.File.ReadAllBytes(path); if (b.Length == 32) return b; }
         var seed = RandomNumberGenerator.GetBytes(32);
         System.IO.File.WriteAllBytes(path, seed);
         return seed;
     }
 
-    public BotWindow(int botId = 1)
+    public BotWindow(int botId = 1, string owner = "", string ownerPub = "")
     {
         InitializeComponent();
         var wa = SystemParameters.WorkArea;
         Left = wa.Right - Width - 12;
         Top = wa.Bottom - Height - 12;
 
-        _botId = botId;
-        _master = LoadOrCreateBotSeed(botId);      // SEPARATE, PERSISTENT wallet per fixed bot id
-        Title = $"ESTATES · bot #{botId}";
+        _botId = botId; _owner = owner;
+        try { _ownerPub = ownerPub.Length == 66 ? Tx.FromHex(ownerPub) : null; } catch { _ownerPub = null; }
+        _master = LoadOrCreateBotSeed(botId, ownerPub);    // owner-keyed seed → the bot is THIS owner's only
+        string name = owner.Length > 0 ? $"{owner}-Bot-{botId:000}" : $"bot#{botId}";
+        Title = $"ESTATES · {name}";
         _pub = Cipher.PublicKey(_master);          // IDENTICAL scheme to MainWindow so chat keys match
-        _node = new P2PNode($"bot#{botId}", Tx.ToHex(_pub));
+        _node = new P2PNode(name, Tx.ToHex(_pub));
         _node.OnLink += link => link.OnFrame += (l, f) => Dispatcher.Invoke(() => OnBotChat(l, f));
         App.Teardowns.Add(() => { try { _node.Dispose(); } catch { } });
         Closed += (_, _) => { _poll.Stop(); RefundFunderOnClose(); try { _node.Dispose(); } catch { } };
 
         BotNetwork.SelectedIndex = 0;              // mainnet by default — triggers BotNetwork_Changed to build the wallet
 
-        Log("automated bot started — connected as a peer node");
+        Log(owner.Length > 0 ? $"{owner}-Bot-{botId:000} started — I belong ONLY to {owner}; no other player can run or control me" : $"bot#{botId} started — connected as a peer node");
         Log("fund me by PAYING my address (Funds tab) on the chosen network — a real on-chain payment");
-        Log("I never simulate a solo game; I refund the funder 100% when I close");
+        Log("I refund my OWNER 100% when I close (never any other player)");
 
         _poll.Interval = TimeSpan.FromMilliseconds(2000);
         _poll.Tick += (_, _) =>
@@ -97,7 +102,8 @@ public partial class BotWindow : Window
     {
         if (_wallet is null) return;
         BotAddress.Text = _wallet.AddressAt(0);
-        BotWallet.Text = $"bot #{_botId} · balance ({_network}): {_spv.Balance():n0} sat   ·   {_spv.CoinCount} coin(s)\n(refunds the funder in full on close)";
+        string who = _owner.Length > 0 ? $"{_owner}-Bot-{_botId:000}  ·  owned by {_owner}" : $"bot#{_botId}";
+        BotWallet.Text = $"{who}\nbalance ({_network}): {_spv.Balance():n0} sat   ·   {_spv.CoinCount} coin(s)\n(refunds my OWNER in full on close — never another player)";
     }
 
     // a FRESH receive address each time it is asked (rotates within the watched range; index 0 is primary).
@@ -128,10 +134,22 @@ public partial class BotWindow : Window
     // is no special bot-funding channel; the bot refunds to whoever controls it (the linked player peer).
     private byte[]? FunderRefundScript()
     {
-        foreach (var p in _node.Peers())
+        // refund ONLY the OWNER: the live peer whose identity pubkey is the owner's. No other player can
+        // ever receive this bot's funds.
+        if (_ownerPub is not null)
+        {
+            string ownerHex = Tx.ToHex(_ownerPub);
+            foreach (var p in _node.Peers())
+                if (p.WalletPub == ownerHex && !string.IsNullOrEmpty(p.RecvAddr)) { var pkh = Base58.CheckDecode(p.RecvAddr, out _); if (pkh is { Length: 20 }) return NodeWallet.P2pkhScript(pkh); }
+            return null;   // owner not present → do not refund anyone else
+        }
+        foreach (var p in _node.Peers())   // solo/test bot (no owner bound): the single controlling peer
             if (!string.IsNullOrEmpty(p.RecvAddr)) { var pkh = Base58.CheckDecode(p.RecvAddr, out _); if (pkh is { Length: 20 }) return NodeWallet.P2pkhScript(pkh); }
         return null;
     }
+
+    // true only if a control message is from THIS bot's owner — no other player may control it.
+    private bool FromOwner(byte[] senderIdentityPub) => _ownerPub is null || (senderIdentityPub.Length == _ownerPub.Length && Tx.ToHex(senderIdentityPub) == Tx.ToHex(_ownerPub));
 
     // refund-to-funder on close: SPV-spend the bot's ENTIRE balance back to the funder's address, broadcast
     // it on-chain, and tell the funder it is done. After this the bot holds nothing.

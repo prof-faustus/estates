@@ -126,14 +126,31 @@ public partial class MainWindow : Window
         return true;
     }
 
+    private int _nextBotId = 1;
     private void RunBot_Click(object sender, RoutedEventArgs e)
     {
         try
         {
-            string? exe = Environment.ProcessPath;
-            if (exe is not null) System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe, "--bot") { UseShellExecute = false });
+            if (_walletSeed is null) { StartMsg.Text = "Unlock your wallet first — a bot is cryptographically YOURS (derived from your identity)."; return; }
+            string? exe = Environment.ProcessPath; if (exe is null) return;
+            int id = _nextBotId++;
+            string ownerHandle = _displayName.Length > 0 ? _displayName : "player-" + Tx.ToHex(_walletPub)[..6];
+            string ownerPub = Tx.ToHex(_walletPub);
+            // the bot's seed is DERIVED from MY seed (so only I can ever reproduce/control it) and written
+            // to the owner-keyed seed file the bot will load.
+            byte[] botSeed = Type42.UniqueKey(_walletSeed, "estates/bot/" + id);
+            string dir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Estates", "bots");
+            System.IO.Directory.CreateDirectory(dir);
+            string key = ownerPub.Length >= 8 ? ownerPub[..8] : ownerPub;
+            System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, $"bot_{key}_{id}.seed"), botSeed);
+            var psi = new System.Diagnostics.ProcessStartInfo(exe) { UseShellExecute = false };
+            psi.ArgumentList.Add("--bot"); psi.ArgumentList.Add("--id"); psi.ArgumentList.Add(id.ToString());
+            psi.ArgumentList.Add("--owner"); psi.ArgumentList.Add(ownerHandle);
+            psi.ArgumentList.Add("--ownerpub"); psi.ArgumentList.Add(ownerPub);
+            System.Diagnostics.Process.Start(psi);
+            StartMsg.Text = $"started {ownerHandle}-Bot-{id:000} (yours only — derived from your identity)";
         }
-        catch { }
+        catch (Exception ex) { StartMsg.Text = ex.Message; }
     }
 
     // ---- Game (its own tab) — a real board, you click every action ------------------
