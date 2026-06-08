@@ -396,6 +396,7 @@ public partial class MainWindow : Window
     {
         var w = EnsureWallet()!;          // built from the unlocked seed; entirely in-process
         _node.ReceiveAddress = w.AddressAt(FirstAddr);   // advertise a sub-key address (index 0 is identity, never an address)
+        try { if (System.IO.File.Exists(RecvIndexPath()) && int.TryParse(System.IO.File.ReadAllText(RecvIndexPath()).Trim(), out int ri) && ri >= FirstAddr && ri < RecvWatch) _recvIndex = ri; } catch { }   // resume fresh-address cursor (no reuse across sessions)
         TextBox F() => new() { Background = B("#171819"), Foreground = B("#e6e6e6"), BorderThickness = new Thickness(0), Padding = new Thickness(8), Margin = new Thickness(0, 2, 0, 6), FontFamily = new FontFamily("Consolas"), FontSize = 12, TextWrapping = TextWrapping.Wrap, AcceptsReturn = true };
         TextBox Mono(int h) => new() { IsReadOnly = true, Background = B("#171819"), Foreground = B("#cfd2d6"), FontFamily = new FontFamily("Consolas"), FontSize = 11, BorderThickness = new Thickness(0), Padding = new Thickness(8), Height = h, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         TextBlock L(string t) => new() { Text = t, Foreground = B("#9aa0a6"), FontSize = 11 };
@@ -1199,7 +1200,8 @@ public partial class MainWindow : Window
         return s;
     }
 
-    private string NextRecvAddress(StandaloneWallet w) { int i = _recvIndex; _recvIndex = _recvIndex + 1 >= RecvWatch ? 1 : _recvIndex + 1; return w.AddressAt(i); }
+    private string RecvIndexPath() => System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"estates_recvidx_{_network}.txt");
+    private string NextRecvAddress(StandaloneWallet w) { int i = _recvIndex; _recvIndex = _recvIndex + 1 >= RecvWatch ? 1 : _recvIndex + 1; try { System.IO.File.WriteAllText(RecvIndexPath(), _recvIndex.ToString()); } catch { } return w.AddressAt(i); }
 
     // post a local status line into the chat (not sent to peers) — for \help, \balance, results.
     private void PostLocal(string text) { _conv.Apply(Messenger.Text(MyPub(), "ℹ " + text)); RenderChat(); }
