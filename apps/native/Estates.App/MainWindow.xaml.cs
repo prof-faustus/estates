@@ -636,6 +636,11 @@ public partial class MainWindow : Window
         swb.Click += async (_, _) => swo.Text = await SweepPrivKey(w, swk.Text.Trim());
         tools.Children.Add(L("private key (64-hex)")); tools.Children.Add(swk); tools.Children.Add(swb); tools.Children.Add(swo);
 
+        tools.Children.Add(new TextBlock { Text = "Pay a BIP270 invoice (Anypay / Centi) — paste the payment URL", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 12, 0, 0) });
+        var inv = F(); var invo = O(); var invb = Btn("Fetch + pay invoice");
+        invb.Click += async (_, _) => { invo.Text = "fetching invoice…"; invo.Text = await PayBip270(w, inv.Text.Trim()); };
+        tools.Children.Add(L("payment URL or bitcoin: URI")); tools.Children.Add(inv); tools.Children.Add(invb); tools.Children.Add(invo);
+
         tools.Children.Add(new TextBlock { Text = "Load / broadcast a raw transaction", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 12, 0, 0) });
         var lrt = F(); var lro = O(); var lrb = Btn("Broadcast raw tx");
         lrb.Click += async (_, _) => { try { using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e"); var r = await rpc.CallAsync("sendrawtransaction", lrt.Text.Trim()); lro.Text = r is null ? "rejected by node" : "broadcast: " + r.Value.ToString(); } catch (Exception e) { lro.Text = e.Message; } };
@@ -676,6 +681,60 @@ public partial class MainWindow : Window
     {
         try { if (script.Length == 25 && script[0] == 0x76) { var pkh = script[3..23]; return Address.P2pkh(pkh, _network == "mainnet" ? BsvNet.Mainnet : _network == "testnet" ? BsvNet.Testnet : BsvNet.Regtest); } } catch { }
         return "(non-standard)";
+    }
+
+    // BIP270: fetch a merchant PaymentRequest (Anypay/Centi) from a URL, pay its outputs from the SPV
+    // wallet, broadcast, then POST the Payment back to the merchant (PaymentACK). Accepts a raw payment
+    // URL or a "bitcoin:?r=<url>" / "pay:" URI.
+    private static readonly System.Net.Http.HttpClient _http = new() { Timeout = System.TimeSpan.FromSeconds(20) };
+    private async System.Threading.Tasks.Task<string> PayBip270(StandaloneWallet w, string urlOrUri)
+    {
+        try
+        {
+            string url = urlOrUri;
+            if (url.StartsWith("bitcoin:", StringComparison.OrdinalIgnoreCase) || url.StartsWith("pay:", StringComparison.OrdinalIgnoreCase))
+            {
+                int r = url.IndexOf("r=", StringComparison.OrdinalIgnoreCase);
+                if (r >= 0) url = System.Uri.UnescapeDataString(url[(r + 2)..].Split('&')[0]);
+            }
+            if (!url.StartsWith("http", StringComparison.OrdinalIgnoreCase)) return "not a payment URL";
+            using var req = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, url);
+            req.Headers.TryAddWithoutValidation("Accept", "application/bitcoinsv-paymentrequest, application/payment-request, application/json");
+            var resp = await _http.SendAsync(req);
+            string body = await resp.Content.ReadAsStringAsync();
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            // BIP270 may wrap details in "memo"/"outputs" directly or under "paymentDetails"
+            var det = root.TryGetProperty("outputs", out _) ? root : (root.TryGetProperty("paymentDetails", out var pd) ? pd : root);
+            if (!det.TryGetProperty("outputs", out var outsEl)) return "invoice has no outputs";
+            var outs = new List<(byte[] script, long amount)>();
+            foreach (var o in outsEl.EnumerateArray())
+            {
+                long amt = o.TryGetProperty("amount", out var av) ? (av.ValueKind == System.Text.Json.JsonValueKind.Number ? av.GetInt64() : long.Parse(av.GetString()!)) : 0;
+                string? scr = o.TryGetProperty("script", out var sv) ? sv.GetString() : null;
+                if (scr is null || amt <= 0) return "invoice output malformed";
+                outs.Add((Tx.FromHex(scr), amt));
+            }
+            string? payUrl = det.TryGetProperty("paymentUrl", out var pu) ? pu.GetString() : null;
+            string merchantData = det.TryGetProperty("merchantData", out var md) ? (md.GetString() ?? "") : "";
+
+            var spv2 = LoadSpvFromDisk(w);
+            byte[] change = NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(FirstAddr)));
+            var built = SpvSpend.BuildMany(spv2, SpvKeymap(w), outs, 500, change, _frozenCoins);
+            if (built is null) return "insufficient funds for this invoice";
+            using (var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e")) { try { await rpc.CallAsync("sendrawtransaction", Tx.ToHex(built.Raw)); } catch { } }
+            foreach (var l in _node.LiveLinks()) { try { l.Send(built.Raw); } catch { } }
+            foreach (var c in built.Tx.Inputs) spv2.Spend(c.PrevTxid + ":" + c.PrevVout);
+            spv2.Save(SpvPathFor());
+            _txLog.Add($"{"(invoice)",-20}{("-" + outs.Sum(o => o.amount).ToString("n0")),16}  {built.Txid[..Math.Min(20, built.Txid.Length)]}…");
+            if (!string.IsNullOrEmpty(payUrl))
+            {
+                var payment = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object> { ["transaction"] = Tx.ToHex(built.Raw), ["merchantData"] = merchantData });
+                try { using var pr = new System.Net.Http.StringContent(payment, System.Text.Encoding.UTF8, "application/bitcoinsv-payment"); await _http.PostAsync(payUrl, pr); } catch { }
+            }
+            return $"PAID invoice · {outs.Count} output(s) · txid {built.Txid}";
+        }
+        catch (System.Exception e) { return e.Message; }
     }
 
     // Sweep: take a raw private key, find its coins via the node, and move them all into this wallet.
