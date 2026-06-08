@@ -1279,7 +1279,9 @@ public partial class MainWindow : Window
         toolsMenu.Items.Add(loadTx);
         var helpMenu = MI("_Help");
         helpMenu.Items.Add(MI("_About", () => System.Windows.MessageBox.Show("ESTATES wallet — ElectrumSVP-class SPV wallet (Craig's SPV: IP-to-IP envelopes + Bloom). Network: " + _network, "About")));
-        helpMenu.Items.Add(MI("Official _website", () => { try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("http://electrumsv.io") { UseShellExecute = true }); } catch { } }));
+        void OpenUrl(string u) { try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(u) { UseShellExecute = true }); } catch { } }
+        helpMenu.Items.Add(MI("_Documentation", () => OpenUrl("https://github.com/prof-faustus/estates/tree/main/docs")));
+        helpMenu.Items.Add(MI("_Report Bug", () => OpenUrl("https://github.com/prof-faustus/estates/issues")));
         menu.Items.Add(file); menu.Items.Add(wallet); menu.Items.Add(view); menu.Items.Add(toolsMenu); menu.Items.Add(helpMenu);
 
         var status = new System.Windows.Controls.Primitives.StatusBar { Background = B("#2b2d31"), Foreground = B("#9aa0a6") };
