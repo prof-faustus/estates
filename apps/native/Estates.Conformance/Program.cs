@@ -980,6 +980,26 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("spv-envelope: a wrong merkle root fails verification", bf is not null && !new SpvEnvelope(raw, hdrBad, bf.Value.branch, bf.Value.index).Verify());
 }
 
+// SPVSPEND pay-to-many end-to-end: receive a real (PoW-verified) coin, then spend it to TWO recipients
+// with change; the built tx has the right outputs and each input is FORKID-signed.
+{
+    byte[] mypriv = Type42.UniqueKey(new byte[32] { 140, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }, "spend"); byte[] mypub = Secp256k1.PublicKey(mypriv);
+    byte[] myscript = NodeWallet.P2pkhScript(Recovery.Hash160(mypub));
+    var spv = new SpvWallet(new[] { myscript });
+    var ctx = new NativeTx(2, new[] { new TxInputN(new string('3', 64), 0, System.Array.Empty<byte>(), 0xffffffff) }, new[] { new TxOutputN(100000, myscript) }, 0);
+    string ctxid = Tx.Txid(ctx); byte[] rootI = Tx.FromHex(ctxid); System.Array.Reverse(rootI);
+    var hdr = new byte[80]; hdr[0] = 2; System.Array.Copy(rootI, 0, hdr, 36, 32); hdr[72] = 0xff; hdr[73] = 0xff; hdr[74] = 0x7f; hdr[75] = 0x20;
+    var cbf = BlockMerkle.BranchFor(new List<string> { ctxid }, ctxid);
+    byte[] craw = Tx.Serialize(ctx); bool recv = false;
+    if (cbf is not null) for (uint n = 0; n < 500000 && !recv; n++) { hdr[76] = (byte)n; hdr[77] = (byte)(n >> 8); hdr[78] = (byte)(n >> 16); hdr[79] = (byte)(n >> 24); if (spv.Receive(new SpvEnvelope(craw, hdr, cbf.Value.branch, cbf.Value.index))) recv = true; }
+    X("spvspend-many: a PoW-verified coin is received (100000 sat)", recv && spv.Balance() == 100000);
+    var keymap = new Dictionary<string, (byte[] priv, byte[] pub)> { [Tx.ToHex(myscript)] = (mypriv, mypub) };
+    byte[] r1 = NodeWallet.P2pkhScript(new byte[20]); var pkh2 = new byte[20]; pkh2[0] = 1; byte[] r2 = NodeWallet.P2pkhScript(pkh2);
+    var built = SpvSpend.BuildMany(spv, keymap, new List<(byte[], long)> { (r1, 30000), (r2, 20000) }, 1000, myscript, null);
+    X("spvspend-many: pays both recipients + change (3 outputs)", built is not null && built.Tx.Outputs.Count == 3 && built.Tx.Outputs[0].Value == 30000 && built.Tx.Outputs[1].Value == 20000 && built.Tx.Outputs[2].Value == 49000);
+    X("spvspend-many: each input is FORKID-signed", built is not null && built.Tx.Inputs.All(i => i.ScriptSig.Length > 100));
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
