@@ -709,13 +709,32 @@ public partial class MainWindow : Window
         netp.Children.Add(netInfo);
         tabs.Items.Add(Tab("Network", netp));
 
-        // ===== NFTs — the deeds/cards you hold =====
+        // ===== NFTs — deeds/cards + your IDENTITY card, displayed as visual cards owned by your identity =====
         var nft = new StackPanel();
-        nft.Children.Add(new TextBlock { Text = "Your NFTs — deeds & cards", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
-        var nl = Mono(360);
-        void LoadNfts() { var s = new System.Text.StringBuilder(); foreach (var n in _heldNfts) s.AppendLine($"{n.name}  (property #{n.id})"); if (_heldNfts.Count == 0) s.AppendLine("none yet — buy a property in a game and its deed lands here."); nl.Text = s.ToString(); }
+        nft.Children.Add(new TextBlock { Text = "NFTs — your identity card, deeds & game cards", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        nft.Children.Add(L("every NFT is owned by your IDENTITY (the base key, index 0 — ECDH root, never an address)"));
+        var nftHost = new StackPanel { Margin = new Thickness(0, 6, 0, 0) };
+        Border Card(string title, string sub, string brush)
+        {
+            var sp2 = new StackPanel();
+            sp2.Children.Add(new TextBlock { Text = title, Foreground = B("#ffffff"), FontWeight = FontWeights.Bold, FontSize = 14 });
+            sp2.Children.Add(new TextBlock { Text = sub, Foreground = B("#cfd2d6"), FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 3, 0, 0) });
+            return new Border { Background = B(brush), CornerRadius = new CornerRadius(10), Padding = new Thickness(14), Margin = new Thickness(0, 0, 0, 10), Child = sp2 };
+        }
+        void LoadNfts()
+        {
+            nftHost.Children.Clear();
+            string idpub = Tx.ToHex(w.ChildPub(0));
+            string handle = _displayName.Length > 0 ? _displayName : "(unnamed)";
+            // the IDENTITY NFT card — the player's identity, equivalent of an NFT (links games + history)
+            nftHost.Children.Add(Card($"🪪 IDENTITY · {handle}", $"identity key {idpub[..24]}…\nthis is your on-chain identity NFT — pay it, chat to it, play as it", "#243043"));
+            foreach (var n in _heldNfts)
+                nftHost.Children.Add(Card($"🏠 {n.name}", $"property #{n.id}  ·  owner: {handle} ({idpub[..12]}…)", "#1f2b22"));
+            if (_heldNfts.Count == 0)
+                nftHost.Children.Add(new TextBlock { Text = "No deeds yet — win/buy a property in a game and its deed NFT lands here, owned by your identity.", Foreground = B("#9aa0a6"), FontSize = 12, TextWrapping = TextWrapping.Wrap });
+        }
         LoadNfts(); var nrb = Btn("Refresh"); nrb.Click += (_, _) => LoadNfts();
-        nft.Children.Add(nrb); nft.Children.Add(nl); tabs.Items.Add(Tab("NFTs", nft));
+        nft.Children.Add(nrb); nft.Children.Add(nftHost); tabs.Items.Add(Tab("NFTs", nft));
 
         // AUTO-REFRESH: balances, coins, history update themselves (no manual refresh). Stops on unload.
         var auto = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
