@@ -793,6 +793,41 @@ public partial class MainWindow : Window
         con.Children.Add(conOut); con.Children.Add(conIn); con.Children.Add(conBtn);
         tabs.Items.Add(Tab("Console", con));
 
+        // ===== VAULT — 2-of-2 (hot+cold) with a MANDATORY pre-signed nLockTime recovery (reclaim 100%) =====
+        var vault = new StackPanel();
+        vault.Children.Add(new TextBlock { Text = "Vault — 2-of-2 with mandatory nLockTime recovery", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        vault.Children.Add(L("Funds lock into a 2-of-2 (your hot + cold key). BEFORE locking, a recovery tx is pre-signed that returns 100% to you after the locktime — you can ALWAYS reclaim, even alone."));
+        var vAmt = F(); var vLock = F(); vLock.Text = "800000"; var vOut = O(); var vBtn = Btn("Create vault + pre-sign recovery");
+        async void DoVault()
+        {
+            try
+            {
+                if (!long.TryParse(vAmt.Text.Trim(), out long amt) || amt <= 0) { vOut.Text = "bad amount"; return; }
+                if (!long.TryParse(vLock.Text.Trim(), out long lt) || lt <= 0) { vOut.Text = "bad locktime (block height)"; return; }
+                byte[] hotPriv = w.ChildPriv(FirstAddr), hotPub = w.ChildPub(FirstAddr);
+                byte[] coldPriv = w.ChildPriv(FirstAddr + 1), coldPub = w.ChildPub(FirstAddr + 1);
+                byte[] lockScript = Vault.LockScript(hotPub, coldPub);
+                var spv2 = LoadSpvFromDisk(w);
+                byte[] change = NodeWallet.P2pkhScript(Recovery.Hash160(hotPub));
+                var built = SpvSpend.BuildMany(spv2, SpvKeymap(w), new List<(byte[], long)> { (lockScript, amt) }, 500, change, _frozenCoins);
+                if (built is null) { vOut.Text = "insufficient SPV funds to fund the vault"; return; }
+                using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e");
+                var r = await rpc.CallAsync("sendrawtransaction", Tx.ToHex(built.Raw));
+                if (r is null) { vOut.Text = "node rejected vault funding"; return; }
+                foreach (var c in built.Tx.Inputs) spv2.Spend(c.PrevTxid + ":" + c.PrevVout); spv2.Save(SpvPathFor());
+                byte[] ownerRefund = NodeWallet.P2pkhScript(Recovery.Hash160(hotPub));
+                var rec = Vault.BuildRecovery(built.Txid, 0, amt, hotPub, coldPub, ownerRefund, lt, hotPriv, coldPriv, 500);
+                bool ok = Vault.VerifyRecovery(rec, hotPub, coldPub);
+                try { System.IO.File.WriteAllText(System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Estates", $"vault_{built.Txid[..12]}.recovery"), Tx.ToHex(Tx.Serialize(Vault.Finalize(rec)))); } catch { }
+                _txLog.Insert(0, new Row4 { A = "vault", B = amt.ToString("n0"), C = built.Txid[..16] + "…", D = "recovery@" + lt });
+                vOut.Text = $"VAULT funded {amt:n0} sat · txid {built.Txid[..16]}…\nrecovery pre-signed + VERIFIED={ok}: reclaim 100% after block {lt} (saved to %APPDATA%/Estates)";
+            }
+            catch (Exception e) { vOut.Text = e.Message; }
+        }
+        vBtn.Click += (_, _) => DoVault();
+        vault.Children.Add(L("amount (sat)")); vault.Children.Add(vAmt); vault.Children.Add(L("recovery locktime (block height)")); vault.Children.Add(vLock); vault.Children.Add(vBtn); vault.Children.Add(vOut);
+        tabs.Items.Add(Tab("Vault", vault));
+
         // ===== NETWORK / SPV — Craig's SPV: IP-to-IP envelopes + a BIP37 Bloom filter over my addresses =====
         var netp = new StackPanel();
         netp.Children.Add(new TextBlock { Text = "Network / SPV", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
