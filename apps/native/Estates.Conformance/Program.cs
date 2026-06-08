@@ -883,6 +883,38 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("vault: a forged co-signer signature is rejected", !Vault.VerifyRecovery(rec with { OtherSig = forged }, oPub, xPub));
 }
 
+// MERKLEBLOCK (BIP37 partial merkle tree): build a proof that one tx in a block matched, then extract the
+// root + matched txid; the extracted root equals the full tree's root; a tampered hash breaks it.
+{
+    var txids = new List<byte[]>();
+    for (int i = 0; i < 7; i++) txids.Add(Tx.Hash256(new byte[] { (byte)i }));   // 7 "txids" (internal order)
+    static byte[] FullRoot(List<byte[]> ids)
+    {
+        var cur = new List<byte[]>(ids);
+        while (cur.Count > 1)
+        {
+            var nxt = new List<byte[]>();
+            for (int i = 0; i < cur.Count; i += 2)
+            {
+                var l = cur[i]; var r = i + 1 < cur.Count ? cur[i + 1] : cur[i];
+                var c = new byte[64]; System.Array.Copy(l, c, 32); System.Array.Copy(r, 0, c, 32, 32);
+                nxt.Add(Tx.Hash256(c));
+            }
+            cur = nxt;
+        }
+        return cur[0];
+    }
+    byte[] fullRoot = FullRoot(txids);
+    var matches = new bool[7]; matches[3] = true;                                 // match tx #3
+    var (pmtFlags, pmtHashes) = PartialMerkleTree.Build(txids, matches);
+    var (pmtRoot, pmtMatched) = PartialMerkleTree.Extract(7, pmtFlags, pmtHashes);
+    X("merkleblock: extracted root equals the full merkle root", pmtRoot is not null && Tx.ToHex(pmtRoot) == Tx.ToHex(fullRoot));
+    X("merkleblock: the matched txid is recovered", pmtMatched.Count == 1 && Tx.ToHex(pmtMatched[0]) == Tx.ToHex(txids[3]));
+    var pmtBad = new List<byte[]>(pmtHashes); if (pmtBad.Count > 0) pmtBad[0] = Tx.Hash256(new byte[] { 0xff });
+    var (badRoot, _) = PartialMerkleTree.Extract(7, pmtFlags, pmtBad);
+    X("merkleblock: a tampered hash yields a different root", badRoot is null || Tx.ToHex(badRoot) != Tx.ToHex(fullRoot));
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
