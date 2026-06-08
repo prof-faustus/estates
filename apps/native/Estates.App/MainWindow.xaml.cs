@@ -590,36 +590,33 @@ public partial class MainWindow : Window
         hist.Children.Add(hr); hist.Children.Add(hl);
         tabs.Items.Add(Tab("History", hist));
 
-        // ===== COINS — every UTXO; freeze/unfreeze (coin control); UTXO split =====
-        var coins = new StackPanel(); var cl = Mono(300); var cidx = F(); cidx.Text = ""; var cmsg = O();
+        // ===== COINS — every UTXO as a TABLE; freeze/unfreeze (coin control); double-click toggles freeze =====
+        var coins = new StackPanel(); var cmsg = O();
+        var cgrid = Grid4("Value (sat)", "Frozen", "Address", "Outpoint", 260);
         void LoadCoins()
         {
-            var s = new System.Text.StringBuilder();
-            s.AppendLine($"{"value (sat)",14}  {"frozen",-7} outpoint  ·  address");
+            var rows = new List<Row4>();
             foreach (var u in LoadSpvFromDisk(w).Utxos())
             {
                 string op = u.txid + ":" + u.vout;
-                string addr = AddrOfScript(u.script);
-                s.AppendLine($"{u.value,14:n0}  {(_frozenCoins.Contains(op) ? "FROZEN" : "      "),-7} {op[..Math.Min(22, op.Length)]}…  {addr}");
+                rows.Add(new Row4 { A = u.value.ToString("n0"), B = _frozenCoins.Contains(op) ? "FROZEN" : "", C = AddrOfScript(u.script), D = op });
             }
-            if (LoadSpvFromDisk(w).CoinCount == 0) s.AppendLine("no coins yet.");
-            cl.Text = s.ToString();
+            cgrid.ItemsSource = rows;
         }
         LoadCoins();
-        var cf = Btn("Freeze/unfreeze outpoint (txid:vout)");
-        cf.Click += (_, _) => { string op = cidx.Text.Trim(); if (op.Length == 0) { cmsg.Text = "enter a txid:vout from the list"; return; } if (!_frozenCoins.Add(op)) _frozenCoins.Remove(op); cmsg.Text = _frozenCoins.Contains(op) ? "frozen (won't be spent)" : "unfrozen"; LoadCoins(); };
-        coins.Children.Add(new TextBlock { Text = "Coins (UTXOs) — coin control", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
-        coins.Children.Add(cl); coins.Children.Add(L("outpoint to freeze/unfreeze")); coins.Children.Add(cidx); coins.Children.Add(cf); coins.Children.Add(cmsg);
+        cgrid.MouseDoubleClick += (_, _) => { if (cgrid.SelectedItem is Row4 r) { if (!_frozenCoins.Add(r.D)) _frozenCoins.Remove(r.D); cmsg.Text = _frozenCoins.Contains(r.D) ? "frozen (won't be spent)" : "unfrozen"; LoadCoins(); } };
+        coins.Children.Add(new TextBlock { Text = "Coins (UTXOs) — coin control (double-click a row to freeze/unfreeze)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        coins.Children.Add(cgrid); coins.Children.Add(cmsg);
         tabs.Items.Add(Tab("Coins", coins));
 
         // ===== DESTINATIONS — addresses WITH derivation paths (index 0 = identity, NEVER an address) =====
-        var dest = new StackPanel(); var dl = Mono(420);
+        var dest = new StackPanel();
         dest.Children.Add(new TextBlock { Text = "Destinations — your addresses & derivation paths", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
         dest.Children.Add(L("index 0 is the BASE IDENTITY key (ECDH-derivation only) and is NEVER an address. Receive addresses are HMAC hash-chain sub-keys, index ≥ 1."));
-        var ds = new System.Text.StringBuilder();
-        ds.AppendLine($"{"path",-18}{"index",-7} address");
-        for (int i = FirstAddr; i <= 24; i++) ds.AppendLine($"{("estates/wallet/" + i),-18}{i,-7} {w.AddressAt(i)}");
-        dl.Text = ds.ToString(); dest.Children.Add(dl);
+        var dgrid = Grid4("Derivation path", "Index", "Address", "Type", 420);
+        var drows = new List<Row4>();
+        for (int i = FirstAddr; i <= 30; i++) drows.Add(new Row4 { A = "estates/wallet/" + i, B = i.ToString(), C = w.AddressAt(i), D = i == FirstAddr ? "receiving/change" : "receiving" });
+        dgrid.ItemsSource = drows; dest.Children.Add(dgrid);
         tabs.Items.Add(Tab("Destinations", dest));
 
         // ===== COINSPLIT — split your balance into many fresh UTXOs (fixed or randomized) =====
@@ -814,6 +811,24 @@ public partial class MainWindow : Window
     // frozen coins (coin control) + a session transaction log for the History tab.
     private readonly HashSet<string> _frozenCoins = new();
     private readonly List<string> _txLog = new();
+
+    // A 4-column table row + a styled DataGrid factory — the ElectrumSV list/table look (sortable columns).
+    private sealed class Row4 { public string A { get; set; } = ""; public string B { get; set; } = ""; public string C { get; set; } = ""; public string D { get; set; } = ""; }
+    private System.Windows.Controls.DataGrid Grid4(string h1, string h2, string h3, string h4, int height)
+    {
+        var g = new System.Windows.Controls.DataGrid
+        {
+            AutoGenerateColumns = false, IsReadOnly = true, CanUserAddRows = false, CanUserSortColumns = true,
+            HeadersVisibility = System.Windows.Controls.DataGridHeadersVisibility.Column,
+            GridLinesVisibility = System.Windows.Controls.DataGridGridLinesVisibility.None,
+            Background = B("#171819"), Foreground = B("#cfd2d6"), RowBackground = B("#1b1d1e"),
+            AlternatingRowBackground = B("#202225"), BorderThickness = new Thickness(0), Height = height,
+            FontFamily = new FontFamily("Consolas"), FontSize = 11,
+        };
+        void Col(string header, string path) => g.Columns.Add(new System.Windows.Controls.DataGridTextColumn { Header = header, Binding = new System.Windows.Data.Binding(path), Width = new System.Windows.Controls.DataGridLength(1, System.Windows.Controls.DataGridLengthUnitType.Star) });
+        Col(h1, "A"); Col(h2, "B"); Col(h3, "C"); Col(h4, "D");
+        return g;
+    }
 
     // map a P2PKH locking script back to its address (for the Coins list).
     private string AddrOfScript(byte[] script)
