@@ -16,7 +16,8 @@ namespace Estates.App;
 public partial class BotWindow : Window
 {
     private readonly P2PNode _node;
-    private readonly byte[] _master = RandomNumberGenerator.GetBytes(32);
+    private readonly int _botId;                  // FIXED bot id — its persistent identity across restarts
+    private readonly byte[] _master;              // this bot's OWN persistent seed (separate per bot id)
     private readonly byte[] _pub;                 // chat/identity pubkey (same scheme as the player client)
     private readonly DispatcherTimer _poll = new();
     private bool _greeted;
@@ -25,17 +26,34 @@ public partial class BotWindow : Window
     private StandaloneWallet _wallet = null!;     // rebuilt per selected network
     private SpvWallet _spv = null!;               // the bot's own SPV view (coins paid to its address)
     private string _spvPath = "";
-    private byte[]? _funderRefundScript;          // where to refund the funder on close (their address)
+    private const int BotWatch = 50;              // addresses the bot watches/derives (fresh per request)
+    private int _recvIndex = 1;                   // next fresh receive address (index 0 = primary)
 
-    public BotWindow()
+    // Each bot's seed lives in its own file, so bot #N always reloads the SAME wallet + identity. Spawning
+    // 10 bots = 10 fixed ids = 10 separate persistent wallets. Created once (32 random bytes), then reused.
+    private static byte[] LoadOrCreateBotSeed(int id)
+    {
+        string dir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Estates", "bots");
+        System.IO.Directory.CreateDirectory(dir);
+        string path = System.IO.Path.Combine(dir, $"bot_{id}.seed");
+        if (System.IO.File.Exists(path)) { var b = System.IO.File.ReadAllBytes(path); if (b.Length == 32) return b; }
+        var seed = RandomNumberGenerator.GetBytes(32);
+        System.IO.File.WriteAllBytes(path, seed);
+        return seed;
+    }
+
+    public BotWindow(int botId = 1)
     {
         InitializeComponent();
         var wa = SystemParameters.WorkArea;
         Left = wa.Right - Width - 12;
         Top = wa.Bottom - Height - 12;
 
+        _botId = botId;
+        _master = LoadOrCreateBotSeed(botId);      // SEPARATE, PERSISTENT wallet per fixed bot id
+        Title = $"ESTATES · bot #{botId}";
         _pub = Cipher.PublicKey(_master);          // IDENTICAL scheme to MainWindow so chat keys match
-        _node = new P2PNode("bot-" + Tx.ToHex(_pub)[..6], Tx.ToHex(_pub));
+        _node = new P2PNode($"bot#{botId}", Tx.ToHex(_pub));
         _node.OnLink += link => link.OnFrame += (l, f) => Dispatcher.Invoke(() => OnBotChat(l, f));
         App.Teardowns.Add(() => { try { _node.Dispose(); } catch { } });
         Closed += (_, _) => { _poll.Stop(); RefundFunderOnClose(); try { _node.Dispose(); } catch { } };
@@ -66,9 +84,9 @@ public partial class BotWindow : Window
         _network = it.Content!.ToString()!;
         _wallet = new StandaloneWallet(_master, _network);
         var owned = new List<byte[]>();
-        for (int i = 0; i < 20; i++) owned.Add(NodeWallet.P2pkhScript(Recovery.Hash160(_wallet.ChildPub(i))));
+        for (int i = 0; i < BotWatch; i++) owned.Add(NodeWallet.P2pkhScript(Recovery.Hash160(_wallet.ChildPub(i))));
         _spv = new SpvWallet(owned);
-        _spvPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"estates_bot_spv_{Tx.ToHex(_pub)[..8]}_{_network}.dat");
+        _spvPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"estates_bot{_botId}_spv_{_network}.dat");
         try { _spv.Load(_spvPath); } catch { }
         _node.ReceiveAddress = _wallet.AddressAt(0);   // advertise my address so the human can pay it
         ShowWallet();
@@ -79,19 +97,22 @@ public partial class BotWindow : Window
     {
         if (_wallet is null) return;
         BotAddress.Text = _wallet.AddressAt(0);
-        BotWallet.Text = $"balance ({_network}): {_spv.Balance():n0} sat   ·   {_spv.CoinCount} coin(s)" +
-                         (_funderRefundScript is not null ? "\n(will refund the funder in full on close)" : "");
+        BotWallet.Text = $"bot #{_botId} · balance ({_network}): {_spv.Balance():n0} sat   ·   {_spv.CoinCount} coin(s)\n(refunds the funder in full on close)";
     }
 
-    // Pull payments made to my address from the chain (SPV: tx + merkle proof), so funding just shows.
+    // a FRESH receive address each time it is asked (rotates within the watched range; index 0 is primary).
+    private string NextRecv() { int i = _recvIndex; _recvIndex = _recvIndex + 1 >= BotWatch ? 1 : _recvIndex + 1; return _wallet.AddressAt(i); }
+
+    // Pull payments made to my addresses from the chain (SPV: tx + merkle proof), so funding just shows.
     private async void BotSpvSync()
     {
         if (_wallet is null) return;
         try
         {
             using var rpc = new BsvRpc("127.0.0.1", RpcPort(_network), "e", "e");
-            int n = await SpvSync.SyncAddressAsync(rpc, _spv, _wallet.AddressAt(0));
-            if (n > 0) { try { _spv.Save(_spvPath); } catch { } }
+            int total = 0;
+            for (int i = 0; i < BotWatch; i++) total += await SpvSync.SyncAddressAsync(rpc, _spv, _wallet.AddressAt(i));
+            if (total > 0) { try { _spv.Save(_spvPath); } catch { } }
             Dispatcher.Invoke(ShowWallet);
         }
         catch { /* no node reachable on this network right now — funds show once it is */ }
@@ -103,6 +124,15 @@ public partial class BotWindow : Window
         catch { FundMsg.Text = _wallet.AddressAt(0); }
     }
 
+    // the controlling human peer's advertised address (where the bot refunds on close). Pay is pay — there
+    // is no special bot-funding channel; the bot refunds to whoever controls it (the linked player peer).
+    private byte[]? FunderRefundScript()
+    {
+        foreach (var p in _node.Peers())
+            if (!string.IsNullOrEmpty(p.RecvAddr)) { var pkh = Base58.CheckDecode(p.RecvAddr, out _); if (pkh is { Length: 20 }) return NodeWallet.P2pkhScript(pkh); }
+        return null;
+    }
+
     // refund-to-funder on close: SPV-spend the bot's ENTIRE balance back to the funder's address, broadcast
     // it on-chain, and tell the funder it is done. After this the bot holds nothing.
     private void RefundFunderOnClose()
@@ -110,12 +140,12 @@ public partial class BotWindow : Window
         try
         {
             if (_spv is null || _spv.Balance() <= 0) return;
-            byte[]? to = _funderRefundScript;
-            if (to is null) { Log("close: I hold funds but no funder address was provided — cannot refund safely"); return; }
+            byte[]? to = FunderRefundScript();
+            if (to is null) { Log("close: I hold funds but no funder peer is known — cannot refund safely"); return; }
             long fee = 500, amt = _spv.Balance() - fee;
             if (amt <= 0) return;
             var keymap = new Dictionary<string, (byte[] priv, byte[] pub)>();
-            for (int i = 0; i < 20; i++) { var pu = _wallet.ChildPub(i); keymap[Tx.ToHex(NodeWallet.P2pkhScript(Recovery.Hash160(pu)))] = (_wallet.ChildPriv(i), pu); }
+            for (int i = 0; i < BotWatch; i++) { var pu = _wallet.ChildPub(i); keymap[Tx.ToHex(NodeWallet.P2pkhScript(Recovery.Hash160(pu)))] = (_wallet.ChildPriv(i), pu); }
             byte[] change = NodeWallet.P2pkhScript(Recovery.Hash160(_wallet.ChildPub(0)));
             var built = SpvSpend.Build(_spv, keymap, to, amt, fee, change);
             if (built is null) { Log("close: refund build failed"); return; }
@@ -167,16 +197,6 @@ public partial class BotWindow : Window
             if (tx is null) return;
             var ex = TxTransport.Extract(tx, _master);
             if (ex is null) return;
-            if (ex.Value.type == TxType.BotFundOffer)                       // the human tells me their refund address
-            {
-                var parts = System.Text.Encoding.ASCII.GetString(ex.Value.plaintext).Split('|');
-                if (parts.Length == 2 && parts[0] == _wallet.AddressAt(0))   // it's for my address
-                {
-                    var pkh = Base58.CheckDecode(parts[1], out _);
-                    if (pkh is { Length: 20 }) { _funderRefundScript = NodeWallet.P2pkhScript(pkh); Dispatcher.Invoke(() => { ShowWallet(); Log($"funder will be refunded to {parts[1]} on close"); }); }
-                }
-                return;
-            }
             if (ex.Value.type == TxType.GameClose)                          // human closed → refund first, then exit
             {
                 Log("human closed the game — refunding and closing now");
@@ -190,6 +210,14 @@ public partial class BotWindow : Window
             {
                 Log($"chat ← {m.FromPub[..6]}: {m.Display}");
                 SendChat(Messenger.Read(Tx.ToHex(_pub), m.Id));             // read receipt (their ✓)
+                // in-chat commands work for the bot too — pay is pay, same commands as any player
+                if (ChatCommands.Is(m.Display))
+                {
+                    var c = ChatCommands.Parse(m.Display);
+                    if (c.Kind == ChatCmd.AskAddress) { SendChat(Messenger.Text(Tx.ToHex(_pub), "\\addr " + NextRecv())); Log("asked for an address — sent a fresh one"); return; }
+                    if (c.Kind == ChatCmd.Help) { SendChat(Messenger.Text(Tx.ToHex(_pub), ChatCommands.Help())); return; }
+                    return;                                                  // other commands: nothing for the bot to do
+                }
                 SendChat(Messenger.Text(Tx.ToHex(_pub), $"got it: “{m.Display}”"));   // auto-reply
             }
         }

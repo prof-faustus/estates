@@ -413,7 +413,7 @@ public partial class MainWindow : Window
         // ON-CHAIN (SPV): the estate node's SPV wallet — verified merkle proofs only, never a full node,
         // never mines. Loads persisted coins instantly on open; pulls each coin's proof from the node.
         var spvOwned = new List<byte[]>();
-        for (int i = 0; i < 20; i++) spvOwned.Add(NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(i))));
+        for (int i = 0; i < RecvWatch; i++) spvOwned.Add(NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(i))));
         var spv = new SpvWallet(spvOwned);
         string spvPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"estates_spv_{_network}.dat");
         try { spv.Load(spvPath); } catch { }
@@ -436,7 +436,8 @@ public partial class MainWindow : Window
                     var mineTo = (await rpc.CallAsync("getnewaddress"))?.GetString() ?? w.AddressAt(1);
                     await rpc.CallAsync("generatetoaddress", 1, mineTo);
                 }
-                int n = await SpvSync.SyncAddressAsync(rpc, spv, w.AddressAt(0));
+                int n = 0;
+                for (int i = 0; i < RecvWatch; i++) n += await SpvSync.SyncAddressAsync(rpc, spv, w.AddressAt(i));
                 if (n > 0) spv.Save(spvPath);
                 Dispatcher.Invoke(ShowSpv);
             }
@@ -455,10 +456,8 @@ public partial class MainWindow : Window
                 var pkh = Base58.CheckDecode(stoAddr.Text.Trim(), out _);
                 if (pkh is null || pkh.Length != 20) { sout.Text = "bad address"; return; }
                 if (!long.TryParse(samt.Text.Trim(), out long amt) || amt <= 0) { sout.Text = "bad amount"; return; }
-                var keymap = new Dictionary<string, (byte[] priv, byte[] pub)>();
-                for (int i = 0; i < 20; i++) { var pu = w.ChildPub(i); keymap[Tx.ToHex(NodeWallet.P2pkhScript(Recovery.Hash160(pu)))] = (w.ChildPriv(i), pu); }
                 byte[] changeScript = NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(0)));
-                var built = SpvSpend.Build(spv, keymap, NodeWallet.P2pkhScript(pkh), amt, 500, changeScript);
+                var built = SpvSpend.Build(spv, SpvKeymap(w), NodeWallet.P2pkhScript(pkh), amt, 500, changeScript);
                 if (built is null) { sout.Text = "insufficient SPV funds"; return; }
                 int rpcPort = _network == "mainnet" ? 8332 : _network == "testnet" ? 18332 : 18443;
                 using var rpc = new BsvRpc("127.0.0.1", rpcPort, "e", "e");
@@ -474,54 +473,8 @@ public partial class MainWindow : Window
         samt.PreviewKeyDown += (_, e) => { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Return) { e.Handled = true; DoSpvSend(); } };
         info.Children.Add(L("to address")); info.Children.Add(stoAddr); info.Children.Add(L("amount (sat)")); info.Children.Add(samt); info.Children.Add(ssend); info.Children.Add(sout);
 
-        // Fund a bot — a REAL on-chain PAYMENT to the bot's ADDRESS (never an import). The bot shows its
-        // address in its own window; paste it here. The bot refunds you 100% when it closes; I also tell
-        // it my refund address so it knows where to send the money back.
-        info.Children.Add(L("Fund a bot — paste the bot's ADDRESS + amount in sat (a real payment)"));
-        var baddr = F(); var bamt = F(); var bout = O();
-        var bfund = Btn("Pay bot");
-        async void DoFundBot()
-        {
-            try
-            {
-                string botAddr = baddr.Text.Trim();
-                var botPkh = Base58.CheckDecode(botAddr, out _);
-                if (botPkh is null || botPkh.Length != 20) { bout.Text = "bad bot address"; return; }
-                if (!long.TryParse(bamt.Text.Trim(), out long amt) || amt <= 0) { bout.Text = "bad amount"; return; }
-                var keymap = new Dictionary<string, (byte[] priv, byte[] pub)>();
-                for (int i = 0; i < 20; i++) { var pu = w.ChildPub(i); keymap[Tx.ToHex(NodeWallet.P2pkhScript(Recovery.Hash160(pu)))] = (w.ChildPriv(i), pu); }
-                byte[] changeScript = NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(0)));
-                var built = SpvSpend.Build(spv, keymap, NodeWallet.P2pkhScript(botPkh), amt, 500, changeScript);   // PAY the bot's address
-                if (built is null) { bout.Text = "insufficient SPV funds"; return; }
-                int rpcPort = _network == "mainnet" ? 8332 : _network == "testnet" ? 18332 : 18443;
-                using var rpc = new BsvRpc("127.0.0.1", rpcPort, "e", "e");
-                var r = await rpc.CallAsync("sendrawtransaction", Tx.ToHex(built.Raw));
-                if (r is null) { bout.Text = "broadcast rejected by node"; return; }
-                foreach (var c in built.Tx.Inputs) spv.Spend(c.PrevTxid + ":" + c.PrevVout);
-                spv.Save(spvPath); Dispatcher.Invoke(ShowSpv);
-
-                // tell the bot MY refund address (and which of its addresses I paid) so it refunds me on close
-                string myRefund = w.AddressAt(0);
-                byte[] note = System.Text.Encoding.ASCII.GetBytes(botAddr + "|" + myRefund);
-                var ring = new KeyRing(_walletSeed!);
-                foreach (var botPub in _node.PeerWalletPubs())
-                {
-                    long seq = System.DateTime.UtcNow.Ticks + System.Threading.Interlocked.Increment(ref _msgSeq);
-                    byte[] carrier = TxMessage.SealCarrier(ring.MessagePriv(botPub, "fund", seq), botPub, TxType.BotFundOffer, note);
-                    var otx = new NativeTx(1, new[] { new TxInputN(new string('0', 64), 0xffffffff, System.Array.Empty<byte>(), 0xffffffff) },
-                        new[] { new TxOutputN(1, TxTransport.MessageOutput(carrier, Recovery.Hash160(_walletPub))) }, 0);
-                    byte[] oraw = Tx.Serialize(otx);
-                    foreach (var l in _node.LiveLinks()) { try { l.Send(oraw); } catch { } }
-                }
-                // track the bot peer (by address→peer) for the close-ordering refund wait
-                foreach (var p in _node.Peers()) if (p.RecvAddr == botAddr && p.WalletPub.Length > 0) _fundedBots.Add(p.WalletPub);
-                bout.Text = $"PAID bot {botAddr[..Math.Min(12, botAddr.Length)]}… {amt:n0} sat · txid {built.Txid[..16]}… (refunded to you on close)";
-            }
-            catch (System.Exception e) { bout.Text = e.Message; }
-        }
-        bfund.Click += (_, _) => DoFundBot();
-        bamt.PreviewKeyDown += (_, e) => { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Return) { e.Handled = true; DoFundBot(); } };
-        info.Children.Add(L("bot address")); info.Children.Add(baddr); info.Children.Add(L("amount (sat)")); info.Children.Add(bamt); info.Children.Add(bfund); info.Children.Add(bout);
+        // (Funding a bot is not special: pay is pay. Pay a bot like any peer — in chat with
+        //  "\pay <bot#id|name|address> <sat>", or with Send (SPV) above. The bot refunds you on close.)
 
         info.Children.Add(L("Recovery seed (back this up)")); var sb0 = F(); sb0.IsReadOnly = true; sb0.Text = Tx.ToHex(_walletSeed!); info.Children.Add(sb0);
         info.Children.Add(L("Address #0")); var sa0 = F(); sa0.IsReadOnly = true; sa0.Text = w.AddressAt(0); info.Children.Add(sa0);
@@ -749,7 +702,92 @@ public partial class MainWindow : Window
     private void SendChat(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return;
+        if (ChatCommands.Is(text)) { HandleChatCommand(text); return; }   // \help \address \pay \request \balance
         Broadcast(Messenger.Text(MyPub(), text));
+    }
+
+    // ---- in-chat commands (same set for player↔player and player↔bot — pay is pay) ----
+    private const int RecvWatch = 50;            // addresses we watch/derive (fresh per request, all SPV-synced)
+    private int _recvIndex = 1;                  // next fresh receive address (index 0 = primary/refund)
+    private int RpcPort() => _network == "mainnet" ? 8332 : _network == "testnet" ? 18332 : 18443;
+    private string SpvPathFor() => System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"estates_spv_{_network}.dat");
+
+    private Dictionary<string, (byte[] priv, byte[] pub)> SpvKeymap(StandaloneWallet w)
+    {
+        var keymap = new Dictionary<string, (byte[] priv, byte[] pub)>();
+        for (int i = 0; i < RecvWatch; i++) { var pu = w.ChildPub(i); keymap[Tx.ToHex(NodeWallet.P2pkhScript(Recovery.Hash160(pu)))] = (w.ChildPriv(i), pu); }
+        return keymap;
+    }
+
+    private SpvWallet LoadSpvFromDisk(StandaloneWallet w)
+    {
+        var owned = new List<byte[]>();
+        for (int i = 0; i < RecvWatch; i++) owned.Add(NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(i))));
+        var s = new SpvWallet(owned); try { s.Load(SpvPathFor()); } catch { }
+        return s;
+    }
+
+    private string NextRecvAddress(StandaloneWallet w) { int i = _recvIndex; _recvIndex = _recvIndex + 1 >= RecvWatch ? 1 : _recvIndex + 1; return w.AddressAt(i); }
+
+    // post a local status line into the chat (not sent to peers) — for \help, \balance, results.
+    private void PostLocal(string text) { _conv.Apply(Messenger.Text(MyPub(), "ℹ " + text)); RenderChat(); }
+
+    // resolve a recipient token to an address: a literal address, or a peer NAME / bot id (e.g. "bob",
+    // "bot#3", "3") → that live peer's advertised receive address.
+    private string? ResolveAddress(string token)
+    {
+        if (Base58.CheckDecode(token, out _) is { Length: 20 }) return token;     // already an address
+        string t = token.Trim(); string tBot = t.StartsWith("bot") ? t : "bot#" + t.TrimStart('#');
+        foreach (var p in _node.Peers())
+            if ((string.Equals(p.Name, t, StringComparison.OrdinalIgnoreCase) || string.Equals(p.Name, tBot, StringComparison.OrdinalIgnoreCase))
+                && !string.IsNullOrEmpty(p.RecvAddr)) return p.RecvAddr;
+        return null;
+    }
+
+    private async void HandleChatCommand(string text)
+    {
+        var c = ChatCommands.Parse(text);
+        var w = EnsureWallet()!;
+        switch (c.Kind)
+        {
+            case ChatCmd.Help: PostLocal(ChatCommands.Help()); break;
+            case ChatCmd.AskAddress: Broadcast(Messenger.Text(MyPub(), "\\address")); PostLocal("asked the other party for an address"); break;
+            case ChatCmd.StateAddress: { string a = string.IsNullOrEmpty(c.Address) ? NextRecvAddress(w) : c.Address; Broadcast(Messenger.Text(MyPub(), "\\addr " + a)); break; }
+            case ChatCmd.Request: { string a = NextRecvAddress(w); Broadcast(Messenger.Text(MyPub(), $"\\request {c.Amount} {a}")); PostLocal($"requested {c.Amount:n0} sat to {a}"); break; }
+            case ChatCmd.Balance: PostLocal($"balance ({_network}): {LoadSpvFromDisk(w).Balance():n0} sat"); break;
+            case ChatCmd.Pay:
+            {
+                if (c.Amount <= 0) { PostLocal("usage: \\pay <address | name | bot#id> <amount-sat>"); break; }
+                string? addr = ResolveAddress(c.Address);
+                if (addr is null) { PostLocal($"unknown recipient '{c.Address}' — paste an address or use a live peer's name/bot#id"); break; }
+                PostLocal($"paying {c.Amount:n0} sat to {c.Address}…");
+                string res = await SpvPayTo(w, addr, c.Amount);
+                PostLocal(res);
+                break;
+            }
+            default: Broadcast(Messenger.Text(MyPub(), text)); break;     // unknown \command → just send the text
+        }
+    }
+
+    // a REAL on-chain payment from the SPV wallet to an address (pay is pay — works for any recipient).
+    private async System.Threading.Tasks.Task<string> SpvPayTo(StandaloneWallet w, string address, long sat)
+    {
+        try
+        {
+            var pkh = Base58.CheckDecode(address, out _);
+            if (pkh is null || pkh.Length != 20) return "bad address";
+            var spv = LoadSpvFromDisk(w);
+            byte[] change = NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(0)));
+            var built = SpvSpend.Build(spv, SpvKeymap(w), NodeWallet.P2pkhScript(pkh), sat, 500, change);
+            if (built is null) return "insufficient SPV funds";
+            using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e");
+            var r = await rpc.CallAsync("sendrawtransaction", Tx.ToHex(built.Raw));
+            if (r is null) return "broadcast rejected by node";
+            foreach (var cc in built.Tx.Inputs) spv.Spend(cc.PrevTxid + ":" + cc.PrevVout);
+            spv.Save(SpvPathFor());
+            return $"PAID {sat:n0} sat to {address[..Math.Min(14, address.Length)]}… · txid {built.Txid[..16]}…";
+        }
+        catch (System.Exception e) { return e.Message; }
     }
 
     private long _msgSeq;
@@ -857,7 +895,10 @@ public partial class MainWindow : Window
     private bool _closeHandled;
     private async void OnHumanClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        if (_closeHandled || _fundedBots.Count == 0) return;        // nothing outstanding → close normally
+        if (_closeHandled) return;
+        // every live bot peer must close + refund me FIRST (pay is pay — any bot I funded refunds on close)
+        foreach (var p in _node.Peers()) if (p.Name.StartsWith("bot#", StringComparison.OrdinalIgnoreCase) && p.WalletPub.Length > 0) _fundedBots.Add(p.WalletPub);
+        if (_fundedBots.Count == 0) return;                         // no bots → close normally
         e.Cancel = true;                                            // hold my close until bots refund
         SendGameCloseToBots();
         var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -929,7 +970,12 @@ public partial class MainWindow : Window
             if (m is null) return;
             _conv.Apply(m); RenderChat();
             if (m.FromPub != MyPub() && (m.Kind is ChatKind.Text or ChatKind.Reply or ChatKind.Media))
+            {
                 Broadcast(Messenger.Read(MyPub(), m.Id));
+                // a peer asked me for an address → AUTO-generate a fresh one and state it back (\addr <a>)
+                if (ChatCommands.Is(m.Display) && ChatCommands.Parse(m.Display).Kind == ChatCmd.AskAddress)
+                { var w = EnsureWallet()!; Broadcast(Messenger.Text(MyPub(), "\\addr " + NextRecvAddress(w))); }
+            }
         }
         catch (System.Exception e) { App.CrashLog("chat-recv", e); }
     }

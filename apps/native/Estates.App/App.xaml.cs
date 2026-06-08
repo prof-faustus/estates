@@ -27,7 +27,10 @@ public partial class App : Application
         // — the same lobby and the same human controls as any player, never automated. The
         // lobby spawns it ONLY when the human clicks "Run a bot".
         bool bot = e.Args.Any(a => a == "--bot");
-        Window w = bot ? new BotWindow() : new MainWindow();   // a bot is NOT a person — its own small window
+        // Each bot has a FIXED id (passed as --id N) → a SEPARATE, PERSISTENT wallet per bot. Default 1.
+        int botId = 1;
+        for (int i = 0; i < e.Args.Length - 1; i++) if (e.Args[i] == "--id" && int.TryParse(e.Args[i + 1], out var n) && n > 0) botId = n;
+        Window w = bot ? new BotWindow(botId) : new MainWindow();   // a bot is NOT a person — its own small window
         w.Show();
     }
 
