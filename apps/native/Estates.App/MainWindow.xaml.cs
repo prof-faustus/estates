@@ -818,6 +818,9 @@ public partial class MainWindow : Window
         }
         if (!_nftsLoaded) { LoadNftsDisk(); _nftsLoaded = true; LoadNfts(); }
         LoadNfts(); var nrb = Btn("Refresh"); nrb.Click += (_, _) => LoadNfts();
+        var mintName = F(); var mintBtn = Btn("Mint NFT to my identity"); var mintMsg = O();
+        mintBtn.Click += (_, _) => { var nm = mintName.Text.Trim(); if (nm.Length == 0) { mintMsg.Text = "enter a name"; return; } int id = (_heldNfts.Count > 0 ? _heldNfts.Max(x => x.id) : 0) + 1; _heldNfts.Add((id, nm, "local")); SaveNftsDisk(); LoadNfts(); mintMsg.Text = $"minted '{nm}' (#{id}) — owned by your identity"; mintName.Clear(); };
+        nft.Children.Add(L("mint a new NFT (name)")); nft.Children.Add(mintName); nft.Children.Add(mintBtn); nft.Children.Add(mintMsg);
         nft.Children.Add(nrb); nft.Children.Add(nftHost); tabs.Items.Add(Tab("NFTs", nft));
 
         // AUTO-REFRESH: balances, coins, history update themselves (no manual refresh). Stops on unload.
