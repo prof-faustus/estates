@@ -1023,6 +1023,9 @@ public partial class MainWindow : Window
         var heightBtn = Btn("Node block height"); var heightO = O();
         heightBtn.Click += async (_, _) => { try { using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e"); var hc = await rpc.CallAsync("getblockcount"); heightO.Text = hc is null ? "node not reachable" : "node height: " + hc.Value.ToString(); } catch (Exception e) { heightO.Text = e.Message; } };
         netp.Children.Add(heightBtn); netp.Children.Add(heightO);
+        var scanRecent = Btn("Scan recent 20 blocks to tip");
+        scanRecent.Click += async (_, _) => { try { using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e"); var hc = await rpc.CallAsync("getblockcount"); if (hc is null) { scanO.Text = "node not reachable"; return; } long top = hc.Value.GetInt64(); scanH.Text = System.Math.Max(0, top - 20).ToString(); scanH2.Text = top.ToString(); DoScan(); } catch (Exception e) { scanO.Text = e.Message; } };
+        netp.Children.Add(scanRecent);
         tabs.Items.Add(Tab("Network", netp));
 
         // ===== IDENTITY — your handle + identity key; used to pay, chat, and play as one identity =====
