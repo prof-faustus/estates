@@ -594,22 +594,25 @@ public partial class MainWindow : Window
         tabs.Items.Add(Tab("History", hist));
 
         // ===== COINS — every UTXO as a TABLE; freeze/unfreeze (coin control); double-click toggles freeze =====
-        var coins = new StackPanel(); var cmsg = O();
+        var coins = new StackPanel(); var cmsg = O(); var cSum = L("");
         var cgrid = Grid4("Value (sat)", "Frozen", "Address", "Outpoint", 260);
         void LoadCoins()
         {
             var rows = new List<Row4>();
+            long total = 0, frozenSat = 0; int frozenN = 0;
             foreach (var u in LoadSpvFromDisk(w).Utxos())
             {
-                string op = u.txid + ":" + u.vout;
-                rows.Add(new Row4 { A = u.value.ToString("n0"), B = _frozenCoins.Contains(op) ? "FROZEN" : "", C = AddrOfScript(u.script), D = op });
+                string op = u.txid + ":" + u.vout; bool fr = _frozenCoins.Contains(op);
+                total += u.value; if (fr) { frozenSat += u.value; frozenN++; }
+                rows.Add(new Row4 { A = u.value.ToString("n0"), B = fr ? "FROZEN" : "", C = AddrOfScript(u.script), D = op });
             }
             cgrid.ItemsSource = rows;
+            cSum.Text = $"{rows.Count} coin(s) · {total:n0} sat total · {frozenN} frozen ({frozenSat:n0} sat) · spendable {(total - frozenSat):n0} sat";
         }
         LoadCoins();
         cgrid.MouseDoubleClick += (_, _) => { if (cgrid.SelectedItem is Row4 r) { if (!_frozenCoins.Add(r.D)) _frozenCoins.Remove(r.D); cmsg.Text = _frozenCoins.Contains(r.D) ? "frozen (won't be spent)" : "unfrozen"; LoadCoins(); } };
         coins.Children.Add(new TextBlock { Text = "Coins (UTXOs) — coin control (double-click a row to freeze/unfreeze)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
-        coins.Children.Add(cgrid); coins.Children.Add(cmsg);
+        coins.Children.Add(cSum); coins.Children.Add(cgrid); coins.Children.Add(cmsg);
         tabs.Items.Add(Tab("Coins", coins));
 
         // ===== DESTINATIONS — addresses WITH derivation paths (index 0 = identity, NEVER an address) =====
