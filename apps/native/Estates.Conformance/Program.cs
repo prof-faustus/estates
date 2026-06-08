@@ -1000,6 +1000,18 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("spvspend-many: each input is FORKID-signed", built is not null && built.Tx.Inputs.All(i => i.ScriptSig.Length > 100));
 }
 
+// BLOOM MATCH spend-detection: a tx that SPENDS a watched outpoint matches the filter (so the wallet
+// detects its coins being spent, not just received).
+{
+    var f = new BloomFilter(8, 0.0001, 99);
+    string watchedTxid = new string('5', 64); long watchedVout = 2;
+    f.Insert(BloomMatch.Outpoint(watchedTxid, watchedVout));
+    var spendTx = new NativeTx(2, new[] { new TxInputN(watchedTxid, watchedVout, System.Array.Empty<byte>(), 0xffffffff) }, new[] { new TxOutputN(1000, NodeWallet.P2pkhScript(new byte[20])) }, 0);
+    X("bloommatch: a tx spending my watched outpoint matches", BloomMatch.Matches(spendTx, Tx.Hash256(new byte[] { 9 }), f));
+    var unrelated = new NativeTx(2, new[] { new TxInputN(new string('6', 64), 0, System.Array.Empty<byte>(), 0xffffffff) }, new[] { new TxOutputN(1000, NodeWallet.P2pkhScript(new byte[20])) }, 0);
+    X("bloommatch: an unrelated spend does not match", !BloomMatch.Matches(unrelated, Tx.Hash256(new byte[] { 10 }), f));
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
