@@ -383,6 +383,7 @@ public partial class MainWindow : Window
     private UIElement ElectrumWallet(System.Action relock)
     {
         var w = EnsureWallet()!;          // built from the unlocked seed; entirely in-process
+        _node.ReceiveAddress = w.AddressAt(0);   // advertise my address so peers/bots can PAY me
         TextBox F() => new() { Background = B("#171819"), Foreground = B("#e6e6e6"), BorderThickness = new Thickness(0), Padding = new Thickness(8), Margin = new Thickness(0, 2, 0, 6), FontFamily = new FontFamily("Consolas"), FontSize = 12, TextWrapping = TextWrapping.Wrap, AcceptsReturn = true };
         TextBox Mono(int h) => new() { IsReadOnly = true, Background = B("#171819"), Foreground = B("#cfd2d6"), FontFamily = new FontFamily("Consolas"), FontSize = 11, BorderThickness = new Thickness(0), Padding = new Thickness(8), Height = h, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         TextBlock L(string t) => new() { Text = t, Foreground = B("#9aa0a6"), FontSize = 11 };
@@ -473,24 +474,24 @@ public partial class MainWindow : Window
         samt.PreviewKeyDown += (_, e) => { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Return) { e.Handled = true; DoSpvSend(); } };
         info.Children.Add(L("to address")); info.Children.Add(stoAddr); info.Children.Add(L("amount (sat)")); info.Children.Add(samt); info.Children.Add(ssend); info.Children.Add(sout);
 
-        // Fund a bot (2-of-2) — a REAL on-chain payment to a {me, bot} 2-of-2 I still control. The bot
-        // can never spend it alone, and refunds me 100% when it closes. No import-coin anywhere.
-        info.Children.Add(L("Fund a bot (2-of-2) — paste the bot's funding key + amount in sat"));
-        var bpub = F(); var bamt = F(); var bout = O();
-        var bfund = Btn("Fund bot");
+        // Fund a bot — a REAL on-chain PAYMENT to the bot's ADDRESS (never an import). The bot shows its
+        // address in its own window; paste it here. The bot refunds you 100% when it closes; I also tell
+        // it my refund address so it knows where to send the money back.
+        info.Children.Add(L("Fund a bot — paste the bot's ADDRESS + amount in sat (a real payment)"));
+        var baddr = F(); var bamt = F(); var bout = O();
+        var bfund = Btn("Pay bot");
         async void DoFundBot()
         {
             try
             {
-                byte[]? botPub = null; try { botPub = Tx.FromHex(bpub.Text.Trim()); } catch { }
-                if (botPub is null || botPub.Length != 33) { bout.Text = "bad bot key"; return; }
+                string botAddr = baddr.Text.Trim();
+                var botPkh = Base58.CheckDecode(botAddr, out _);
+                if (botPkh is null || botPkh.Length != 20) { bout.Text = "bad bot address"; return; }
                 if (!long.TryParse(bamt.Text.Trim(), out long amt) || amt <= 0) { bout.Text = "bad amount"; return; }
-                byte[] alicePriv = w.ChildPriv(0), alicePub = w.ChildPub(0);
-                byte[] lockScript = Multisig.Lock2of2(alicePub, botPub);
                 var keymap = new Dictionary<string, (byte[] priv, byte[] pub)>();
                 for (int i = 0; i < 20; i++) { var pu = w.ChildPub(i); keymap[Tx.ToHex(NodeWallet.P2pkhScript(Recovery.Hash160(pu)))] = (w.ChildPriv(i), pu); }
                 byte[] changeScript = NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(0)));
-                var built = SpvSpend.Build(spv, keymap, lockScript, amt, 500, changeScript);   // pay the 2-of-2 (output 0)
+                var built = SpvSpend.Build(spv, keymap, NodeWallet.P2pkhScript(botPkh), amt, 500, changeScript);   // PAY the bot's address
                 if (built is null) { bout.Text = "insufficient SPV funds"; return; }
                 int rpcPort = _network == "mainnet" ? 8332 : _network == "testnet" ? 18332 : 18443;
                 using var rpc = new BsvRpc("127.0.0.1", rpcPort, "e", "e");
@@ -499,25 +500,28 @@ public partial class MainWindow : Window
                 foreach (var c in built.Tx.Inputs) spv.Spend(c.PrevTxid + ":" + c.PrevVout);
                 spv.Save(spvPath); Dispatcher.Invoke(ShowSpv);
 
-                byte[] aliceRefund = NodeWallet.P2pkhScript(Recovery.Hash160(alicePub));
-                var fund = new BotFund(built.Txid, 0, amt, alicePub, botPub, aliceRefund);
-                _botFunds[Tx.ToHex(lockScript)] = (alicePriv, alicePub, botPub);
-
-                // tell the bot its funding details IP-to-IP so it can track + refund on close
+                // tell the bot MY refund address (and which of its addresses I paid) so it refunds me on close
+                string myRefund = w.AddressAt(0);
+                byte[] note = System.Text.Encoding.ASCII.GetBytes(botAddr + "|" + myRefund);
                 var ring = new KeyRing(_walletSeed!);
-                long seq = System.DateTime.UtcNow.Ticks;
-                byte[] carrier = TxMessage.SealCarrier(ring.MessagePriv(botPub, "fund", seq), botPub, TxType.BotFundOffer, BotFunding.EncodeOffer(fund));
-                var otx = new NativeTx(1, new[] { new TxInputN(new string('0', 64), 0xffffffff, System.Array.Empty<byte>(), 0xffffffff) },
-                    new[] { new TxOutputN(1, TxTransport.MessageOutput(carrier, Recovery.Hash160(_walletPub))) }, 0);
-                byte[] oraw = Tx.Serialize(otx);
-                foreach (var l in _node.LiveLinks()) { try { l.Send(oraw); } catch { } }
-                bout.Text = $"FUNDED bot · {amt} sat in 2-of-2 · txid {built.Txid[..16]}… (refunded to you on close)";
+                foreach (var botPub in _node.PeerWalletPubs())
+                {
+                    long seq = System.DateTime.UtcNow.Ticks + System.Threading.Interlocked.Increment(ref _msgSeq);
+                    byte[] carrier = TxMessage.SealCarrier(ring.MessagePriv(botPub, "fund", seq), botPub, TxType.BotFundOffer, note);
+                    var otx = new NativeTx(1, new[] { new TxInputN(new string('0', 64), 0xffffffff, System.Array.Empty<byte>(), 0xffffffff) },
+                        new[] { new TxOutputN(1, TxTransport.MessageOutput(carrier, Recovery.Hash160(_walletPub))) }, 0);
+                    byte[] oraw = Tx.Serialize(otx);
+                    foreach (var l in _node.LiveLinks()) { try { l.Send(oraw); } catch { } }
+                }
+                // track the bot peer (by address→peer) for the close-ordering refund wait
+                foreach (var p in _node.Peers()) if (p.RecvAddr == botAddr && p.WalletPub.Length > 0) _fundedBots.Add(p.WalletPub);
+                bout.Text = $"PAID bot {botAddr[..Math.Min(12, botAddr.Length)]}… {amt:n0} sat · txid {built.Txid[..16]}… (refunded to you on close)";
             }
             catch (System.Exception e) { bout.Text = e.Message; }
         }
         bfund.Click += (_, _) => DoFundBot();
         bamt.PreviewKeyDown += (_, e) => { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Return) { e.Handled = true; DoFundBot(); } };
-        info.Children.Add(L("bot funding key")); info.Children.Add(bpub); info.Children.Add(L("amount (sat)")); info.Children.Add(bamt); info.Children.Add(bfund); info.Children.Add(bout);
+        info.Children.Add(L("bot address")); info.Children.Add(baddr); info.Children.Add(L("amount (sat)")); info.Children.Add(bamt); info.Children.Add(bfund); info.Children.Add(bout);
 
         info.Children.Add(L("Recovery seed (back this up)")); var sb0 = F(); sb0.IsReadOnly = true; sb0.Text = Tx.ToHex(_walletSeed!); info.Children.Add(sb0);
         info.Children.Add(L("Address #0")); var sa0 = F(); sa0.IsReadOnly = true; sa0.Text = w.AddressAt(0); info.Children.Add(sa0);
@@ -843,21 +847,21 @@ public partial class MainWindow : Window
         return res;
     }
 
-    // The 2-of-2 bot fundings THIS human created, keyed by lock-script hex → the human's signing key and
-    // the bot's pubkey. Lets us complete (add our signature) the bot's refund reclaim on close.
-    private readonly Dictionary<string, (byte[] priv, byte[] pub, byte[] botPub)> _botFunds = new();
+    // Bots I have PAID that still owe me a refund (by their identity pubkey hex). A bot broadcasts its
+    // refund to the chain on close, then acks me; I remove it here so my close can proceed.
+    private readonly HashSet<string> _fundedBots = new();
 
-    // ABSOLUTE close-ordering: when the human closes the game, EVERY bot closes and refunds the human
-    // FIRST. We hold the human's close, tell each bot to close+refund, wait for the refunds to settle
-    // (so no bot is left running and no sat is left in a 2-of-2), then close.
+    // ABSOLUTE close-ordering: when the human closes the game, EVERY funded bot closes and refunds the
+    // human FIRST. We hold the human's close, tell each bot to close+refund, wait for their on-chain
+    // refunds to be acked (so no bot is left running and no sat is left behind), then close.
     private bool _closeHandled;
     private async void OnHumanClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        if (_closeHandled || _botFunds.Count == 0) return;          // nothing outstanding → close normally
+        if (_closeHandled || _fundedBots.Count == 0) return;        // nothing outstanding → close normally
         e.Cancel = true;                                            // hold my close until bots refund
         SendGameCloseToBots();
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        while (_botFunds.Count > 0 && sw.Elapsed < System.TimeSpan.FromSeconds(15))
+        while (_fundedBots.Count > 0 && sw.Elapsed < System.TimeSpan.FromSeconds(15))
             await System.Threading.Tasks.Task.Delay(150);
         _closeHandled = true;
         Close();                                                    // now I close
@@ -883,22 +887,15 @@ public partial class MainWindow : Window
         catch (System.Exception e) { App.CrashLog("game-close-signal", e); }
     }
 
-    // The bot, on close, sent its half-signed 2-of-2 reclaim refunding us 100%. Add our signature and
-    // broadcast it — money safety: the funder always gets the funds back.
-    private async void CompleteBotRefund(byte[] payload)
+    // The bot acked that it has refunded me on-chain ("refunded|<botpub>"). Stop waiting on it.
+    private void CompleteBotRefund(byte[] payload)
     {
         try
         {
-            var r = BotFunding.ParseRefund(payload);
-            if (r is null || !_botFunds.TryGetValue(Tx.ToHex(r.LockScript), out var k)) return;
-            var final = BotFunding.CompleteRefund(r, k.priv, k.pub, k.botPub);
-            if (final is null) return;                                   // forged/invalid bot signature
-            int rpcPort = _network == "mainnet" ? 8332 : _network == "testnet" ? 18332 : 18443;
-            using var rpc = new BsvRpc("127.0.0.1", rpcPort, "e", "e");
-            await rpc.CallAsync("sendrawtransaction", Tx.ToHex(Tx.Serialize(final)));
-            _botFunds.Remove(Tx.ToHex(r.LockScript));
+            var parts = System.Text.Encoding.ASCII.GetString(payload).Split('|');
+            if (parts.Length == 2 && parts[0] == "refunded") _fundedBots.Remove(parts[1]);
         }
-        catch (System.Exception e) { App.CrashLog("bot-refund-complete", e); }
+        catch (System.Exception e) { App.CrashLog("bot-refund-ack", e); }
     }
 
     // Incoming bytes are parsed AS A TRANSACTION; the carrier addressed to us is extracted. Fully

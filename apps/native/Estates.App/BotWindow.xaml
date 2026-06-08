@@ -1,25 +1,34 @@
 <Window x:Class="Estates.App.BotWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="ESTATES · automated bot" Height="640" Width="360" Icon="appicon.ico"
+        Title="ESTATES · automated bot" Height="660" Width="380" Icon="appicon.ico"
         Background="#1a1206" WindowStartupLocation="Manual" Topmost="False"
         ResizeMode="CanMinimize" ShowInTaskbar="True">
     <!-- A BOT — fully automated, NOT a person. Narrow amber console, docked to a screen corner, never
-         over the player window. The human can fund it (Funds), watch it, and End it. It never fakes a
-         solo game; it plays its seat only inside a real funded on-chain game. -->
+         over the player window. The human FUNDS it by PAYING its address (a real on-chain payment — never
+         an import). Network is selectable (mainnet / testnet / regtest). On close it refunds the funder
+         in full and exits. It never fakes a solo game; it plays its seat only inside a real on-chain game. -->
     <StackPanel Margin="14">
         <TextBlock Text="🤖 AUTOMATED BOT" Foreground="#f5a623" FontSize="16" FontWeight="Bold"/>
         <TextBlock x:Name="BotStatus" Foreground="#ffd54f" FontSize="12" Margin="0,4,0,8" TextWrapping="Wrap"/>
 
+        <!-- network selector — same model on every screen: regtest / testnet / mainnet -->
+        <DockPanel Margin="0,0,0,8">
+            <TextBlock Text="Network:" Foreground="#b8a98a" FontSize="12" VerticalAlignment="Center" Margin="0,0,8,0" DockPanel.Dock="Left"/>
+            <ComboBox x:Name="BotNetwork" SelectionChanged="BotNetwork_Changed">
+                <ComboBoxItem Content="mainnet"/>
+                <ComboBoxItem Content="testnet"/>
+                <ComboBoxItem Content="regtest"/>
+            </ComboBox>
+        </DockPanel>
+
         <TabControl Background="#1a1206" BorderThickness="0">
             <TabItem Header="Funds">
                 <StackPanel Margin="8">
-                    <TextBlock x:Name="BotWallet" Foreground="#7bd88f" FontSize="12" FontFamily="Consolas" TextWrapping="Wrap" Margin="0,0,0,8"/>
-                    <TextBlock Text="Fund the bot — import a coin you control (txid / vout / sat):" Foreground="#b8a98a" FontSize="11" TextWrapping="Wrap"/>
-                    <TextBox x:Name="FundTxid" Background="#0f0a03" Foreground="#cfc4ad" FontFamily="Consolas" FontSize="11" BorderThickness="0" Padding="6" Margin="0,4,0,4"/>
-                    <TextBox x:Name="FundVout" Background="#0f0a03" Foreground="#cfc4ad" FontFamily="Consolas" FontSize="11" BorderThickness="0" Padding="6" Margin="0,0,0,4" Text="0"/>
-                    <TextBox x:Name="FundSat" Background="#0f0a03" Foreground="#cfc4ad" FontFamily="Consolas" FontSize="11" BorderThickness="0" Padding="6" Margin="0,0,0,4"/>
-                    <Button x:Name="FundBtn" Content="Import coin" HorizontalAlignment="Left" Click="Fund_Click"/>
+                    <TextBlock Text="Fund the bot — PAY this address (a real on-chain payment):" Foreground="#b8a98a" FontSize="11" TextWrapping="Wrap"/>
+                    <TextBox x:Name="BotAddress" IsReadOnly="True" Background="#0f0a03" Foreground="#7bd88f" FontFamily="Consolas" FontSize="12" BorderThickness="0" Padding="6" Margin="0,4,0,4" TextWrapping="Wrap"/>
+                    <Button x:Name="CopyBtn" Content="Copy address" HorizontalAlignment="Left" Click="Copy_Click"/>
+                    <TextBlock x:Name="BotWallet" Foreground="#7bd88f" FontSize="13" FontFamily="Consolas" TextWrapping="Wrap" Margin="0,10,0,0"/>
                     <TextBlock x:Name="FundMsg" Foreground="#f5a623" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/>
                 </StackPanel>
             </TabItem>

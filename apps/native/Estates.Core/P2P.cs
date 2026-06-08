@@ -25,7 +25,7 @@ using System.Collections.Concurrent;
 namespace Estates.Core;
 
 /// <summary>A peer seen alive on the network right now (from its multicast announce).</summary>
-public sealed record PeerInfo(string NodeId, string Name, string Host, int Port, string? TableId, string? TableInfo, string WalletPub, DateTime LastSeen);
+public sealed record PeerInfo(string NodeId, string Name, string Host, int Port, string? TableId, string? TableInfo, string WalletPub, DateTime LastSeen, string? RecvAddr = null);
 
 /// <summary>One direct TCP link to another peer (length-prefixed frames).</summary>
 public sealed class PeerLink : IDisposable
@@ -116,6 +116,8 @@ public sealed class P2PNode : IDisposable
     private readonly string _walletPub;   // this node's compressed secp256k1 wallet pub (hex) — chat recipient key
     /// <summary>The table this node is hosting/advertising, or null. Set by the lobby.</summary>
     public (string id, string info)? Advertised { get; set; }
+    /// <summary>This node's current receive address (so a peer can PAY it directly). Set by the app.</summary>
+    public string? ReceiveAddress { get; set; }
 
     private readonly TcpListener _listener;
     private readonly int _tcpPort;
@@ -219,7 +221,7 @@ public sealed class P2PNode : IDisposable
         {
             try
             {
-                var msg = JsonSerializer.Serialize(new AnnounceMsg(NodeId, Name, _tcpPort, Advertised?.id, Advertised?.info, _walletPub));
+                var msg = JsonSerializer.Serialize(new AnnounceMsg(NodeId, Name, _tcpPort, Advertised?.id, Advertised?.info, _walletPub, ReceiveAddress));
                 var b = Encoding.UTF8.GetBytes("ESTATES-P2P\n" + msg);
                 _udp.Send(b, b.Length, ep);
             }
@@ -242,7 +244,7 @@ public sealed class P2PNode : IDisposable
                 var a = JsonSerializer.Deserialize<AnnounceMsg>(s["ESTATES-P2P\n".Length..]);
                 if (a is null || a.NodeId == NodeId) continue;     // ignore our own announce
                 var host = from.Address.ToString();
-                var info = new PeerInfo(a.NodeId, a.Name ?? "player", host, a.TcpPort, a.TableId, a.TableInfo, a.WalletPub ?? "", DateTime.UtcNow);
+                var info = new PeerInfo(a.NodeId, a.Name ?? "player", host, a.TcpPort, a.TableId, a.TableInfo, a.WalletPub ?? "", DateTime.UtcNow, a.RecvAddr);
                 bool isNew = !_peers.ContainsKey(a.NodeId);
                 _peers[a.NodeId] = info;
                 if (isNew) OnPeerDiscovered?.Invoke(info);
@@ -343,5 +345,5 @@ public sealed class P2PNode : IDisposable
         try { _listener.Stop(); } catch { }
     }
 
-    private sealed record AnnounceMsg(string NodeId, string? Name, int TcpPort, string? TableId, string? TableInfo, string? WalletPub);
+    private sealed record AnnounceMsg(string NodeId, string? Name, int TcpPort, string? TableId, string? TableInfo, string? WalletPub, string? RecvAddr = null);
 }
