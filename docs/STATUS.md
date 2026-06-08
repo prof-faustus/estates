@@ -22,7 +22,7 @@ finished. Below: what is in vs the major work remaining.
 ## Steps to go (major)
 - [ ] Full multi-screen wizard (account types, restore flows, cosigner) — currently one step
 - [ ] Table parity: per-row labels, right-click actions, sorting/columns to ElectrumSV depth
-- [ ] Address/transaction LABELS (editable, persisted) across History/Coins/Destinations
+- [x] Address/transaction LABELS (editable, persisted) + Labels tab; shown in Coins
 - [ ] Unit selector (Bitcoin/BSV/mBSV) applied everywhere; fiat
 - [ ] On-chain NFT mint/transfer as real txs (TxType.NftMint/Transfer), not local-only records
 - [ ] QR: generate (Receive) + scan (Send/BIP270)

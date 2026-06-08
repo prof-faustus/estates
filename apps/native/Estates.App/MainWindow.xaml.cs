@@ -416,9 +416,9 @@ public partial class MainWindow : Window
         var balImm = new TextBlock { Foreground = B("#8ab4f8"), FontSize = 13, Margin = new Thickness(0, 0, 0, 4) };
         void ShowBal()
         {
-            bal.Text = $"Spendable: {w.Balance():n0} sat";
-            balPend.Text = $"Pending (0-conf): {w.PendingSats:n0} sat";
-            balImm.Text = $"Immature (mined, <100 conf): {w.ImmatureSats:n0} sat";
+            bal.Text = $"Spendable: {Fmt(w.Balance())}";
+            balPend.Text = $"Pending (0-conf): {Fmt(w.PendingSats)}";
+            balImm.Text = $"Immature (mined, <100 conf): {Fmt(w.ImmatureSats)}";
         }
         ShowBal();
         info.Children.Add(bal); info.Children.Add(balPend); info.Children.Add(balImm);
@@ -431,7 +431,7 @@ public partial class MainWindow : Window
         string spvPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"estates_spv_{_network}.dat");
         try { spv.Load(spvPath); } catch { }
         var spvBal = new TextBlock { Foreground = B("#8ab4f8"), FontSize = 16, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 2, 0, 6) };
-        void ShowSpv() => spvBal.Text = $"On-chain (SPV): {spv.Balance():n0} sat   ·   {spv.CoinCount} coin(s)";
+        void ShowSpv() => spvBal.Text = $"On-chain (SPV): {Fmt(spv.Balance())}   ·   {spv.CoinCount} coin(s)";
         ShowSpv();
         info.Children.Add(spvBal);
         async void SpvSyncNow()
@@ -909,10 +909,14 @@ public partial class MainWindow : Window
         var status = new System.Windows.Controls.Primitives.StatusBar { Background = B("#2b2d31"), Foreground = B("#9aa0a6") };
         var stBal = new TextBlock { Foreground = B("#7bd88f"), FontWeight = FontWeights.SemiBold };
         var stNet = new TextBlock { Foreground = B("#8ab4f8") };
+        var unitBox = new ComboBox { MinWidth = 80 }; foreach (var u in new[] { "sat", "BSV", "mBSV" }) unitBox.Items.Add(u); unitBox.SelectedItem = _unit;
+        unitBox.SelectionChanged += (_, _) => { _unit = unitBox.SelectedItem?.ToString() ?? "sat"; };
         status.Items.Add(new System.Windows.Controls.Primitives.StatusBarItem { Content = stBal });
         status.Items.Add(new Separator());
         status.Items.Add(new System.Windows.Controls.Primitives.StatusBarItem { Content = stNet });
-        void ShowStatus() { try { stBal.Text = $"  Balance: {LoadSpvFromDisk(w).Balance():n0} sat"; stNet.Text = $"{_network} · SPV (IP-to-IP + Bloom) · 🔒 encrypted"; } catch { } }
+        status.Items.Add(new Separator());
+        status.Items.Add(new System.Windows.Controls.Primitives.StatusBarItem { Content = unitBox });
+        void ShowStatus() { try { stBal.Text = $"  Balance: {Fmt(LoadSpvFromDisk(w).Balance())}"; stNet.Text = $"{_network} · SPV (IP-to-IP + Bloom) · 🔒 encrypted"; } catch { } }
         ShowStatus(); auto.Tick += (_, _) => ShowStatus();
 
         var shell = new DockPanel { LastChildFill = true };
@@ -1221,6 +1225,8 @@ public partial class MainWindow : Window
 
     // ---- in-chat commands (same set for player↔player and player↔bot — pay is pay) ----
     private const int RecvWatch = 50;            // addresses we watch/derive (fresh per request, all SPV-synced)
+    private string _unit = "sat";                 // display unit: sat / BSV / mBSV (ElectrumSV unit options)
+    private string Fmt(long sat) => _unit == "BSV" ? (sat / 1e8).ToString("0.########") + " BSV" : _unit == "mBSV" ? (sat / 1e5).ToString("0.###") + " mBSV" : sat.ToString("n0") + " sat";
     private int _recvIndex = 1;                  // next fresh receive address (index 0 = primary/refund)
     private int RpcPort() => _network == "mainnet" ? 8332 : _network == "testnet" ? 18332 : 18443;
     private string SpvPathFor() => System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"estates_spv_{_network}.dat");
