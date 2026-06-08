@@ -1142,7 +1142,24 @@ public partial class MainWindow : Window
         ident.Children.Add(L("Your IDENTITY is your name + your base identity key. Set a handle (e.g. Bob); peers can then find you, chat to you, and PAY you by that identity — not just by address."));
         var idHandle = F(); idHandle.Text = _displayName; var idMsg = O();
         var idSave = Btn("Set / save my identity handle");
-        idSave.Click += (_, _) => { _displayName = idHandle.Text.Trim(); SaveHandle(_displayName); idMsg.Text = $"identity saved + advertised as '{_displayName}'"; RefreshNodes(); };
+        idSave.Click += (_, _) =>
+        {
+            _displayName = idHandle.Text.Trim();
+            if (_displayName.Length == 0) { idMsg.Text = "enter a pseudonym to set your identity"; return; }
+            SaveHandle(_displayName);
+            try
+            {
+                byte[] idPub = w.ChildPub(0); byte[] attPriv = w.ChildPriv(1); byte[] attPub = Secp256k1.PublicKey(attPriv);
+                string fa = Address.P2pkh(Recovery.Hash160(attPub), BsvNet.Mainnet);
+                string prof = "{\"pseudonym\":\"" + _displayName + "\",\"identity\":\"" + Tx.ToHex(idPub) + "\",\"wallet_address\":\"" + fa + "\",\"attestation_pub\":\"" + Tx.ToHex(attPub) + "\",\"created\":\"" + DateTime.UtcNow.ToString("o") + "\"}";
+                byte[] sig = EcdsaSign.Sign(attPriv, System.Text.Encoding.UTF8.GetBytes(prof));
+                string dir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Estates"); System.IO.Directory.CreateDirectory(dir);
+                System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "identity.json"), prof + "\n" + Tx.ToHex(sig));
+                idMsg.Text = "identity SET + registered as '" + _displayName + "' (signed, saved)";
+            }
+            catch (Exception ex) { idMsg.Text = ex.Message; }
+            RefreshNodes();
+        };
         ident.Children.Add(L("handle (your identity name)")); ident.Children.Add(idHandle); ident.Children.Add(idSave); ident.Children.Add(idMsg);
         ident.Children.Add(L("Identity key (index 0 — ECDH derivation root, NEVER an address; all addresses are HMAC hash-chain sub-keys at index ≥ 1)"));
         var idKey = F(); idKey.IsReadOnly = true; idKey.Text = Tx.ToHex(w.ChildPub(0)); ident.Children.Add(idKey);

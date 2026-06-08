@@ -182,7 +182,15 @@ public sealed class WalletWizard : Window
         }
         var pwWin = new PromptPw();
         if (pwWin.ShowDialog() != true) return;
-        try { var s = WalletStore.Open(path, pwWin.Value); if (s is null) { _msg.Text = "wrong password, or not a wallet file"; return; } Seed = s; Password = pwWin.Value; DialogResult = true; Close(); }
+        try
+        {
+            var s = WalletStore.Open(path, pwWin.Value);
+            if (s is null) { _msg.Text = "wrong password, or not a wallet file"; return; }
+            // EXISTING wallet but NOT yet registered → force identity registration (pseudonym + email).
+            string idjson = System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData), "Estates", "identity.json");
+            if (!System.IO.File.Exists(idjson)) { _pending = s; Password = pwWin.Value; _step = Step.Register; Render(); return; }
+            Seed = s; Password = pwWin.Value; DialogResult = true; Close();
+        }
         catch (System.Exception e) { _msg.Text = e.Message; }
     }
 
