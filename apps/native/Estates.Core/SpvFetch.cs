@@ -66,6 +66,46 @@ public static class SpvFetch
         catch (Exception e) { return new Result(null, "public-proof", "error: " + e.Message); }
     }
 
+    /// <summary>Scan the wallet's own addresses for incoming coins: for each address, ask the network which
+    /// UTXOs pay it, fetch each one's proof, VERIFY locally, and credit it. This is the "it just works"
+    /// path — the user never types a txid. P2P/bloom is the eventual primary; the public UTXO+proof index
+    /// is the backup used here. Returns (coinsCredited, satsCredited, addressesScanned, detail).</summary>
+    public static async Task<(int coins, long sats, int scanned, string detail)> ScanAndCreditAsync(
+        IReadOnlyList<string> addresses, BsvNet net, SpvWallet spv, HttpClient http,
+        Action<string>? progress = null, CancellationToken ct = default)
+    {
+        string api = ApiBase(net);
+        if (api.Length == 0) return (0, 0, 0, "no public proof source for this network (use a delivered envelope)");
+        int coins = 0; long sats = 0; int scanned = 0;
+        var seenTx = new HashSet<string>();
+        foreach (var addr in addresses)
+        {
+            ct.ThrowIfCancellationRequested();
+            scanned++;
+            progress?.Invoke($"scanning address {scanned}/{addresses.Count}…");
+            List<string> txids = new();
+            try
+            {
+                using var doc = JsonDocument.Parse(await http.GetStringAsync($"{api}/address/{addr}/unspent", ct).ConfigureAwait(false));
+                foreach (var u in doc.RootElement.EnumerateArray()) txids.Add(u.GetProperty("tx_hash").GetString()!);
+            }
+            catch { await Task.Delay(1400, ct).ConfigureAwait(false); continue; }   // rate-limit friendly; skip on error
+            await Task.Delay(1000, ct).ConfigureAwait(false);
+            foreach (var txid in txids)
+            {
+                if (!seenTx.Add(txid)) continue;
+                var res = await FetchAsync(txid, net, http, ct).ConfigureAwait(false);
+                if (res.Env is not null)
+                {
+                    long before = spv.Balance();
+                    if (spv.Receive(res.Env) && spv.Balance() > before) { coins++; sats += spv.Balance() - before; progress?.Invoke($"credited {sats:n0} sat so far…"); }
+                }
+                await Task.Delay(1000, ct).ConfigureAwait(false);
+            }
+        }
+        return (coins, sats, scanned, coins > 0 ? $"credited {coins} coin(s), {sats:n0} sat" : "no new coins found for your addresses");
+    }
+
     /// <summary>Reconstruct the canonical 80-byte block header from the public header fields and confirm it
     /// hashes to the claimed block hash (so a lying API can't substitute a header).</summary>
     private static async Task<byte[]> FetchHeader80Async(string api, string blockHash, HttpClient http, CancellationToken ct)

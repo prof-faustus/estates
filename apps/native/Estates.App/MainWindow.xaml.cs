@@ -829,6 +829,29 @@ public partial class MainWindow : Window
             finally { fxBtn.IsEnabled = true; }
         };
         recv.Children.Add(L("confirmed txid (64 hex)")); recv.Children.Add(fxTxid); recv.Children.Add(fxBtn); recv.Children.Add(fxOut);
+
+        // ONE-CLICK: find ALL my coins. Scans this wallet's addresses on the network, fetches each coin's
+        // proof, verifies locally, and credits — the user never needs a txid. This is the "it just works".
+        recv.Children.Add(new TextBlock { Text = "Find all my coins (scan the network for payments to my addresses)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 12, 0, 2) });
+        var scanOut = O(); var scanCoinsBtn = Btn("Scan for my coins");
+        scanCoinsBtn.Click += async (_, _) =>
+        {
+            scanCoinsBtn.IsEnabled = false;
+            try
+            {
+                BsvNet net = _network == "mainnet" ? BsvNet.Mainnet : _network == "testnet" ? BsvNet.Testnet : BsvNet.Regtest;
+                var addrs = new List<string>();
+                for (int i = FirstAddr; i <= RecvWatch; i++) addrs.Add(w.AddressAt(i));
+                var spv2 = LoadSpvFromDisk(w);
+                var res = await SpvFetch.ScanAndCreditAsync(addrs, net, spv2, _http,
+                    msg => Dispatcher.Invoke(() => scanOut.Text = msg));
+                if (res.coins > 0) { spv2.Save(SpvPathFor()); ShowSpv(); LogEvent("scan", res.detail); }   // Coins/History auto-refresh on the 4s tick
+                scanOut.Text = res.detail + $"  (scanned {res.scanned} addresses)";
+            }
+            catch (Exception e) { scanOut.Text = e.Message; }
+            finally { scanCoinsBtn.IsEnabled = true; }
+        };
+        recv.Children.Add(scanCoinsBtn); recv.Children.Add(scanOut);
         tabs.Items.Add(Tab("Receive", recv));
 
         // ===== REQUESTS — saved payment requests (address / amount / memo) =====
