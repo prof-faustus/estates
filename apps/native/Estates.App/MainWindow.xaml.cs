@@ -985,6 +985,9 @@ public partial class MainWindow : Window
         var idProveMsg = F(); var idProveOut = O(); var idProve = Btn("Prove identity (sign a challenge)");
         idProve.Click += (_, _) => { try { byte[] sig = EcdsaSign.Sign(w.ChildPriv(0), System.Text.Encoding.UTF8.GetBytes(idProveMsg.Text)); idProveOut.Text = $"identity {Tx.ToHex(w.ChildPub(0))}\nsig {Tx.ToHex(sig)}\n(anyone can verify this proves you control this identity)"; } catch (Exception e) { idProveOut.Text = e.Message; } };
         ident.Children.Add(L("prove ownership — sign a challenge with your identity key")); ident.Children.Add(idProveMsg); ident.Children.Add(idProve); ident.Children.Add(idProveOut);
+        var vIdPub = F(); var vIdMsg = F(); var vIdSig = F(); var vIdOut = O(); var vIdBtn = Btn("Verify an identity proof");
+        vIdBtn.Click += (_, _) => { try { vIdOut.Text = EcdsaSign.Verify(Tx.FromHex(vIdPub.Text.Trim()), System.Text.Encoding.UTF8.GetBytes(vIdMsg.Text), Tx.FromHex(vIdSig.Text.Trim())) ? "VALID — they control that identity" : "INVALID"; } catch (Exception e) { vIdOut.Text = e.Message; } };
+        ident.Children.Add(L("verify an identity proof — identity pubkey / challenge / signature")); ident.Children.Add(vIdPub); ident.Children.Add(vIdMsg); ident.Children.Add(vIdSig); ident.Children.Add(vIdBtn); ident.Children.Add(vIdOut);
         ident.Children.Add(L("How it's used: pay an identity (\\pay <handle> <sat>), chat direct/broadcast to identities, and play the game as this identity. The identity is your on-chain NFT card (see NFTs tab)."));
         tabs.Items.Add(Tab("Identity", ident));
 
