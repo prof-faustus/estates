@@ -809,7 +809,16 @@ public partial class MainWindow : Window
         var menu = new Menu { Background = B("#2b2d31"), Foreground = B("#e6e6e6") };
         var file = MI("_File");
         file.Items.Add(MI("_Open…", () => Sel("Info"))); file.Items.Add(MI("_New / Restore…", () => relock()));
-        file.Items.Add(MI("_Save Copy (backup seed)", () => Sel("Info"))); file.Items.Add(new Separator());
+        file.Items.Add(MI("_Save Copy (backup encrypted wallet)", () =>
+        {
+            try
+            {
+                var dlg = new Microsoft.Win32.SaveFileDialog { Title = "Backup wallet", Filter = "wallet (*.dat)|*.dat", FileName = "estates-wallet-backup.dat" };
+                if (dlg.ShowDialog() == true) { System.IO.File.Copy(WalletStore.DefaultPath(), dlg.FileName, true); System.Windows.MessageBox.Show("Encrypted wallet backed up. Keep it safe — it still needs your password.", "Save Copy"); }
+            }
+            catch (Exception e) { System.Windows.MessageBox.Show(e.Message, "Save Copy"); }
+        }));
+        file.Items.Add(new Separator());
         file.Items.Add(MI("_Quit", () => relock()));
         var wallet = MI("_Wallet");
         wallet.Items.Add(MI("_Information", () => Sel("Info")));
