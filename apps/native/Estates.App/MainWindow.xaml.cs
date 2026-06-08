@@ -581,7 +581,20 @@ public partial class MainWindow : Window
         recv.Children.Add(L("requested amount (sat, optional)")); recv.Children.Add(rAmt);
         var rrow = new StackPanel { Orientation = Orientation.Horizontal }; rrow.Children.Add(rNew); rrow.Children.Add(rCopy); rrow.Children.Add(rUri);
         recv.Children.Add(rrow); recv.Children.Add(L("payment request / URI (copyable; paste into a payer's Send)")); recv.Children.Add(rReq);
+        var rMemo = F(); var rSave = Btn("Save request");
+        rSave.Click += (_, _) => { long.TryParse(rAmt.Text.Trim(), out long sa); _requests.Add((ra.Text, sa, rMemo.Text.Trim())); SaveRequestsDisk(); rReq.Text = "request saved (see Requests tab)"; };
+        recv.Children.Add(L("memo (optional)")); recv.Children.Add(rMemo); recv.Children.Add(rSave);
         tabs.Items.Add(Tab("Receive", recv));
+
+        // ===== REQUESTS — saved payment requests (address / amount / memo) =====
+        var reqp = new StackPanel();
+        reqp.Children.Add(new TextBlock { Text = "Requests — your saved payment requests", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        if (!_reqLoaded) { LoadRequestsDisk(); _reqLoaded = true; }
+        var reqGrid = Grid4("Address", "Amount (sat)", "Memo", "", 260);
+        void LoadReq() { reqGrid.ItemsSource = _requests.Select(r => new Row4 { A = r.addr, B = r.sat > 0 ? r.sat.ToString("n0") : "", C = r.memo }).ToList(); }
+        LoadReq(); var reqRefresh = Btn("Refresh"); reqRefresh.Click += (_, _) => LoadReq();
+        reqp.Children.Add(reqRefresh); reqp.Children.Add(reqGrid);
+        tabs.Items.Add(Tab("Requests", reqp));
 
         // (Addresses are listed in the Destinations tab, with derivation paths, starting at index 1 —
         //  index 0 is the identity/base key and is never shown as an address.)
@@ -897,6 +910,13 @@ public partial class MainWindow : Window
     // frozen coins (coin control) + a session transaction log for the History tab.
     private readonly HashSet<string> _frozenCoins = new();
     private readonly List<Row4> _txLog = new();
+
+    // Persistent payment requests at %APPDATA%/Estates/requests.txt — "address\tsat\tmemo" per line.
+    private readonly List<(string addr, long sat, string memo)> _requests = new();
+    private bool _reqLoaded;
+    private static string RequestsPath() { string d = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Estates"); System.IO.Directory.CreateDirectory(d); return System.IO.Path.Combine(d, "requests.txt"); }
+    private void LoadRequestsDisk() { try { if (!System.IO.File.Exists(RequestsPath())) return; foreach (var ln in System.IO.File.ReadAllLines(RequestsPath())) { var p = ln.Split('\t'); if (p.Length == 3 && long.TryParse(p[1], out long s)) _requests.Add((p[0], s, p[2])); } } catch { } }
+    private void SaveRequestsDisk() { try { System.IO.File.WriteAllLines(RequestsPath(), _requests.Select(r => r.addr + "\t" + r.sat + "\t" + r.memo)); } catch { } }
 
     // Persistent NFT deeds at %APPDATA%/Estates/nfts.txt — "id\tname\ttxid" per line.
     private bool _nftsLoaded;
