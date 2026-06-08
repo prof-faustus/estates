@@ -956,6 +956,30 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("filterload: payload round-trips the Bloom filter", parsed is not null && Tx.ToHex(parsed.Payload) == Tx.ToHex(payload));
 }
 
+// SPV ENVELOPE end-to-end: a single-tx block — build the tx, put its merkle root in an 80-byte header
+// (regtest easy bits so PoW passes), make the envelope, and it VERIFIES (proof-of-work + merkle).
+{
+    var tx = new NativeTx(2, new[] { new TxInputN(new string('1', 64), 0, System.Array.Empty<byte>(), 0xffffffff) }, new[] { new TxOutputN(5000, NodeWallet.P2pkhScript(new byte[20])) }, 0);
+    string txidDisp = Tx.Txid(tx);
+    byte[] rootInternal = Tx.FromHex(txidDisp); System.Array.Reverse(rootInternal);
+    var hdr = new byte[80];
+    hdr[0] = 2;                                              // version
+    System.Array.Copy(rootInternal, 0, hdr, 36, 32);        // merkle root (single tx)
+    hdr[72] = 0xff; hdr[73] = 0xff; hdr[74] = 0x7f; hdr[75] = 0x20;   // bits 0x207fffff (regtest max target)
+    var bf = BlockMerkle.BranchFor(new List<string> { txidDisp }, txidDisp);
+    byte[] raw = Tx.Serialize(tx);
+    bool verified = false;
+    if (bf is not null)
+        for (uint nonce = 0; nonce < 500000 && !verified; nonce++)   // grind PoW (regtest target → found in a few tries)
+        {
+            hdr[76] = (byte)nonce; hdr[77] = (byte)(nonce >> 8); hdr[78] = (byte)(nonce >> 16); hdr[79] = (byte)(nonce >> 24);
+            if (new SpvEnvelope(raw, hdr, bf.Value.branch, bf.Value.index).Verify()) verified = true;
+        }
+    X("spv-envelope: a single-tx envelope verifies (PoW grind + merkle)", verified);
+    var hdrBad = (byte[])hdr.Clone(); hdrBad[36] ^= 0xff;    // corrupt the merkle root, keep the valid nonce
+    X("spv-envelope: a wrong merkle root fails verification", bf is not null && !new SpvEnvelope(raw, hdrBad, bf.Value.branch, bf.Value.index).Verify());
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
