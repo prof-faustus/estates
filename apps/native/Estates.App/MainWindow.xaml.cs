@@ -722,7 +722,50 @@ public partial class MainWindow : Window
         auto.Tick += (_, _) => { try { ShowBal(); ShowSpv(); SpvSyncNow(); LoadCoins(); LoadHistory(); } catch { } };
         auto.Start();
         tabs.Unloaded += (_, _) => auto.Stop();
-        return tabs;
+
+        // ===== ElectrumSVP-style SHELL ported to WPF: menu bar (File/Wallet/Account/View/Tools/Help) +
+        // status bar, wrapping the tab views — the look-and-feel of ElectrumSV. =====
+        void Sel(string header) { foreach (TabItem t in tabs.Items) if ((t.Header as string) == header) { tabs.SelectedItem = t; return; } }
+        MenuItem MI(string h, System.Action? a = null) { var m = new MenuItem { Header = h }; if (a is not null) m.Click += (_, _) => { try { a(); } catch (Exception e) { App.CrashLog("menu", e); } }; return m; }
+
+        var menu = new Menu { Background = B("#2b2d31"), Foreground = B("#e6e6e6") };
+        var file = MI("_File");
+        file.Items.Add(MI("_Open…", () => Sel("Info"))); file.Items.Add(MI("_New / Restore…", () => relock()));
+        file.Items.Add(MI("_Save Copy (backup seed)", () => Sel("Info"))); file.Items.Add(new Separator());
+        file.Items.Add(MI("_Quit", () => relock()));
+        var wallet = MI("_Wallet");
+        wallet.Items.Add(MI("_Information", () => Sel("Info"))); wallet.Items.Add(MI("_Password…", () => Sel("Info")));
+        var contactsMenu = MI("Contacts"); contactsMenu.Items.Add(MI("_New…", () => Sel("Contacts") )); wallet.Items.Add(contactsMenu);
+        wallet.Items.Add(MI("_Find", () => Sel("History")));
+        var view = MI("_View");
+        foreach (TabItem t in tabs.Items) { string hh = t.Header as string ?? ""; view.Items.Add(MI(hh, () => Sel(hh))); }
+        var toolsMenu = MI("_Tools");
+        toolsMenu.Items.Add(MI("_Preferences", () => Sel("Network"))); toolsMenu.Items.Add(MI("_Network", () => Sel("Network")));
+        toolsMenu.Items.Add(new Separator());
+        toolsMenu.Items.Add(MI("_Sign / verify message", () => Sel("Tools"))); toolsMenu.Items.Add(MI("_Encrypt / decrypt message", () => Sel("Tools")));
+        toolsMenu.Items.Add(new Separator());
+        toolsMenu.Items.Add(MI("_Pay to many", () => Sel("Send"))); toolsMenu.Items.Add(MI("_Sweep Private Key", () => Sel("Tools")));
+        var loadTx = MI("_Load transaction");
+        loadTx.Items.Add(MI("From _text", () => Sel("Tools"))); loadTx.Items.Add(MI("From the _blockchain", () => Sel("Tools"))); loadTx.Items.Add(MI("From _QR code", () => Sel("Tools")));
+        toolsMenu.Items.Add(loadTx);
+        var helpMenu = MI("_Help");
+        helpMenu.Items.Add(MI("_About", () => System.Windows.MessageBox.Show("ESTATES wallet — ElectrumSVP-class SPV wallet (Craig's SPV: IP-to-IP envelopes + Bloom). Network: " + _network, "About")));
+        helpMenu.Items.Add(MI("Official _website", () => { try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("http://electrumsv.io") { UseShellExecute = true }); } catch { } }));
+        menu.Items.Add(file); menu.Items.Add(wallet); menu.Items.Add(view); menu.Items.Add(toolsMenu); menu.Items.Add(helpMenu);
+
+        var status = new System.Windows.Controls.Primitives.StatusBar { Background = B("#2b2d31"), Foreground = B("#9aa0a6") };
+        var stBal = new TextBlock { Foreground = B("#7bd88f"), FontWeight = FontWeights.SemiBold };
+        var stNet = new TextBlock { Foreground = B("#8ab4f8") };
+        status.Items.Add(new System.Windows.Controls.Primitives.StatusBarItem { Content = stBal });
+        status.Items.Add(new Separator());
+        status.Items.Add(new System.Windows.Controls.Primitives.StatusBarItem { Content = stNet });
+        void ShowStatus() { try { stBal.Text = $"  Balance: {LoadSpvFromDisk(w).Balance():n0} sat"; stNet.Text = $"{_network} · SPV (IP-to-IP + Bloom) · 🔒 encrypted"; } catch { } }
+        ShowStatus(); auto.Tick += (_, _) => ShowStatus();
+
+        var shell = new DockPanel { LastChildFill = true };
+        DockPanel.SetDock(menu, Dock.Top); DockPanel.SetDock(status, Dock.Bottom);
+        shell.Children.Add(menu); shell.Children.Add(status); shell.Children.Add(tabs);
+        return shell;
     }
 
     // frozen coins (coin control) + a session transaction log for the History tab.
