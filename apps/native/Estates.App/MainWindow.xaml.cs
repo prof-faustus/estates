@@ -258,7 +258,7 @@ public partial class MainWindow : Window
             if (bought is int pid)   // buying records the deed NFT to YOUR wallet
             {
                 string nm = Params.Instance.Board[pid].Name;
-                _heldNfts.Add((pid, nm, "local"));
+                _heldNfts.Add((pid, nm, "local")); SaveNftsDisk();
                 _game.Log.Add($"deed '{nm}' recorded to your wallet");
             }
         }
@@ -816,6 +816,7 @@ public partial class MainWindow : Window
             if (_heldNfts.Count == 0)
                 nftHost.Children.Add(new TextBlock { Text = "No deeds yet — win/buy a property in a game and its deed NFT lands here, owned by your identity.", Foreground = B("#9aa0a6"), FontSize = 12, TextWrapping = TextWrapping.Wrap });
         }
+        if (!_nftsLoaded) { LoadNftsDisk(); _nftsLoaded = true; LoadNfts(); }
         LoadNfts(); var nrb = Btn("Refresh"); nrb.Click += (_, _) => LoadNfts();
         nft.Children.Add(nrb); nft.Children.Add(nftHost); tabs.Items.Add(Tab("NFTs", nft));
 
@@ -883,6 +884,12 @@ public partial class MainWindow : Window
     // frozen coins (coin control) + a session transaction log for the History tab.
     private readonly HashSet<string> _frozenCoins = new();
     private readonly List<Row4> _txLog = new();
+
+    // Persistent NFT deeds at %APPDATA%/Estates/nfts.txt — "id\tname\ttxid" per line.
+    private bool _nftsLoaded;
+    private static string NftsPath() { string d = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Estates"); System.IO.Directory.CreateDirectory(d); return System.IO.Path.Combine(d, "nfts.txt"); }
+    private void LoadNftsDisk() { try { if (!System.IO.File.Exists(NftsPath())) return; foreach (var ln in System.IO.File.ReadAllLines(NftsPath())) { var p = ln.Split('\t'); if (p.Length == 3 && int.TryParse(p[0], out int id) && !_heldNfts.Any(n => n.id == id)) _heldNfts.Add((id, p[1], p[2])); } } catch { } }
+    private void SaveNftsDisk() { try { System.IO.File.WriteAllLines(NftsPath(), _heldNfts.Select(n => n.id + "\t" + n.name + "\t" + n.txid)); } catch { } }
 
     // Persistent contacts (named payees) at %APPDATA%/Estates/contacts.txt — one "name\taddress" per line.
     private bool _contactsLoaded;
