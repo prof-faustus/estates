@@ -665,6 +665,12 @@ public partial class MainWindow : Window
         }
         LoadHistory(); var hr = Btn("Refresh"); hr.Click += (_, _) => LoadHistory();
         hgrid.MouseDoubleClick += (_, _) => { if (hgrid.SelectedItem is Row4 r) System.Windows.MessageBox.Show($"Type:    {r.A}\nAmount:  {r.B} sat\nTxid:    {r.C}\nDetail:  {r.D}", "Transaction"); };
+        var hmenu = new ContextMenu();
+        var hCopy = new MenuItem { Header = "Copy txid" };
+        hCopy.Click += (_, _) => { if (hgrid.SelectedItem is Row4 r) { try { System.Windows.Clipboard.SetText(r.C.TrimEnd('…', ' ')); } catch { } } };
+        var hLabel = new MenuItem { Header = "Label this transaction" };
+        hLabel.Click += (_, _) => { if (hgrid.SelectedItem is Row4 r) { if (!_labelsLoaded) { LoadLabelsDisk(); _labelsLoaded = true; } var t = Prompt("Label for " + r.C, Label(r.C)); if (t is not null) { _labels[r.C] = t; SaveLabelsDisk(); } } };
+        hmenu.Items.Add(hCopy); hmenu.Items.Add(hLabel); hgrid.ContextMenu = hmenu;
         hist.Children.Add(new TextBlock { Text = "Transaction history (Craig's SPV — coins arrive IP-to-IP with their merkle proof)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
         hist.Children.Add(hr); hist.Children.Add(hgrid);
         tabs.Items.Add(Tab("History", hist));
