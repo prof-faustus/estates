@@ -784,6 +784,22 @@ public partial class MainWindow : Window
         }
         hSearch.TextChanged += (_, _) => LoadHistory();
         LoadHistory(); var hr = Btn("Refresh"); hr.Click += (_, _) => LoadHistory();
+        var hCsv = Btn("Export to CSV");
+        hCsv.Click += (_, _) =>
+        {
+            try
+            {
+                var dlg = new Microsoft.Win32.SaveFileDialog { Title = "Export transaction history", Filter = "CSV (*.csv)|*.csv", FileName = "estates-history.csv" };
+                if (dlg.ShowDialog() != true) return;
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine("type,amount_sat,txid,detail,label");
+                foreach (var r in (System.Collections.Generic.IEnumerable<Row4>)hgrid.ItemsSource)
+                    sb.AppendLine("\"" + r.A.Replace("\"", "\"\"") + "\",\"" + r.B.Replace("\"", "\"\"") + "\",\"" + r.C.Replace("\"", "\"\"") + "\",\"" + r.D.Replace("\"", "\"\"") + "\",\"" + Label(r.C).Replace("\"", "\"\"") + "\"");
+                System.IO.File.WriteAllText(dlg.FileName, sb.ToString());
+                System.Windows.MessageBox.Show("Exported " + ((System.Collections.Generic.ICollection<Row4>)hgrid.ItemsSource).Count + " rows to\n" + dlg.FileName, "History exported");
+            }
+            catch (Exception e) { System.Windows.MessageBox.Show(e.Message); }
+        };
         hgrid.MouseDoubleClick += (_, _) => { if (hgrid.SelectedItem is Row4 r) System.Windows.MessageBox.Show($"Type:    {r.A}\nAmount:  {r.B} sat\nTxid:    {r.C}\nDetail:  {r.D}", "Transaction"); };
         var hmenu = new ContextMenu();
         var hCopy = new MenuItem { Header = "Copy txid" };
@@ -793,7 +809,8 @@ public partial class MainWindow : Window
         hmenu.Items.Add(hCopy); hmenu.Items.Add(hLabel); hgrid.ContextMenu = hmenu;
         hist.Children.Add(new TextBlock { Text = "Transaction history (Craig's SPV — coins arrive IP-to-IP with their merkle proof)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
         hist.Children.Add(L("search (type/amount/txid/label)")); hist.Children.Add(hSearch);
-        hist.Children.Add(hr); hist.Children.Add(hgrid);
+        var hRow = new StackPanel { Orientation = Orientation.Horizontal }; hRow.Children.Add(hr); hRow.Children.Add(hCsv);
+        hist.Children.Add(hRow); hist.Children.Add(hgrid);
         tabs.Items.Add(Tab("History", hist));
 
         // ===== COINS — every UTXO as a TABLE; freeze/unfreeze (coin control); double-click toggles freeze =====
@@ -951,6 +968,29 @@ public partial class MainWindow : Window
         var ltxid = F(); var lfetch = Btn("Fetch from blockchain (by txid)");
         lfetch.Click += async (_, _) => { try { using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e"); var r = await rpc.CallAsync("getrawtransaction", ltxid.Text.Trim()); if (r is null) { lro.Text = "not found on node"; return; } lrt.Text = r.Value.GetString() ?? ""; lro.Text = "fetched — press Decode / preview"; } catch (Exception e) { lro.Text = e.Message; } };
         tools.Children.Add(L("…or fetch a tx by txid")); tools.Children.Add(ltxid); tools.Children.Add(lfetch);
+
+        tools.Children.Add(new TextBlock { Text = "Change wallet password (re-encrypt your keys, AES-256-GCM)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 12, 0, 0) });
+        var cpo = O(); var cpb = Btn("Change password…");
+        cpb.Click += (_, _) =>
+        {
+            try
+            {
+                string? oldp = PromptPassword("Enter your CURRENT password");
+                if (oldp is null) return;
+                var seed = WalletStore.Open(WalletStore.DefaultPath(), oldp);
+                if (seed is null) { cpo.Text = "current password is wrong"; return; }
+                string? n1 = PromptPassword("Choose a NEW password");
+                if (n1 is null) return;
+                string? n2 = PromptPassword("Confirm the NEW password");
+                if (n2 is null) return;
+                if (n1.Length == 0) { cpo.Text = "the new password cannot be empty"; return; }
+                if (n1 != n2) { cpo.Text = "the new passwords do not match"; return; }
+                WalletStore.Create(WalletStore.DefaultPath(), seed, n1);   // same seed, re-encrypted with the new password
+                cpo.Text = "password changed — your keys are re-encrypted. Use the new password next time you open the wallet.";
+            }
+            catch (Exception e) { cpo.Text = e.Message; }
+        };
+        tools.Children.Add(cpb); tools.Children.Add(cpo);
         tabs.Items.Add(Tab("Tools", tools));
 
         // ===== TRANSACTIONS — this session's unpublished/just-sent transactions (ElectrumSV's 2nd tab) =====
@@ -1002,7 +1042,34 @@ public partial class MainWindow : Window
         LoadLab();
         var labKey = F(); var labVal = F(); var labMsg = O(); var labAdd = Btn("Set label");
         labAdd.Click += (_, _) => { var k = labKey.Text.Trim(); if (k.Length == 0) { labMsg.Text = "enter a key (txid or address)"; return; } _labels[k] = labVal.Text.Trim(); SaveLabelsDisk(); LoadLab(); LoadCoins(); labMsg.Text = "label saved"; labKey.Clear(); labVal.Clear(); };
-        labp.Children.Add(labGrid); labp.Children.Add(L("key (txid or address)")); labp.Children.Add(labKey); labp.Children.Add(L("label")); labp.Children.Add(labVal); labp.Children.Add(labAdd); labp.Children.Add(labMsg);
+        var labExport = Btn("Export labels (JSON)"); var labImport = Btn("Import labels (JSON)");
+        labExport.Click += (_, _) =>
+        {
+            try
+            {
+                var dlg = new Microsoft.Win32.SaveFileDialog { Title = "Export labels", Filter = "JSON (*.json)|*.json", FileName = "estates-labels.json" };
+                if (dlg.ShowDialog() != true) return;
+                var sb = new System.Text.StringBuilder(); sb.Append('{'); bool first = true;
+                foreach (var kv in _labels) { if (!first) sb.Append(','); first = false; sb.Append('"').Append(kv.Key.Replace("\\", "\\\\").Replace("\"", "\\\"")).Append("\":\"").Append(kv.Value.Replace("\\", "\\\\").Replace("\"", "\\\"")).Append('"'); }
+                sb.Append('}'); System.IO.File.WriteAllText(dlg.FileName, sb.ToString());
+                labMsg.Text = "exported " + _labels.Count + " labels to " + dlg.FileName;
+            }
+            catch (Exception e) { labMsg.Text = e.Message; }
+        };
+        labImport.Click += (_, _) =>
+        {
+            try
+            {
+                var dlg = new Microsoft.Win32.OpenFileDialog { Title = "Import labels", Filter = "JSON (*.json)|*.json|all files|*.*" };
+                if (dlg.ShowDialog() != true) return;
+                using var doc = System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(dlg.FileName));
+                int n = 0; foreach (var p in doc.RootElement.EnumerateObject()) { _labels[p.Name] = p.Value.GetString() ?? ""; n++; }
+                SaveLabelsDisk(); LoadLab(); LoadCoins(); labMsg.Text = "imported " + n + " labels (merged)";
+            }
+            catch (Exception e) { labMsg.Text = e.Message; }
+        };
+        var labBtnRow = new StackPanel { Orientation = Orientation.Horizontal }; labBtnRow.Children.Add(labAdd); labBtnRow.Children.Add(labExport); labBtnRow.Children.Add(labImport);
+        labp.Children.Add(labGrid); labp.Children.Add(L("key (txid or address)")); labp.Children.Add(labKey); labp.Children.Add(L("label")); labp.Children.Add(labVal); labp.Children.Add(labBtnRow); labp.Children.Add(labMsg);
         tabs.Items.Add(Tab("Labels", labp));
 
         // ===== CONSOLE — type any in-wallet command (\help lists them) =====
