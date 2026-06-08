@@ -962,6 +962,9 @@ public partial class MainWindow : Window
         }
         scanBtn.Click += (_, _) => DoScan();
         netp.Children.Add(L("scan blocks for my coins (from height / to height)")); netp.Children.Add(scanH); netp.Children.Add(scanH2); netp.Children.Add(scanBtn); netp.Children.Add(scanO);
+        var heightBtn = Btn("Node block height"); var heightO = O();
+        heightBtn.Click += async (_, _) => { try { using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e"); var hc = await rpc.CallAsync("getblockcount"); heightO.Text = hc is null ? "node not reachable" : "node height: " + hc.Value.ToString(); } catch (Exception e) { heightO.Text = e.Message; } };
+        netp.Children.Add(heightBtn); netp.Children.Add(heightO);
         tabs.Items.Add(Tab("Network", netp));
 
         // ===== IDENTITY — your handle + identity key; used to pay, chat, and play as one identity =====
