@@ -723,6 +723,31 @@ public partial class MainWindow : Window
         var rMemo = F(); var rSave = Btn("Save request");
         rSave.Click += (_, _) => { long.TryParse(rAmt.Text.Trim(), out long sa); _requests.Add((ra.Text, sa, rMemo.Text.Trim())); SaveRequestsDisk(); rReq.Text = "request saved (see Requests tab)"; };
         recv.Children.Add(L("memo (optional)")); recv.Children.Add(rMemo); recv.Children.Add(rSave);
+        // RECEIVE A PAYMENT THE SPV WAY — no node: the payer hands you the tx + its merkle proof + header;
+        // the wallet VERIFIES (proof-of-work + merkle) and credits it. This is how funds appear — not by
+        // asking a node (a node can be down/behind). Paste what you were given (or it arrives IP-to-IP).
+        recv.Children.Add(new TextBlock { Text = "Receive a payment (SPV envelope — NO node)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 12, 0, 2) });
+        recv.Children.Add(L("paste the raw tx, its merkle branch (comma-separated hashes; empty for a single-tx block), the 80-byte block header, and the tx index — the wallet verifies the proof and credits it with NO node query"));
+        var imTx = F(); var imBranch = F(); var imHdr = F(); var imIdx = F(); imIdx.Text = "0"; var imOut = O(); var imBtn = Btn("Verify proof + credit (no node)");
+        imBtn.Click += (_, _) =>
+        {
+            try
+            {
+                var branch = imBranch.Text.Trim().Length == 0 ? new List<string>() : new List<string>(imBranch.Text.Trim().Split(','));
+                var env = new SpvEnvelope(Tx.FromHex(imTx.Text.Trim()), Tx.FromHex(imHdr.Text.Trim()), branch, long.Parse(imIdx.Text.Trim()));
+                if (!env.Verify()) { imOut.Text = "proof INVALID — proof-of-work or merkle did not verify"; return; }
+                var spv2 = LoadSpvFromDisk(w); long before = spv2.Balance();
+                bool got = spv2.Receive(env);
+                if (got && spv2.Balance() > before) { spv2.Save(SpvPathFor()); ShowSpv(); imOut.Text = $"VERIFIED + credited {Fmt(spv2.Balance() - before)} (no node used — the proof is enough)"; }
+                else imOut.Text = got ? "proof verified, but no output pays one of YOUR addresses (not yours)" : "proof did not verify";
+            }
+            catch (Exception e) { imOut.Text = e.Message; }
+        };
+        recv.Children.Add(L("raw transaction (hex)")); recv.Children.Add(imTx);
+        recv.Children.Add(L("merkle branch (comma-separated hashes)")); recv.Children.Add(imBranch);
+        recv.Children.Add(L("block header (160 hex = 80 bytes)")); recv.Children.Add(imHdr);
+        recv.Children.Add(L("tx index in block")); recv.Children.Add(imIdx);
+        recv.Children.Add(imBtn); recv.Children.Add(imOut);
         tabs.Items.Add(Tab("Receive", recv));
 
         // ===== REQUESTS — saved payment requests (address / amount / memo) =====
