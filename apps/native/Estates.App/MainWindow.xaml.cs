@@ -83,6 +83,19 @@ public partial class MainWindow : Window
         catch { }
     }
 
+    // Network dialog (ported from SVP _show_network_dialog): network, SPV model, node reachability, peers.
+    private async void ShowNetworkDialog()
+    {
+        string nodeStatus = "not reachable";
+        try { using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e"); var hc = await rpc.CallAsync("getblockcount"); if (hc is not null) nodeStatus = $"reachable · height {hc.Value}"; } catch { }
+        var w = new Window { Title = "Network", Width = 440, Height = 250, Owner = this, Background = B("#1b1d1e"), ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        var sp = new StackPanel { Margin = new Thickness(16) };
+        sp.Children.Add(new TextBlock { Text = "Network", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        sp.Children.Add(new TextBlock { Foreground = B("#cfd2d6"), FontFamily = new FontFamily("Consolas"), FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0), Text = $"Network:        {_network}\nSPV:            Craig's SPV (IP-to-IP envelopes + Bloom)\nProof source:   127.0.0.1:{RpcPort()}\nNode:           {nodeStatus}\nLive peers:     {_node.Peers().Count}\nThe estate node never mines; it gets headers/proofs and gossips." });
+        var ok = new Button { Content = "Close", Width = 90, Margin = new Thickness(0, 16, 0, 0), HorizontalAlignment = HorizontalAlignment.Right, Background = B("#2d2f34"), Foreground = B("#e6e6e6") };
+        ok.Click += (_, _) => w.Close(); sp.Children.Add(ok); w.Content = sp; w.ShowDialog();
+    }
+
     // Preferences dialog (ported from SVP preferences_dialog / on_base_unit_changed): base unit selection.
     private void ShowPreferences()
     {
@@ -1269,7 +1282,7 @@ public partial class MainWindow : Window
         var view = MI("_View");
         foreach (TabItem t in tabs.Items) { string hh = t.Header as string ?? ""; view.Items.Add(MI(hh, () => Sel(hh))); }
         var toolsMenu = MI("_Tools");
-        toolsMenu.Items.Add(MI("_Preferences", ShowPreferences)); toolsMenu.Items.Add(MI("_Network", () => Sel("Network")));
+        toolsMenu.Items.Add(MI("_Preferences", ShowPreferences)); toolsMenu.Items.Add(MI("_Network", ShowNetworkDialog));
         toolsMenu.Items.Add(new Separator());
         toolsMenu.Items.Add(MI("_Sign / verify message", () => Sel("Tools"))); toolsMenu.Items.Add(MI("_Encrypt / decrypt message", () => Sel("Tools")));
         toolsMenu.Items.Add(new Separator());
