@@ -727,6 +727,7 @@ public partial class MainWindow : Window
         var coinsByScript = new Dictionary<string, long>();
         foreach (var u in LoadSpvFromDisk(w).Utxos()) { var k = Tx.ToHex(u.script); coinsByScript[k] = coinsByScript.TryGetValue(k, out var s) ? s + u.value : u.value; }
         for (int i = FirstAddr; i <= 30; i++) { string scr = Tx.ToHex(NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(i)))); long addrBal = coinsByScript.TryGetValue(scr, out var b) ? b : 0; drows.Add(new Row4 { A = "estates/wallet/" + i, B = i.ToString(), C = w.AddressAt(i), D = addrBal > 0 ? Fmt(addrBal) : "unused" }); }
+        dest.Children.Add(L($"{drows.Count} addresses shown · {drows.Count(r => r.D != "unused")} used · index 0 is the identity key (never an address)"));
         dgrid.ItemsSource = drows;
         var dMenu = new ContextMenu();
         var dCopy = new MenuItem { Header = "Copy address" }; dCopy.Click += (_, _) => { if (dgrid.SelectedItem is Row4 r) { try { System.Windows.Clipboard.SetText(r.C); } catch { } } };
