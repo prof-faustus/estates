@@ -684,6 +684,17 @@ public partial class MainWindow : Window
         tools.Children.Add(L("raw tx (hex)")); tools.Children.Add(lrt); tools.Children.Add(lrb); tools.Children.Add(lro);
         tabs.Items.Add(Tab("Tools", tools));
 
+        // ===== CONTACTS — named payees (save an identity/address, then pay it by name) =====
+        var contacts = new StackPanel();
+        contacts.Children.Add(new TextBlock { Text = "Contacts — named payees (pay them by name in Send/chat)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        var ctGrid = Grid4("Name", "Address", "", "", 220);
+        void LoadContacts() { var rows = new List<Row4>(); foreach (var c in _contacts) rows.Add(new Row4 { A = c.name, B = c.address }); ctGrid.ItemsSource = rows; }
+        LoadContacts();
+        var ctName = F(); var ctAddr = F(); var ctMsg = O(); var ctAdd = Btn("Add contact");
+        ctAdd.Click += (_, _) => { string nm = ctName.Text.Trim(); string ad = ctAddr.Text.Trim(); if (nm.Length == 0 || Base58.CheckDecode(ad, out _) is not { Length: 20 }) { ctMsg.Text = "enter a name + a valid address"; return; } _contacts.Add((nm, ad)); LoadContacts(); ctMsg.Text = $"added contact '{nm}'"; ctName.Clear(); ctAddr.Clear(); };
+        contacts.Children.Add(ctGrid); contacts.Children.Add(L("name")); contacts.Children.Add(ctName); contacts.Children.Add(L("address")); contacts.Children.Add(ctAddr); contacts.Children.Add(ctAdd); contacts.Children.Add(ctMsg);
+        tabs.Items.Add(Tab("Contacts", contacts));
+
         // ===== CONSOLE — type any in-wallet command (\help lists them) =====
         var con = new StackPanel(); var conOut = Mono(360); var conIn = F(); var conBtn = Btn("Run");
         void RunConsole() { string cmd = conIn.Text.Trim(); if (cmd.Length == 0) return; conOut.AppendText("> " + cmd + "\n"); if (ChatCommands.Is(cmd)) { var pc = ChatCommands.Parse(cmd); if (pc.Kind == ChatCmd.Help) conOut.AppendText(ChatCommands.Help() + "\n"); else if (pc.Kind == ChatCmd.Balance) conOut.AppendText($"balance: {LoadSpvFromDisk(w).Balance():n0} sat\n"); else if (pc.Kind == ChatCmd.AskAddress || pc.Kind == ChatCmd.StateAddress) conOut.AppendText("fresh address: " + NextRecvAddress(w) + "\n"); else conOut.AppendText("use the Send tab / chat for \\pay\n"); } else conOut.AppendText("commands start with \\ — try \\help\n"); conIn.Clear(); conOut.ScrollToEnd(); }
