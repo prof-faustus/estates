@@ -52,9 +52,14 @@ public partial class MainWindow : Window
             string sel = ((ComboBoxItem)Network.SelectedItem).Content!.ToString()!;
             if (sel == "regtest" && PromptPassword("Regtest is test-only — enter the password") != "craig") { Network.SelectedIndex = 0; return; }
             _network = sel;
+            try { System.IO.File.WriteAllText(NetworkPath(), _network); } catch { }   // remember the choice
             WalletHost.Content = BuildWalletUI();   // rebuild the wallet against the chosen network
         };
+        // restore the last-used network (mainnet/testnet only; regtest stays opt-in to avoid a startup prompt)
+        try { string saved = System.IO.File.Exists(NetworkPath()) ? System.IO.File.ReadAllText(NetworkPath()).Trim() : ""; if (saved == "testnet") { foreach (ComboBoxItem it in Network.Items) if ((it.Content?.ToString()) == "testnet") { Network.SelectedItem = it; break; } } } catch { }
     }
+
+    private static string NetworkPath() { string d = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Estates"); System.IO.Directory.CreateDirectory(d); return System.IO.Path.Combine(d, "network.txt"); }
 
     private static SolidColorBrush B(string hex) => new((Color)ColorConverter.ConvertFromString(hex));
 
