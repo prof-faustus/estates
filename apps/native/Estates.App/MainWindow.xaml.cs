@@ -324,10 +324,15 @@ public partial class MainWindow : Window
                     sp.Children.Add(Head("Create or restore your wallet"));
                     sp.Children.Add(Note("Real BSV. Your seed is saved to disk (encrypted with your password) so closing keeps your money. BACK UP YOUR SEED — losing it loses your funds, forever."));
                     sp.Children.Add(Lab("password (optional)")); sp.Children.Add(pw);
+                    // Wizard step: generate a seed → DISPLAY it (force backup) → confirm → persist + unlock.
                     var create = Btn2("Create a new wallet");
-                    create.Click += (_, _) => { try { Unlocked(WalletStore.OpenOrCreate(path, pw.Password)); } catch (Exception ex) { msg.Text = ex.Message; } };
+                    var seedShow = FieldBox(); seedShow.IsReadOnly = true; seedShow.Visibility = Visibility.Collapsed;
+                    var confirm = Btn2("I have written down my seed — create wallet"); confirm.Visibility = Visibility.Collapsed;
+                    byte[]? pending = null;
+                    create.Click += (_, _) => { pending = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32); seedShow.Text = Tx.ToHex(pending); seedShow.Visibility = Visibility.Visible; confirm.Visibility = Visibility.Visible; msg.Text = "WRITE DOWN this seed now — it is the ONLY way to recover your funds. Then confirm."; };
+                    confirm.Click += (_, _) => { try { if (pending is null) return; WalletStore.Create(path, pending, pw.Password); Unlocked(pending); } catch (Exception ex) { msg.Text = ex.Message; } };
                     pw.KeyDown += (_, e) => { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Return) { e.Handled = true; create.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)); } };
-                    sp.Children.Add(create);
+                    sp.Children.Add(create); sp.Children.Add(Lab("your new seed (back this up!)")); sp.Children.Add(seedShow); sp.Children.Add(confirm);
                     sp.Children.Add(Note("…or restore an existing wallet:"));
                     sp.Children.Add(Lab("seed (64-hex backup)")); var seedBox = FieldBox(); sp.Children.Add(seedBox);
                     var restore = Btn2("Restore from seed");
