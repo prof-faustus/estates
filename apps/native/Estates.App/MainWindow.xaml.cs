@@ -684,6 +684,30 @@ public partial class MainWindow : Window
         tools.Children.Add(L("raw tx (hex)")); tools.Children.Add(lrt); tools.Children.Add(lrb); tools.Children.Add(lro);
         tabs.Items.Add(Tab("Tools", tools));
 
+        // ===== TRANSACTIONS — this session's unpublished/just-sent transactions (ElectrumSV's 2nd tab) =====
+        var txp = new StackPanel();
+        txp.Children.Add(new TextBlock { Text = "Transactions — sent this session (0-conf until mined)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        var txGrid = Grid4("Type", "Amount (sat)", "Txid", "Detail", 360);
+        void LoadTxs() { txGrid.ItemsSource = new List<Row4>(_txLog); }
+        LoadTxs(); var txr = Btn("Refresh"); txr.Click += (_, _) => LoadTxs();
+        txp.Children.Add(txr); txp.Children.Add(txGrid);
+        tabs.Items.Add(Tab("Transactions", txp));
+
+        // ===== NOTIFICATIONS — live events (peers, network) =====
+        var notif = new StackPanel();
+        notif.Children.Add(new TextBlock { Text = "Notifications", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        var nfGrid = Grid4("When", "Event", "Detail", "", 360);
+        void LoadNotif()
+        {
+            var rows = new List<Row4>();
+            rows.Add(new Row4 { A = "now", B = "network", C = $"{_network} · SPV (IP-to-IP + Bloom)" });
+            rows.Add(new Row4 { A = "now", B = "peers live", C = _node.Peers().Count.ToString() });
+            rows.Add(new Row4 { A = "now", B = "identity", C = (_displayName.Length > 0 ? _displayName : "(unnamed)") });
+            nfGrid.ItemsSource = rows;
+        }
+        LoadNotif(); notif.Children.Add(nfGrid);
+        tabs.Items.Add(Tab("Notifications", notif));
+
         // ===== CONTACTS — named payees (save an identity/address, then pay it by name) =====
         var contacts = new StackPanel();
         contacts.Children.Add(new TextBlock { Text = "Contacts — named payees (pay them by name in Send/chat)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
@@ -768,7 +792,7 @@ public partial class MainWindow : Window
 
         // AUTO-REFRESH: balances, coins, history update themselves (no manual refresh). Stops on unload.
         var auto = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-        auto.Tick += (_, _) => { try { ShowBal(); ShowSpv(); SpvSyncNow(); LoadCoins(); LoadHistory(); } catch { } };
+        auto.Tick += (_, _) => { try { ShowBal(); ShowSpv(); SpvSyncNow(); LoadCoins(); LoadHistory(); LoadTxs(); LoadNotif(); } catch { } };
         auto.Start();
         tabs.Unloaded += (_, _) => auto.Stop();
 
