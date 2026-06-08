@@ -201,12 +201,26 @@ public sealed class WalletWizard : Window
         catch (System.Exception e) { _msg.Text = e.Message; }
     }
 
-    // a real email CHECK with no server: valid format AND the domain actually resolves (DNS).
+    // a real email CHECK with no server. The HARD gate is a strict format check (this is what makes the
+    // email well-formed). DNS resolution is a BEST-EFFORT signal only and must NEVER block registration:
+    // many valid domains publish only MX records (no A/AAAA), and DNS can be momentarily unreachable —
+    // neither means the email is invalid. So: bad format → reject; good format → accept (DNS is advisory).
     private static bool EmailOk(string e)
     {
+        e = (e ?? "").Trim();
+        // strict-enough format: local@domain.tld, no spaces, a dot in the domain, sane length.
+        if (e.Length < 6 || e.Length > 254) return false;
         if (!System.Text.RegularExpressions.Regex.IsMatch(e, @"^[^@\s]+@[^@\s]+\.[^@\s]+$")) return false;
-        try { var domain = e.Split('@')[1]; return System.Net.Dns.GetHostAddresses(domain).Length > 0; }
-        catch { return false; }
+        var parts = e.Split('@');
+        if (parts.Length != 2 || parts[0].Length == 0 || parts[1].Length < 3) return false;
+        if (parts[1].StartsWith('.') || parts[1].EndsWith('.') || parts[1].Contains("..")) return false;
+        return true;   // format is valid — accept. (DNS is checked best-effort in DnsHint, never blocks.)
+    }
+
+    // advisory only: does the domain resolve? Used to show a soft hint, NEVER to block.
+    private static bool DnsHint(string e)
+    {
+        try { return System.Net.Dns.GetHostAddresses(e.Split('@')[1]).Length > 0; } catch { return false; }
     }
 
     // REGISTER: create the wallet, then bind the PSEUDONYM ↔ email ↔ wallet ↔ identity key into a signed
