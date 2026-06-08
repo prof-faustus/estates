@@ -645,7 +645,12 @@ public partial class MainWindow : Window
         if (!_reqLoaded) { LoadRequestsDisk(); _reqLoaded = true; }
         var reqGrid = Grid4("Address", "Amount (sat)", "Memo", "", 260);
         void LoadReq() { reqGrid.ItemsSource = _requests.Select(r => new Row4 { A = r.addr, B = r.sat > 0 ? r.sat.ToString("n0") : "", C = r.memo }).ToList(); }
-        LoadReq(); var reqRefresh = Btn("Refresh"); reqRefresh.Click += (_, _) => LoadReq();
+        LoadReq();
+        var reqMenu = new ContextMenu();
+        var reqCopy = new MenuItem { Header = "Copy address" }; reqCopy.Click += (_, _) => { if (reqGrid.SelectedItem is Row4 r) { try { System.Windows.Clipboard.SetText(r.A); } catch { } } };
+        var reqDel = new MenuItem { Header = "Delete request" }; reqDel.Click += (_, _) => { if (reqGrid.SelectedItem is Row4 r) { _requests.RemoveAll(x => x.addr == r.A); SaveRequestsDisk(); LoadReq(); } };
+        reqMenu.Items.Add(reqCopy); reqMenu.Items.Add(reqDel); reqGrid.ContextMenu = reqMenu;
+        var reqRefresh = Btn("Refresh"); reqRefresh.Click += (_, _) => LoadReq();
         reqp.Children.Add(reqRefresh); reqp.Children.Add(reqGrid);
         tabs.Items.Add(Tab("Requests", reqp));
 
