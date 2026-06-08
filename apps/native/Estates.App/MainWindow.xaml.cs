@@ -1264,7 +1264,8 @@ public partial class MainWindow : Window
             try
             {
                 ShowBal(); ShowSpv();
-                if (_tick % 8 == 0) SpvSyncNow();            // node RPC only occasionally
+                // NO node poll for funds: the wallet's money comes ONLY from delivered, self-verifying SPV
+                // envelopes (tx + merkle proof + header). My/your/any node is NOT the source of funds.
                 var sv = LoadSpvFromDisk(w); long fz = 0; foreach (var u in sv.Utxos()) if (_frozenCoins.Contains(u.txid + ":" + u.vout)) fz += u.value;
                 sSpendable.Text = $"spendable: {Fmt(sv.Balance() - fz)}" + (fz > 0 ? $"  ({Fmt(fz)} frozen)" : "");
                 if (tabs.SelectedItem is TabItem ti)        // refresh ONLY the visible table, not all of them
@@ -1276,7 +1277,7 @@ public partial class MainWindow : Window
             }
             catch { }
         };
-        SpvSyncNow();                                        // one sync on open
+        // (no node sync on open — funds come from delivered SPV envelopes, not from any node)
         auto.Start();
         tabs.Unloaded += (_, _) => auto.Stop();
 
