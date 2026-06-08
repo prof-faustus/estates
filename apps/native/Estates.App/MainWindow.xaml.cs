@@ -689,7 +689,7 @@ public partial class MainWindow : Window
         tabs.Items.Add(Tab("History", hist));
 
         // ===== COINS — every UTXO as a TABLE; freeze/unfreeze (coin control); double-click toggles freeze =====
-        var coins = new StackPanel(); var cmsg = O(); var cSum = L("");
+        var coins = new StackPanel(); var cmsg = O(); var cSum = L(""); var cSearch = F();
         var cgrid = Grid4("Value (sat)", "Frozen", "Address", "Outpoint", 260);
         void LoadCoins()
         {
@@ -703,7 +703,8 @@ public partial class MainWindow : Window
                 total += u.value; if (fr) { frozenSat += u.value; frozenN++; }
                 rows.Add(new Row4 { A = u.value.ToString("n0"), B = fr ? "FROZEN" : "", C = addr + (lbl.Length > 0 ? "  (" + lbl + ")" : ""), D = op });
             }
-            cgrid.ItemsSource = rows;
+            string cq = cSearch.Text.Trim();
+            cgrid.ItemsSource = cq.Length > 0 ? rows.Where(r => (r.A + r.C + r.D).Contains(cq, StringComparison.OrdinalIgnoreCase)).ToList() : rows;
             cSum.Text = $"{rows.Count} coin(s) · {Fmt(total)} total · {frozenN} frozen ({Fmt(frozenSat)}) · spendable {Fmt(total - frozenSat)}";
         }
         LoadCoins();
@@ -720,7 +721,8 @@ public partial class MainWindow : Window
         cUnfreezeAll.Click += (_, _) => { _frozenCoins.Clear(); LoadCoins(); cmsg.Text = "all coins unfrozen"; };
         cSendFrom.Click += (_, _) => { if (cgrid.SelectedItem is Row4 r) { _frozenCoins.Clear(); foreach (var u in LoadSpvFromDisk(w).Utxos()) { var op = u.txid + ":" + u.vout; if (op != r.D) _frozenCoins.Add(op); } LoadCoins(); cmsg.Text = "frozen all but the selected coin — Send will spend only it (coin control)"; } else cmsg.Text = "select a coin row first"; };
         var cFrow = new StackPanel { Orientation = Orientation.Horizontal }; cFrow.Children.Add(cFreezeAll); cFrow.Children.Add(cUnfreezeAll); cFrow.Children.Add(cSendFrom);
-        coins.Children.Add(cSum); coins.Children.Add(cgrid); coins.Children.Add(cFrow); coins.Children.Add(cmsg);
+        cSearch.TextChanged += (_, _) => LoadCoins();
+        coins.Children.Add(cSum); coins.Children.Add(L("search (address / outpoint)")); coins.Children.Add(cSearch); coins.Children.Add(cgrid); coins.Children.Add(cFrow); coins.Children.Add(cmsg);
         tabs.Items.Add(Tab("Coins", coins));
 
         // ===== DESTINATIONS — addresses WITH derivation paths (index 0 = identity, NEVER an address) =====
