@@ -597,9 +597,24 @@ public partial class MainWindow : Window
             catch (Exception e) { so.Text = e.Message; }
         }
         sbtn.Click += (_, _) => DoMany();
+        var sprev = Btn("Preview (fee + total)");
+        void DoPreview()
+        {
+            try
+            {
+                if (!long.TryParse(feekb.Text.Trim(), out long satkb) || satkb < 0) { so.Text = "bad fee rate"; return; }
+                int n = 0; long total = 0;
+                foreach (var line in many.Text.Split('\n')) { var ln = line.Trim(); if (ln.Length == 0) continue; var p = ln.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries); if (p.Length < 2 || !long.TryParse(p[^1], out long a) || a <= 0) continue; n++; total += a; }
+                long est = 200 + n * 34 + 150 * 8; long fee = System.Math.Max(500, satkb * est / 1000);
+                so.Text = n == 0 ? "no valid recipients" : $"preview: {n} payee(s) · {Fmt(total)} + fee {Fmt(fee)} = {Fmt(total + fee)}";
+            }
+            catch (Exception e) { so.Text = e.Message; }
+        }
+        sprev.Click += (_, _) => DoPreview();
         send.Children.Add(L("recipients (one per line)")); send.Children.Add(many);
         send.Children.Add(L("fee rate (sat/kB)")); send.Children.Add(feekb);
-        send.Children.Add(sbtn); send.Children.Add(so);
+        var srow = new StackPanel { Orientation = Orientation.Horizontal }; srow.Children.Add(sprev); srow.Children.Add(sbtn);
+        send.Children.Add(srow); send.Children.Add(so);
         send.Children.Add(L("signed raw transaction")); send.Children.Add(raw);
         tabs.Items.Add(Tab("Send", send));
 
