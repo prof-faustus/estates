@@ -938,7 +938,39 @@ public partial class MainWindow : Window
         };
         nft.Children.Add(L("mint a new NFT (name)")); nft.Children.Add(mintName); nft.Children.Add(mintBtn); nft.Children.Add(mintMsg);
         var xferId = F(); var xferTo = F(); var xferBtn = Btn("Transfer NFT to an identity/address"); var xferMsg = O();
-        xferBtn.Click += (_, _) => { if (!int.TryParse(xferId.Text.Trim(), out int id)) { xferMsg.Text = "enter the NFT #id"; return; } var item = _heldNfts.FirstOrDefault(n => n.id == id); if (item.name is null) { xferMsg.Text = "you don't hold that NFT"; return; } string to = xferTo.Text.Trim(); if (to.Length == 0) { xferMsg.Text = "enter recipient"; return; } _heldNfts.RemoveAll(n => n.id == id); SaveNftsDisk(); LoadNfts(); _txLog.Insert(0, new Row4 { A = "nft-xfer", B = "#" + id, C = item.name, D = "→ " + to }); xferMsg.Text = $"transferred '{item.name}' (#{id}) to {to}"; };
+        xferBtn.Click += async (_, _) =>
+        {
+            if (!int.TryParse(xferId.Text.Trim(), out int id)) { xferMsg.Text = "enter the NFT #id"; return; }
+            var item = _heldNfts.FirstOrDefault(n => n.id == id); if (item.name is null) { xferMsg.Text = "you don't hold that NFT"; return; }
+            string to = xferTo.Text.Trim(); if (to.Length == 0) { xferMsg.Text = "enter recipient"; return; }
+            // resolve the recipient's IDENTITY pubkey (paste a 66-hex pubkey, or a live peer's handle/name)
+            byte[]? rpub = null;
+            try { if (to.Length == 66) rpub = Tx.FromHex(to); } catch { }
+            if (rpub is null) foreach (var p in _node.Peers()) if (string.Equals(p.Name, to, StringComparison.OrdinalIgnoreCase) && p.WalletPub.Length == 66) { try { rpub = Tx.FromHex(p.WalletPub); } catch { } break; }
+            if (rpub is null || rpub.Length != 33) { xferMsg.Text = "cannot find recipient identity — paste their identity pubkey (66-hex) or use a live peer's name"; return; }
+            string txidRec = "local";
+            try
+            {
+                var spv2 = LoadSpvFromDisk(w);
+                var ring = new KeyRing(_walletSeed!);
+                byte[] payload = System.Text.Encoding.ASCII.GetBytes($"nft|{id}|{item.name}");
+                byte[] carrier = TxMessage.SealCarrier(ring.MessagePriv(rpub, "nft", id), rpub, TxType.NftTransfer, payload);   // RE-SEALED to the NEW owner
+                byte[] script = TxTransport.MessageOutput(carrier, Recovery.Hash160(rpub));   // the new owner controls the NFT output
+                byte[] change = NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(FirstAddr)));
+                var built = SpvSpend.BuildMany(spv2, SpvKeymap(w), new List<(byte[], long)> { (script, 1) }, 500, change, _frozenCoins);
+                if (built is not null)
+                {
+                    using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e");
+                    var r = await rpc.CallAsync("sendrawtransaction", Tx.ToHex(built.Raw));
+                    foreach (var l in _node.LiveLinks()) { try { l.Send(built.Raw); } catch { } }
+                    if (r is not null) { foreach (var c in built.Tx.Inputs) spv2.Spend(c.PrevTxid + ":" + c.PrevVout); spv2.Save(SpvPathFor()); txidRec = built.Txid; }
+                }
+            }
+            catch { }
+            _heldNfts.RemoveAll(n => n.id == id); SaveNftsDisk(); LoadNfts();
+            _txLog.Insert(0, new Row4 { A = "nft-xfer", B = "#" + id, C = item.name, D = (txidRec == "local" ? "local " : "on-chain ") + "→ " + to[..Math.Min(12, to.Length)] });
+            xferMsg.Text = txidRec == "local" ? $"transferred '{item.name}' (#{id}) — re-sealed locally (no SPV funds to anchor)" : $"transferred '{item.name}' (#{id}) ON-CHAIN, re-sealed to {to[..Math.Min(12, to.Length)]}… · txid {txidRec[..16]}…";
+        };
         nft.Children.Add(L("transfer NFT — #id + recipient (identity/handle/address)")); nft.Children.Add(xferId); nft.Children.Add(xferTo); nft.Children.Add(xferBtn); nft.Children.Add(xferMsg);
         nft.Children.Add(nrb); nft.Children.Add(nftHost); tabs.Items.Add(Tab("NFTs", nft));
 
