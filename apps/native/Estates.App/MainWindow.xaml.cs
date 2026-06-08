@@ -905,18 +905,23 @@ public partial class MainWindow : Window
         netp.Children.Add(netInfo);
         // Real SPV find: fetch a block from the node, match its txs against my Bloom filter, and VERIFY the
         // matches with a BIP37 merkleblock against the header's merkle root (bloom → merkleblock → find).
-        var scanH = F(); var scanO = O(); var scanBtn = Btn("Scan a block for my coins (by height)");
+        var scanH = F(); var scanH2 = F(); var scanO = O(); var scanBtn = Btn("Scan blocks for my coins (height range)");
         async void DoScan()
         {
             try
             {
-                if (!long.TryParse(scanH.Text.Trim(), out long h)) { scanO.Text = "bad height"; return; }
+                if (!long.TryParse(scanH.Text.Trim(), out long h)) { scanO.Text = "bad from-height"; return; }
+                long h2 = long.TryParse(scanH2.Text.Trim(), out long hh) && hh >= h ? hh : h;
+                if (h2 - h > 500) h2 = h + 500;                       // cap a single scan to 500 blocks
                 using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e");
-                var hashEl = await rpc.CallAsync("getblockhash", h); if (hashEl is null) { scanO.Text = "no such block"; return; }
-                var rawEl = await rpc.CallAsync("getblock", hashEl.Value.GetString()!, 0); if (rawEl is null) { scanO.Text = "getblock failed"; return; }
-                var parsed = Block.Parse(Tx.FromHex(rawEl.Value.GetString()!)); if (parsed is null) { scanO.Text = "block parse failed"; return; }
+                long totalTx = 0, totalFound = 0, totalCredited = 0;
+                for (long bh = h; bh <= h2; bh++)
+                {
+                var hashEl = await rpc.CallAsync("getblockhash", bh); if (hashEl is null) { scanO.Text = $"no block at {bh}"; break; }
+                var rawEl = await rpc.CallAsync("getblock", hashEl.Value.GetString()!, 0); if (rawEl is null) { scanO.Text = "getblock failed"; break; }
+                var parsed = Block.Parse(Tx.FromHex(rawEl.Value.GetString()!)); if (parsed is null) continue;
                 var myCoins = LoadSpvFromDisk(w).Utxos();
-                var filter = new BloomFilter(RecvWatch + myCoins.Count + 5, 0.0001, (uint)h);
+                var filter = new BloomFilter(RecvWatch + myCoins.Count + 5, 0.0001, (uint)bh);
                 for (int i = FirstAddr; i <= RecvWatch; i++) filter.Insert(Recovery.Hash160(w.ChildPub(i)));   // my addresses (receives)
                 foreach (var u in myCoins) filter.Insert(BloomMatch.Outpoint(u.txid, u.vout));                  // my outpoints (spends)
                 var ids = new List<byte[]>(); var matches = new List<bool>(); int found = 0;
@@ -949,12 +954,14 @@ public partial class MainWindow : Window
                     }
                     if (credited > 0) { spv2.Save(SpvPathFor()); ShowSpv(); }
                 }
-                scanO.Text = $"block {h}: {parsed.Txs.Count} txs · {found} match · merkleblock VERIFIED={ok} · credited {credited} coin(s)";
+                totalTx += parsed.Txs.Count; totalFound += found; totalCredited += credited;
+                }   // end for each block in range
+                scanO.Text = $"scanned blocks {h}–{h2}: {totalTx} txs · {totalFound} match my wallet · credited {totalCredited} coin(s)";
             }
             catch (Exception e) { scanO.Text = e.Message; }
         }
         scanBtn.Click += (_, _) => DoScan();
-        netp.Children.Add(L("scan a block for my coins (height)")); netp.Children.Add(scanH); netp.Children.Add(scanBtn); netp.Children.Add(scanO);
+        netp.Children.Add(L("scan blocks for my coins (from height / to height)")); netp.Children.Add(scanH); netp.Children.Add(scanH2); netp.Children.Add(scanBtn); netp.Children.Add(scanO);
         tabs.Items.Add(Tab("Network", netp));
 
         // ===== IDENTITY — your handle + identity key; used to pay, chat, and play as one identity =====
