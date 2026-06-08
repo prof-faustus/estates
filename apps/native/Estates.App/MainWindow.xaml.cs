@@ -678,6 +678,7 @@ public partial class MainWindow : Window
                 foreach (var c in built.Tx.Inputs) spv2.Spend(c.PrevTxid + ":" + c.PrevVout);
                 spv2.Save(SpvPathFor()); ShowSpv();
                 _txLog.Insert(0, new Row4 { A = "sent", B = "-" + outs.Sum(o => o.amount).ToString("n0"), C = built.Txid[..Math.Min(20, built.Txid.Length)] + "…", D = outs.Count + " payee, fee " + fee });
+                LogEvent("sent", outs.Sum(o => o.amount).ToString("n0") + " sat to " + outs.Count + " payee(s), fee " + fee + ", txid " + built.Txid);
                 so.Text = $"SENT · {outs.Count} payee(s) · fee {fee} sat · txid {built.Txid}";
             }
             catch (Exception e) { so.Text = e.Message; }
@@ -1032,17 +1033,21 @@ public partial class MainWindow : Window
 
         // ===== NOTIFICATIONS — live events (peers, network) =====
         var notif = new StackPanel();
-        notif.Children.Add(new TextBlock { Text = "Notifications", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
-        var nfGrid = Grid4("When", "Event", "Detail", "", 360);
+        notif.Children.Add(new TextBlock { Text = "Notifications — your event log (newest first, persisted)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        var nfGrid = Grid4("When (UTC)", "Event", "Detail", "", 360);
         void LoadNotif()
         {
             var rows = new List<Row4>();
             rows.Add(new Row4 { A = "now", B = "network", C = $"{_network} · SPV (IP-to-IP + Bloom)" });
             rows.Add(new Row4 { A = "now", B = "peers live", C = _node.Peers().Count.ToString() });
             rows.Add(new Row4 { A = "now", B = "identity", C = (_displayName.Length > 0 ? _displayName : "(unnamed)") });
+            rows.AddRange(ReadEvents(200));    // persisted history (sends, receives, NFT, vault, identity)
             nfGrid.ItemsSource = rows;
         }
-        LoadNotif(); notif.Children.Add(nfGrid);
+        LoadNotif(); var nfr = Btn("Refresh"); nfr.Click += (_, _) => LoadNotif();
+        var nfClear = Btn("Clear log"); nfClear.Click += (_, _) => { try { System.IO.File.Delete(EventsPath()); } catch { } LoadNotif(); };
+        var nfRow = new StackPanel { Orientation = Orientation.Horizontal }; nfRow.Children.Add(nfr); nfRow.Children.Add(nfClear);
+        notif.Children.Add(nfRow); notif.Children.Add(nfGrid);
         tabs.Items.Add(Tab("Notifications", notif));
 
         // ===== CONTACTS — named payees (save an identity/address, then pay it by name) =====
@@ -1136,6 +1141,7 @@ public partial class MainWindow : Window
                 bool ok = Vault.VerifyRecovery(rec, hotPub, coldPub);
                 try { System.IO.File.WriteAllText(System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Estates", $"vault_{built.Txid[..12]}.recovery"), Tx.ToHex(Tx.Serialize(Vault.Finalize(rec)))); } catch { }
                 _txLog.Insert(0, new Row4 { A = "vault", B = amt.ToString("n0"), C = built.Txid[..16] + "…", D = "recovery@" + lt });
+                LogEvent("vault", amt.ToString("n0") + " sat locked, pre-signed recovery@" + lt + ", txid " + built.Txid);
                 vOut.Text = $"VAULT funded {amt:n0} sat · txid {built.Txid[..16]}…\nrecovery pre-signed + VERIFIED={ok}: reclaim 100% after block {lt} (saved to %APPDATA%/Estates)";
             }
             catch (Exception e) { vOut.Text = e.Message; }
@@ -1250,6 +1256,7 @@ public partial class MainWindow : Window
                 byte[] sig = EcdsaSign.Sign(attPriv, System.Text.Encoding.UTF8.GetBytes(prof));
                 string dir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Estates"); System.IO.Directory.CreateDirectory(dir);
                 System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "identity.json"), prof + "\n" + Tx.ToHex(sig));
+                LogEvent("identity", "registered as '" + _displayName + "' (signed)");
                 idMsg.Text = "identity SET + registered as '" + _displayName + "' (signed, saved)";
             }
             catch (Exception ex) { idMsg.Text = ex.Message; }
@@ -1325,6 +1332,7 @@ public partial class MainWindow : Window
             catch { }
             _heldNfts.Add((id, nm, txidRec)); SaveNftsDisk(); LoadNfts();
             _txLog.Insert(0, new Row4 { A = "nft-mint", B = "#" + id, C = nm, D = txidRec == "local" ? "local" : txidRec[..16] + "…" });
+            LogEvent("nft-mint", "#" + id + " '" + nm + "' " + (txidRec == "local" ? "(local)" : "txid " + txidRec));
             mintMsg.Text = txidRec == "local" ? $"minted '{nm}' (#{id}) locally (no SPV funds to anchor on-chain)" : $"minted '{nm}' (#{id}) ON-CHAIN · txid {txidRec[..16]}…";
             mintName.Clear();
         };
@@ -1657,6 +1665,28 @@ public partial class MainWindow : Window
     private static string IdentityPath() { string d = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Estates"); System.IO.Directory.CreateDirectory(d); return System.IO.Path.Combine(d, "identity.txt"); }
     private static string LoadHandle() { try { return System.IO.File.Exists(IdentityPath()) ? System.IO.File.ReadAllText(IdentityPath()).Trim() : ""; } catch { return ""; } }
     private void SaveHandle(string h) { try { System.IO.File.WriteAllText(IdentityPath(), h); } catch { } _node.Name = h.Length > 0 ? h : _node.Name; }
+    // Persisted event log (the Notifications tab): newest first, one tab-separated line per event.
+    private static string EventsPath() { string d = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Estates"); System.IO.Directory.CreateDirectory(d); return System.IO.Path.Combine(d, "events.log"); }
+    private void LogEvent(string evt, string detail)
+    {
+        try { System.IO.File.AppendAllText(EventsPath(), DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss") + "Z\t" + evt + "\t" + (detail ?? "").Replace('\t', ' ').Replace('\n', ' ') + "\n"); } catch { }
+    }
+    private List<Row4> ReadEvents(int max)
+    {
+        var rows = new List<Row4>();
+        try
+        {
+            if (!System.IO.File.Exists(EventsPath())) return rows;
+            var lines = System.IO.File.ReadAllLines(EventsPath());
+            for (int i = lines.Length - 1; i >= 0 && rows.Count < max; i--)
+            {
+                var p = lines[i].Split('\t'); if (p.Length < 2) continue;
+                rows.Add(new Row4 { A = p[0], B = p[1], C = p.Length > 2 ? p[2] : "" });
+            }
+        }
+        catch { }
+        return rows;
+    }
     private StackPanel? _chatList;
     private System.Action? _refreshChatWho;
     private byte[]? _chatDirectTo;   // set => Direct (1:1, ECDH symmetric to that identity)
