@@ -821,6 +821,9 @@ public partial class MainWindow : Window
         var mintName = F(); var mintBtn = Btn("Mint NFT to my identity"); var mintMsg = O();
         mintBtn.Click += (_, _) => { var nm = mintName.Text.Trim(); if (nm.Length == 0) { mintMsg.Text = "enter a name"; return; } int id = (_heldNfts.Count > 0 ? _heldNfts.Max(x => x.id) : 0) + 1; _heldNfts.Add((id, nm, "local")); SaveNftsDisk(); LoadNfts(); mintMsg.Text = $"minted '{nm}' (#{id}) — owned by your identity"; mintName.Clear(); };
         nft.Children.Add(L("mint a new NFT (name)")); nft.Children.Add(mintName); nft.Children.Add(mintBtn); nft.Children.Add(mintMsg);
+        var xferId = F(); var xferTo = F(); var xferBtn = Btn("Transfer NFT to an identity/address"); var xferMsg = O();
+        xferBtn.Click += (_, _) => { if (!int.TryParse(xferId.Text.Trim(), out int id)) { xferMsg.Text = "enter the NFT #id"; return; } var item = _heldNfts.FirstOrDefault(n => n.id == id); if (item.name is null) { xferMsg.Text = "you don't hold that NFT"; return; } string to = xferTo.Text.Trim(); if (to.Length == 0) { xferMsg.Text = "enter recipient"; return; } _heldNfts.RemoveAll(n => n.id == id); SaveNftsDisk(); LoadNfts(); _txLog.Insert(0, new Row4 { A = "nft-xfer", B = "#" + id, C = item.name, D = "→ " + to }); xferMsg.Text = $"transferred '{item.name}' (#{id}) to {to}"; };
+        nft.Children.Add(L("transfer NFT — #id + recipient (identity/handle/address)")); nft.Children.Add(xferId); nft.Children.Add(xferTo); nft.Children.Add(xferBtn); nft.Children.Add(xferMsg);
         nft.Children.Add(nrb); nft.Children.Add(nftHost); tabs.Items.Add(Tab("NFTs", nft));
 
         // AUTO-REFRESH: balances, coins, history update themselves (no manual refresh). Stops on unload.
