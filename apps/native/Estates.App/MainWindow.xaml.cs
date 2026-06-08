@@ -553,10 +553,21 @@ public partial class MainWindow : Window
         send.Children.Add(L("signed raw transaction")); send.Children.Add(raw);
         tabs.Items.Add(Tab("Send", send));
 
-        // Receive
-        var recv = new StackPanel(); var ridx = F(); ridx.Text = "1"; var ra = F(); ra.IsReadOnly = true; var rbtn = Btn("Show address");
-        rbtn.Click += (_, _) => { try { ra.Text = w.AddressAt(int.Parse(ridx.Text.Trim())); } catch (Exception e) { ra.Text = e.Message; } };
-        recv.Children.Add(L("address index")); recv.Children.Add(ridx); recv.Children.Add(rbtn); recv.Children.Add(ra); tabs.Items.Add(Tab("Receive", recv));
+        // ===== RECEIVE — a FRESH sub-key address each time (Type-42 fresh-per-payment), amount + request URI
+        var recv = new StackPanel();
+        recv.Children.Add(new TextBlock { Text = "Receive", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        recv.Children.Add(L("a FRESH, never-before-used receive address (HMAC sub-key, index ≥ 1; identity index 0 is never an address)"));
+        var ra = F(); ra.IsReadOnly = true; ra.Text = w.AddressAt(FirstAddr); ra.FontFamily = new FontFamily("Consolas");
+        var rAmt = F(); var rReq = O();
+        var rNew = Btn("New fresh address"); var rCopy = Btn("Copy"); var rUri = Btn("Make payment request (URI)");
+        rNew.Click += (_, _) => { ra.Text = NextRecvAddress(w); rReq.Text = "fresh address generated"; };
+        rCopy.Click += (_, _) => { try { System.Windows.Clipboard.SetText(ra.Text); rReq.Text = "address copied"; } catch (Exception e) { rReq.Text = e.Message; } };
+        rUri.Click += (_, _) => { string u = "bitcoin:" + ra.Text; if (long.TryParse(rAmt.Text.Trim(), out long sa) && sa > 0) u += "?amount=" + (sa / 100_000_000.0).ToString("0.########"); rReq.Text = u; try { System.Windows.Clipboard.SetText(u); } catch { } };
+        recv.Children.Add(L("receiving address")); recv.Children.Add(ra);
+        recv.Children.Add(L("requested amount (sat, optional)")); recv.Children.Add(rAmt);
+        var rrow = new StackPanel { Orientation = Orientation.Horizontal }; rrow.Children.Add(rNew); rrow.Children.Add(rCopy); rrow.Children.Add(rUri);
+        recv.Children.Add(rrow); recv.Children.Add(L("payment request / URI (copyable; paste into a payer's Send)")); recv.Children.Add(rReq);
+        tabs.Items.Add(Tab("Receive", recv));
 
         // (Addresses are listed in the Destinations tab, with derivation paths, starting at index 1 —
         //  index 0 is the identity/base key and is never shown as an address.)
