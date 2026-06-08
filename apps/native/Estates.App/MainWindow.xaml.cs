@@ -27,7 +27,9 @@ public partial class MainWindow : Window
         _walletPub = Cipher.PublicKey(_master);
         if (bot) Title = "ESTATES — bot (you control it)";
 
-        _node = new P2PNode((bot ? "bot-" : "player-") + Tx.ToHex(_walletPub)[..6], Tx.ToHex(_walletPub));
+        _displayName = LoadHandle();                     // my persistent IDENTITY handle (e.g. "Bob"), if set
+        string nodeName = _displayName.Length > 0 ? _displayName : (bot ? "bot-" : "player-") + Tx.ToHex(_walletPub)[..6];
+        _node = new P2PNode(nodeName, Tx.ToHex(_walletPub));   // advertise the handle so peers can find/pay me by identity
         App.Teardowns.Add(() => { try { _node.Dispose(); } catch { } });
         _node.OnPeerDiscovered += _ => Dispatcher.Invoke(RefreshNodes);
         _node.OnPeerLost += _ => Dispatcher.Invoke(RefreshNodes);
@@ -573,6 +575,13 @@ public partial class MainWindow : Window
     // ---- Chat: a real messenger (group + 1:1, history, reactions/edit/delete/receipts, identity) ----
     private readonly Conversation _conv = new("lobby", true, Array.Empty<string>());
     private string _displayName = "";
+
+    // ---- IDENTITY (baseline): a persistent handle (e.g. "Bob") bound to your stable identity key (the
+    // wallet pubkey from your seed). It is advertised so peers can find, chat with, and PAY you by name —
+    // pay an identity, not just an address. Persisted across launches; loaded at login.
+    private static string IdentityPath() { string d = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Estates"); System.IO.Directory.CreateDirectory(d); return System.IO.Path.Combine(d, "identity.txt"); }
+    private static string LoadHandle() { try { return System.IO.File.Exists(IdentityPath()) ? System.IO.File.ReadAllText(IdentityPath()).Trim() : ""; } catch { return ""; } }
+    private void SaveHandle(string h) { try { System.IO.File.WriteAllText(IdentityPath(), h); } catch { } _node.Name = h.Length > 0 ? h : _node.Name; }
     private StackPanel? _chatList;
     private System.Action? _refreshChatWho;
     private byte[]? _chatDirectTo;   // set => Direct (1:1, ECDH symmetric to that identity)
@@ -635,7 +644,7 @@ public partial class MainWindow : Window
         }
         _refreshChatWho = ShowWho;          // so peer discovery/loss live-updates the contact line
         ShowWho(); DockPanel.SetDock(who, Dock.Top); root.Children.Add(who);
-        setName.Click += (_, _) => { _displayName = nameBox.Text.Trim(); ShowWho(); RenderChat(); };
+        setName.Click += (_, _) => { _displayName = nameBox.Text.Trim(); SaveHandle(_displayName); ShowWho(); RenderChat(); RefreshNodes(); };
 
         // send bar
         var input = new TextBox { Background = B("#171819"), Foreground = B("#e6e6e6"), BorderThickness = new Thickness(0), Padding = new Thickness(8), FontSize = 13 };
@@ -738,9 +747,13 @@ public partial class MainWindow : Window
     {
         if (Base58.CheckDecode(token, out _) is { Length: 20 }) return token;     // already an address
         string t = token.Trim(); string tBot = t.StartsWith("bot") ? t : "bot#" + t.TrimStart('#');
+        // a live peer's advertised IDENTITY handle (or bot#id) → their receive address
         foreach (var p in _node.Peers())
             if ((string.Equals(p.Name, t, StringComparison.OrdinalIgnoreCase) || string.Equals(p.Name, tBot, StringComparison.OrdinalIgnoreCase))
                 && !string.IsNullOrEmpty(p.RecvAddr)) return p.RecvAddr;
+        // a saved contact (a stored identity → address)
+        foreach (var (name, address) in _contacts)
+            if (string.Equals(name, t, StringComparison.OrdinalIgnoreCase)) return address;
         return null;
     }
 

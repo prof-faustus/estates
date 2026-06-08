@@ -78,6 +78,25 @@ public sealed class SpvWallet
     public void Spend(string outpoint) { lock (_lock) { _utxos.Remove(outpoint); _proofs.Remove(outpoint); } }
     public int CoinCount { get { lock (_lock) return _utxos.Count; } }
 
+    /// <summary>Received transactions still held (by txid), with the total credited to this wallet and the
+    /// number of coins from that tx — drives the wallet History view.</summary>
+    public IReadOnlyList<(string txid, long credited, int coins)> ReceivedHistory()
+    {
+        lock (_lock)
+        {
+            var by = new Dictionary<string, (long v, int n)>();
+            foreach (var kv in _utxos)
+            {
+                string t = kv.Key[..kv.Key.LastIndexOf(':')];
+                var cur = by.TryGetValue(t, out var e) ? e : (0L, 0);
+                by[t] = (cur.Item1 + kv.Value.value, cur.Item2 + 1);
+            }
+            var o = new List<(string, long, int)>();
+            foreach (var kv in by) o.Add((kv.Key, kv.Value.v, kv.Value.n));
+            return o;
+        }
+    }
+
     /// <summary>Persist the stored envelopes so the next open shows the balance instantly (no re-fetch).
     /// One line per distinct envelope: rawTxHex|header80Hex|branchCsv|index.</summary>
     public void Save(string path)
