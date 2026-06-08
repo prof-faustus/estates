@@ -511,6 +511,8 @@ public partial class MainWindow : Window
         // broadcast to the node + IP-to-IP. Recipients are one per line: "<address|identity|bot#id> <sat>".
         var send = new StackPanel();
         send.Children.Add(new TextBlock { Text = "Send — pay to many (one per line: recipient amount-sat)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        var sSpendable = new TextBlock { Foreground = B("#7bd88f"), FontSize = 12 };
+        send.Children.Add(sSpendable);
         send.Children.Add(L("recipient may be an address, an identity handle, a bot#id, or a contact"));
         var many = F(); many.MinHeight = 90; many.Text = "";
         var feekb = F(); feekb.Text = "1000";   // sat/kB
@@ -819,7 +821,7 @@ public partial class MainWindow : Window
 
         // AUTO-REFRESH: balances, coins, history update themselves (no manual refresh). Stops on unload.
         var auto = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-        auto.Tick += (_, _) => { try { ShowBal(); ShowSpv(); SpvSyncNow(); LoadCoins(); LoadHistory(); LoadTxs(); LoadNotif(); } catch { } };
+        auto.Tick += (_, _) => { try { ShowBal(); ShowSpv(); SpvSyncNow(); LoadCoins(); LoadHistory(); LoadTxs(); LoadNotif(); long sp = LoadSpvFromDisk(w).Balance(); long fz = 0; foreach (var u in LoadSpvFromDisk(w).Utxos()) if (_frozenCoins.Contains(u.txid + ":" + u.vout)) fz += u.value; sSpendable.Text = $"spendable: {(sp - fz):n0} sat" + (fz > 0 ? $"  ({fz:n0} frozen)" : ""); } catch { } };
         auto.Start();
         tabs.Unloaded += (_, _) => auto.Stop();
 
