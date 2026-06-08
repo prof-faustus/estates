@@ -1,38 +1,29 @@
-# ESTATES — build status & steps to go
+# ESTATES — build status (honest, per-phase)
 
-Honest state: this is scaffolding toward an A++ target (ElectrumSVP is the C- baseline to exceed). NOT
-finished. Below: what is in vs the major work remaining.
+Overall ≈ **15%** against the A++ / 1000-build / 1M-doc bar. NOT finished; nothing is "done" until you
+confirm each tab works at runtime.
 
-## In so far (wallet)
-- [x] Key arch: base identity key = index 0, ECDH-root, NEVER an address; addresses = HMAC sub-keys (≥1)
-- [x] Keys encrypted at rest (AES-256-GCM + PBKDF2-SHA256); Save Copy backup; Password change
-- [x] Wallet-create wizard step: seed generated → displayed → confirmed → persisted (existing wallet kept)
-- [x] ElectrumSV shell: menu bar (File/Wallet/View/Tools/Help) + status bar
-- [x] Tabs: Info · Fund · Send · Receive · Requests · History · Transactions · Coins · Destinations ·
-      Coinsplit · Contacts · Identity · NFTs · Network · Tools · Console · Notifications
-- [x] Tables (DataGrid) for History/Coins/Destinations/Contacts/Transactions/Notifications/Requests
-- [x] Send: pay-to-many, fee sat/kB, coin control (freeze), pay-is-pay resolver
-- [x] Receive: fresh sub-key per request (cursor persisted), amount, URI, save request
-- [x] Sweep (raw + BIP38/scrypt, verified), sign/verify, encrypt/decrypt, load/decode/broadcast tx, BIP270
-- [x] Bloom filter (BIP37) + Network/SPV tab; Craig's SPV (IP-to-IP envelopes)
-- [x] Identity tab + persistent advertised handle; NFTs (mint/transfer/persist, owned by identity)
-- [x] Contacts/NFTs/requests/network/cursor persisted across restarts
-- [x] Reference docs: ARCHITECTURE, WALLET, SPV, IDENTITY, KEYS, CHAT, BOTS, GAME, TRANSPORT (+ index)
+| Phase | % | State |
+|-------|---|-------|
+| Identity (Base ID / Type-42 / HMAC hash-chain, integrated) | ~70% | code + tests; base ID never an address; needs deeper game wiring + node-verified pays |
+| SPV money (envelope / merkle proof / headers / Bloom BIP37) | ~55% | code + tests; not runtime-verified end-to-end; node-proof flow partial |
+| ElectrumSVP wallet UI (dark tabs + all features) | ~40% | shell + full tab set + tables structurally there; not A++-polished; no tab confirmed by you |
+| QR | ~80% | real in-tree encoder (RS GF(256), 40 versions, byte mode, masks), verified, rendered in Receive; scan still to do |
+| Multisig / vaults | ~25% | 2-of-2 spend primitive done; vault UI + mandatory nLockTime recovery + node-proof to do |
+| NFTs | ~30% | display + local mint/transfer/persist; on-chain mint + transfer as real txs to do |
+| Chat / game integration | ~40% | chat uses identity + contacts; game seats not yet @handle/pay-from-game |
+| Smart agent | ~20% | command agent works; far from "smart" |
+| Documentation (1M target) | <1% | 10 reference doc files |
+| Runtime / node acceptance | 0% | no tab confirmed by you yet |
 
-## Steps to go (major)
-- [ ] Full multi-screen wizard (account types, restore flows, cosigner) — currently one step
-- [ ] Table parity: per-row labels, right-click actions, sorting/columns to ElectrumSV depth
-- [x] Address/transaction LABELS (editable, persisted) + Labels tab; shown in Coins
-- [ ] Unit selector (Bitcoin/BSV/mBSV) applied everywhere; fiat
-- [ ] On-chain NFT mint/transfer as real txs (TxType.NftMint/Transfer), not local-only records
-- [ ] QR: generate (Receive) + scan (Send/BIP270)
-- [ ] Network dialog/preferences screens (servers, explorers) ported
-- [ ] Deeper identity↔chat↔game integration; in-game NFT deeds as on-chain NFTs
-- [ ] Built-in smart agent
-- [ ] Exhaustive documentation toward the million-line target
-- [ ] Conformance/tests expanded to every claim; thousands of build iterations
+## Steps to go
+1. Vault UI with **mandatory nLockTime recovery** — consensus-critical, built node-verified, not rushed.
+2. On-chain NFT **mint + transfer** to an identity (real txs, TxType.NftMint/Transfer).
+3. Game seats show **@handle** + pay/message from the game.
+4. Richer transaction dialog + History right-click parity; multi-account.
+5. QR **scan** (Send / BIP270).
+6. Network / Preferences dialogs (servers, explorers).
+7. Massive documentation toward the 1M target.
+8. Per-tab tests + a runtime verification pass with you.
 
-## Where I'm at
-Early. The shell + full tab inventory + core features + key architecture + persistence + first docs are in
-and building green each iteration. The depth (labels, units, full wizard, on-chain NFTs, smart agent, the
-million-line docs, table parity) is the bulk still ahead.
+Next: ② on-chain NFT + ③ game wiring, then ① vaults carefully.
