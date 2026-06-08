@@ -709,6 +709,19 @@ public partial class MainWindow : Window
         netp.Children.Add(netInfo);
         tabs.Items.Add(Tab("Network", netp));
 
+        // ===== IDENTITY — your handle + identity key; used to pay, chat, and play as one identity =====
+        var ident = new StackPanel();
+        ident.Children.Add(new TextBlock { Text = "Identity", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        ident.Children.Add(L("Your IDENTITY is your name + your base identity key. Set a handle (e.g. Bob); peers can then find you, chat to you, and PAY you by that identity — not just by address."));
+        var idHandle = F(); idHandle.Text = _displayName; var idMsg = O();
+        var idSave = Btn("Set / save my identity handle");
+        idSave.Click += (_, _) => { _displayName = idHandle.Text.Trim(); SaveHandle(_displayName); idMsg.Text = $"identity saved + advertised as '{_displayName}'"; RefreshNodes(); };
+        ident.Children.Add(L("handle (your identity name)")); ident.Children.Add(idHandle); ident.Children.Add(idSave); ident.Children.Add(idMsg);
+        ident.Children.Add(L("Identity key (index 0 — ECDH derivation root, NEVER an address; all addresses are HMAC hash-chain sub-keys at index ≥ 1)"));
+        var idKey = F(); idKey.IsReadOnly = true; idKey.Text = Tx.ToHex(w.ChildPub(0)); ident.Children.Add(idKey);
+        ident.Children.Add(L("How it's used: pay an identity (\\pay <handle> <sat>), chat direct/broadcast to identities, and play the game as this identity. The identity is your on-chain NFT card (see NFTs tab)."));
+        tabs.Items.Add(Tab("Identity", ident));
+
         // ===== NFTs — deeds/cards + your IDENTITY card, displayed as visual cards owned by your identity =====
         var nft = new StackPanel();
         nft.Children.Add(new TextBlock { Text = "NFTs — your identity card, deeds & game cards", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
