@@ -944,6 +944,18 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("identity: identity pubkey is a valid 33-byte compressed key", kr.IdentityPub().Length == 33 && (kr.IdentityPub()[0] == 0x02 || kr.IdentityPub()[0] == 0x03));
 }
 
+// FILTERLOAD wire (P2P bloom): the wallet's Bloom filter frames into a valid `filterload` network message
+// (magic/command/checksum) and parses back with the exact filter payload — so a serving peer can be told
+// which transactions to return.
+{
+    var bf = new BloomFilter(10, 0.0001, 7);
+    byte[] payload = bf.FilterLoad();
+    byte[] msg = BsvWire.Frame(BsvNet.Mainnet, "filterload", payload);
+    var (parsed, consumed) = BsvWire.TryRead(BsvNet.Mainnet, msg);
+    X("filterload: frames + parses to the filterload command", parsed is not null && parsed.Command == "filterload" && consumed == msg.Length);
+    X("filterload: payload round-trips the Bloom filter", parsed is not null && Tx.ToHex(parsed.Payload) == Tx.ToHex(payload));
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
