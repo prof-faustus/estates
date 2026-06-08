@@ -737,11 +737,12 @@ public partial class MainWindow : Window
         // ===== CONTACTS — named payees (save an identity/address, then pay it by name) =====
         var contacts = new StackPanel();
         contacts.Children.Add(new TextBlock { Text = "Contacts — named payees (pay them by name in Send/chat)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
+        if (!_contactsLoaded) { LoadContactsDisk(); _contactsLoaded = true; }
         var ctGrid = Grid4("Name", "Address", "", "", 220);
         void LoadContacts() { var rows = new List<Row4>(); foreach (var c in _contacts) rows.Add(new Row4 { A = c.name, B = c.address }); ctGrid.ItemsSource = rows; }
         LoadContacts();
         var ctName = F(); var ctAddr = F(); var ctMsg = O(); var ctAdd = Btn("Add contact");
-        ctAdd.Click += (_, _) => { string nm = ctName.Text.Trim(); string ad = ctAddr.Text.Trim(); if (nm.Length == 0 || Base58.CheckDecode(ad, out _) is not { Length: 20 }) { ctMsg.Text = "enter a name + a valid address"; return; } _contacts.Add((nm, ad)); LoadContacts(); ctMsg.Text = $"added contact '{nm}'"; ctName.Clear(); ctAddr.Clear(); };
+        ctAdd.Click += (_, _) => { string nm = ctName.Text.Trim(); string ad = ctAddr.Text.Trim(); if (nm.Length == 0 || Base58.CheckDecode(ad, out _) is not { Length: 20 }) { ctMsg.Text = "enter a name + a valid address"; return; } _contacts.Add((nm, ad)); SaveContactsDisk(); LoadContacts(); ctMsg.Text = $"added contact '{nm}' (saved)"; ctName.Clear(); ctAddr.Clear(); };
         contacts.Children.Add(ctGrid); contacts.Children.Add(L("name")); contacts.Children.Add(ctName); contacts.Children.Add(L("address")); contacts.Children.Add(ctAddr); contacts.Children.Add(ctAdd); contacts.Children.Add(ctMsg);
         tabs.Items.Add(Tab("Contacts", contacts));
 
@@ -880,6 +881,12 @@ public partial class MainWindow : Window
     // frozen coins (coin control) + a session transaction log for the History tab.
     private readonly HashSet<string> _frozenCoins = new();
     private readonly List<Row4> _txLog = new();
+
+    // Persistent contacts (named payees) at %APPDATA%/Estates/contacts.txt — one "name\taddress" per line.
+    private bool _contactsLoaded;
+    private static string ContactsPath() { string d = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Estates"); System.IO.Directory.CreateDirectory(d); return System.IO.Path.Combine(d, "contacts.txt"); }
+    private void LoadContactsDisk() { try { if (!System.IO.File.Exists(ContactsPath())) return; foreach (var ln in System.IO.File.ReadAllLines(ContactsPath())) { var p = ln.Split('\t'); if (p.Length == 2 && !_contacts.Any(c => c.name == p[0])) _contacts.Add((p[0], p[1])); } } catch { } }
+    private void SaveContactsDisk() { try { System.IO.File.WriteAllLines(ContactsPath(), _contacts.Select(c => c.name + "\t" + c.address)); } catch { } }
 
     // A 4-column table row + a styled DataGrid factory — the ElectrumSV list/table look (sortable columns).
     private sealed class Row4 { public string A { get; set; } = ""; public string B { get; set; } = ""; public string C { get; set; } = ""; public string D { get; set; } = ""; }
