@@ -702,6 +702,9 @@ public partial class MainWindow : Window
         lrb.Click += async (_, _) => { try { using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e"); var r = await rpc.CallAsync("sendrawtransaction", lrt.Text.Trim()); lro.Text = r is null ? "rejected by node" : "broadcast: " + r.Value.ToString(); } catch (Exception e) { lro.Text = e.Message; } };
         var lrow = new StackPanel { Orientation = Orientation.Horizontal }; lrow.Children.Add(ldec); lrow.Children.Add(lrb);
         tools.Children.Add(L("raw tx (hex)")); tools.Children.Add(lrt); tools.Children.Add(lrow); tools.Children.Add(lro);
+        var ltxid = F(); var lfetch = Btn("Fetch from blockchain (by txid)");
+        lfetch.Click += async (_, _) => { try { using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e"); var r = await rpc.CallAsync("getrawtransaction", ltxid.Text.Trim()); if (r is null) { lro.Text = "not found on node"; return; } lrt.Text = r.Value.GetString() ?? ""; lro.Text = "fetched — press Decode / preview"; } catch (Exception e) { lro.Text = e.Message; } };
+        tools.Children.Add(L("…or fetch a tx by txid")); tools.Children.Add(ltxid); tools.Children.Add(lfetch);
         tabs.Items.Add(Tab("Tools", tools));
 
         // ===== TRANSACTIONS — this session's unpublished/just-sent transactions (ElectrumSV's 2nd tab) =====
