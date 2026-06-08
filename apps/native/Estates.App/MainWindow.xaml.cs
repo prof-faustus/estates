@@ -573,11 +573,13 @@ public partial class MainWindow : Window
         recv.Children.Add(L("a FRESH, never-before-used receive address (HMAC sub-key, index ≥ 1; identity index 0 is never an address)"));
         var ra = F(); ra.IsReadOnly = true; ra.Text = w.AddressAt(FirstAddr); ra.FontFamily = new FontFamily("Consolas");
         var rAmt = F(); var rReq = O();
+        var qrImg = new System.Windows.Controls.Image { Stretch = System.Windows.Media.Stretch.None, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 8, 0, 8) };
+        RenderQr(qrImg, ra.Text);
         var rNew = Btn("New fresh address"); var rCopy = Btn("Copy"); var rUri = Btn("Make payment request (URI)");
-        rNew.Click += (_, _) => { ra.Text = NextRecvAddress(w); rReq.Text = "fresh address generated"; };
+        rNew.Click += (_, _) => { ra.Text = NextRecvAddress(w); rReq.Text = "fresh address generated"; RenderQr(qrImg, ra.Text); };
         rCopy.Click += (_, _) => { try { System.Windows.Clipboard.SetText(ra.Text); rReq.Text = "address copied"; } catch (Exception e) { rReq.Text = e.Message; } };
-        rUri.Click += (_, _) => { string u = "bitcoin:" + ra.Text; if (long.TryParse(rAmt.Text.Trim(), out long sa) && sa > 0) u += "?amount=" + (sa / 100_000_000.0).ToString("0.########"); rReq.Text = u; try { System.Windows.Clipboard.SetText(u); } catch { } };
-        recv.Children.Add(L("receiving address")); recv.Children.Add(ra);
+        rUri.Click += (_, _) => { string u = "bitcoin:" + ra.Text; if (long.TryParse(rAmt.Text.Trim(), out long sa) && sa > 0) u += "?amount=" + (sa / 100_000_000.0).ToString("0.########"); rReq.Text = u; RenderQr(qrImg, u); try { System.Windows.Clipboard.SetText(u); } catch { } };
+        recv.Children.Add(L("receiving address")); recv.Children.Add(ra); recv.Children.Add(qrImg);
         recv.Children.Add(L("requested amount (sat, optional)")); recv.Children.Add(rAmt);
         var rrow = new StackPanel { Orientation = Orientation.Horizontal }; rrow.Children.Add(rNew); rrow.Children.Add(rCopy); rrow.Children.Add(rUri);
         recv.Children.Add(rrow); recv.Children.Add(L("payment request / URI (copyable; paste into a payer's Send)")); recv.Children.Add(rReq);
@@ -955,6 +957,31 @@ public partial class MainWindow : Window
     private static string ContactsPath() { string d = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Estates"); System.IO.Directory.CreateDirectory(d); return System.IO.Path.Combine(d, "contacts.txt"); }
     private void LoadContactsDisk() { try { if (!System.IO.File.Exists(ContactsPath())) return; foreach (var ln in System.IO.File.ReadAllLines(ContactsPath())) { var p = ln.Split('\t'); if (p.Length == 2 && !_contacts.Any(c => c.name == p[0])) _contacts.Add((p[0], p[1])); } } catch { } }
     private void SaveContactsDisk() { try { System.IO.File.WriteAllLines(ContactsPath(), _contacts.Select(c => c.name + "\t" + c.address)); } catch { } }
+
+    // Render a QR code (real in-tree encoder) into a WPF Image — used for the receive address / URI.
+    private static void RenderQr(System.Windows.Controls.Image img, string text)
+    {
+        try
+        {
+            var q = QrCode.Encode(text, QrCode.Medium);
+            int scale = 6, quiet = 4, n = q.Size, dim = (n + quiet * 2) * scale;
+            var px = new byte[dim * dim * 4];
+            for (int i = 0; i < px.Length; i++) px[i] = 255;                 // white BGRA
+            for (int y = 0; y < n; y++)
+                for (int x = 0; x < n; x++)
+                    if (q.Module(x, y))
+                        for (int dy = 0; dy < scale; dy++)
+                            for (int dx = 0; dx < scale; dx++)
+                            {
+                                int o = (((quiet + y) * scale + dy) * dim + ((quiet + x) * scale + dx)) * 4;
+                                px[o] = 0; px[o + 1] = 0; px[o + 2] = 0; px[o + 3] = 255;
+                            }
+            var wb = new System.Windows.Media.Imaging.WriteableBitmap(dim, dim, 96, 96, System.Windows.Media.PixelFormats.Bgra32, null);
+            wb.WritePixels(new System.Windows.Int32Rect(0, 0, dim, dim), px, dim * 4, 0);
+            img.Source = wb; img.Width = dim; img.Height = dim;
+        }
+        catch { }
+    }
 
     // A 4-column table row + a styled DataGrid factory — the ElectrumSV list/table look (sortable columns).
     private sealed class Row4 { public string A { get; set; } = ""; public string B { get; set; } = ""; public string C { get; set; } = ""; public string D { get; set; } = ""; }

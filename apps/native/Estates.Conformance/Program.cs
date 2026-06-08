@@ -851,6 +851,21 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("bloom: filterload payload is well-formed", bf.FilterLoad()[0] == bf.ByteLength && bf.FilterLoad().Length == 1 + bf.ByteLength + 9);
 }
 
+// QR encoder — structural invariants (real QR: finder patterns, timing, dark module, size scaling).
+{
+    var q = QrCode.Encode("hi", QrCode.Medium);                  // fits version 1
+    X("qr: version-1 short data is 21x21", q.Size == 21);
+    X("qr: finder centres are dark (all 3 corners)", q.Module(3, 3) && q.Module(q.Size - 4, 3) && q.Module(3, q.Size - 4));
+    X("qr: finder light ring (d=2) is light", !q.Module(1, 3) && !q.Module(5, 3));
+    X("qr: timing row alternates", q.Module(8, 6) != q.Module(9, 6));
+    X("qr: mandatory dark module set", q.Module(8, q.Size - 8));
+    var addr = QrCode.Encode("1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2", QrCode.Medium);   // 34 bytes → bigger version
+    X("qr: a 34-char address uses a larger symbol", addr.Size > 21);
+    var big = QrCode.Encode(new string('x', 300), QrCode.Low);
+    X("qr: larger payload uses a larger symbol still", big.Size > addr.Size);
+    X("qr: bitcoin URI encodes without error", QrCode.Encode("bitcoin:1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2?amount=0.5", QrCode.Medium).Size >= 21);
+}
+
 Console.WriteLine($"Estates.Conformance (crypto-core): {xpass} passed, {xfail} failed");
 if (xfail == 0) Console.WriteLine("PASS: the in-tree, library-free crypto core upholds every claim (positive + hostile-negative).");
 else Console.Error.WriteLine("FAIL: the crypto core failed a claim.");
