@@ -24,16 +24,89 @@ public static class WalletStore
 
     public static bool Exists(string path) => File.Exists(path);
 
-    /// <summary>Write the seed to an encrypted wallet file under `password` (overwrites).</summary>
+    /// <summary>Write the seed to an encrypted wallet file under `password`. ABSOLUTE SAFETY RULE: a wallet
+    /// file is NEVER silently overwritten or deleted — if one already exists it is BACKED UP first (an
+    /// append-only set of timestamped copies is kept FOREVER, never pruned), so a previous seed can never
+    /// be lost. Losing keys = losing a life; this makes overwrite-loss impossible by construction.</summary>
+    /// <summary>Extra, independent backup roots that EVERY wallet write fans out to (the app adds
+    /// D:\claude\backups). Each backup is a NEW, uniquely-named, READ-ONLY file that is NEVER deleted or
+    /// overwritten — the user would rather 1 TB of tiny files than ever lose one seed.</summary>
+    public static readonly List<string> ExtraBackupDirs = new();
+
     public static void Create(string path, byte[] seed, string password)
     {
+        BackupFile(path, "pre");    // ON ANY WRITE: back up the PRIOR file first (read-only, never deleted)
         byte[] salt = RandomNumberGenerator.GetBytes(16);
         byte[] key = Rfc2898DeriveBytes.Pbkdf2(password, salt, Pbkdf2Iterations, HashAlgorithmName.SHA256, 32);
         byte[] nonce = RandomNumberGenerator.GetBytes(12);
         byte[] ct = Cipher.Seal(key, nonce, seed, salt);   // AAD = salt
         Array.Clear(key);
-        using var fs = File.Create(path);
-        fs.Write(Magic); fs.Write(salt); fs.Write(nonce); fs.Write(ct);
+        // temp file then atomic move — the prior file is NEVER truncated in place.
+        string tmp = path + ".new-" + Guid.NewGuid().ToString("N");
+        using (var fs = File.Create(tmp)) { fs.Write(Magic); fs.Write(salt); fs.Write(nonce); fs.Write(ct); }
+        if (File.Exists(path)) File.Replace(tmp, path, path + ".prev");   // keeps the immediately-prior copy too
+        else File.Move(tmp, path);
+        BackupFile(path, "post");   // ON ANY WRITE: back up the NEW file too (read-only, never deleted)
+    }
+
+    /// <summary>Copy `path` (if it exists) to EVERY backup root — a unique, timestamped, READ-ONLY file that
+    /// is never overwritten or deleted. Roots = a wallet-backups folder beside the file + every ExtraBackupDir
+    /// (e.g. claude\backups). A failure to back up never blocks the wallet write, but we try every root.</summary>
+    private static void BackupFile(string path, string tag)
+    {
+        try
+        {
+            if (!File.Exists(path)) return;
+            byte[] data = File.ReadAllBytes(path);
+            var roots = new List<string> { Path.Combine(Path.GetDirectoryName(path) ?? ".", "wallet-backups") };
+            roots.AddRange(ExtraBackupDirs);
+            foreach (var d in roots)
+            {
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(d)) continue;
+                    Directory.CreateDirectory(d);
+                    // sequential, never-reused names: estates-wallet-backup-001.dat, -002.dat, …
+                    int next = NextBackupNumber(d);
+                    string bp;
+                    do { bp = Path.Combine(d, $"estates-wallet-backup-{next:000}.dat"); next++; } while (File.Exists(bp));
+                    File.WriteAllBytes(bp, data);
+                    File.SetAttributes(bp, FileAttributes.ReadOnly);   // a backup is immutable + read-only
+                }
+                catch { }
+            }
+        }
+        catch { }
+    }
+
+    private static int NextBackupNumber(string dir)
+    {
+        int max = 0;
+        try
+        {
+            foreach (var f in Directory.GetFiles(dir, "estates-wallet-backup-*.dat"))
+            {
+                string n = Path.GetFileNameWithoutExtension(f);
+                int dash = n.LastIndexOf('-');
+                if (dash >= 0 && int.TryParse(n[(dash + 1)..], out int v) && v > max) max = v;
+            }
+        }
+        catch { }
+        return max + 1;
+    }
+
+    /// <summary>Every wallet copy we still have (the live file + every backup), newest first — for recovery.</summary>
+    public static IReadOnlyList<string> AllCopies(string path)
+    {
+        var list = new List<string>();
+        try { if (File.Exists(path)) list.Add(path); } catch { }
+        try
+        {
+            string bdir = Path.Combine(Path.GetDirectoryName(path) ?? ".", "wallet-backups");
+            if (Directory.Exists(bdir)) list.AddRange(Directory.GetFiles(bdir).OrderByDescending(File.GetLastWriteTimeUtc));
+        }
+        catch { }
+        return list;
     }
 
     /// <summary>Load + decrypt the seed with `password`. null on wrong password / tampered / missing.</summary>

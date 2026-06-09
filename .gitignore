@@ -41,3 +41,5 @@ AGENTS.md
 
 # Published binary artifact
 publish/*.exe
+publish/test-evidence/
+publish/*.pdb

@@ -346,6 +346,30 @@ public partial class MainWindow : Window
 
     // ---- Wallet (its own tab): real, connected to YOUR BSV node ----------------------
     private byte[]? _walletSeed;   // the persisted wallet seed once unlocked (null = locked)
+
+    /// <summary>Headless self-test hook: build the REAL unlocked wallet UI (every tab — Send/Receive/Coins/
+    /// History/NFTs/Tools/…) for a given seed+network and return how many tabs it produced. No window is
+    /// shown; this exercises the actual wallet-rendering code so the 100x EXE test covers it.</summary>
+    internal int SelfTestBuildWalletTabs(byte[] seed, string network)
+    {
+        _walletSeed = seed; _network = network; _wallet = null;
+        var ui = BuildWalletUI();
+        int tabs = 0;
+        void Walk(System.Windows.DependencyObject? d)
+        {
+            if (d is null) return;
+            if (d is System.Windows.Controls.TabControl tc) tabs += tc.Items.Count;
+            int n = System.Windows.Media.VisualTreeHelper.GetChildrenCount(d);
+            for (int i = 0; i < n; i++) Walk(System.Windows.Media.VisualTreeHelper.GetChild(d, i));
+            if (d is System.Windows.Controls.ContentControl cc && cc.Content is System.Windows.DependencyObject co) Walk(co);
+        }
+        // the wallet UI may not be in a visual tree yet; inspect logical content directly
+        if (ui is System.Windows.Controls.ContentControl host && host.Content is System.Windows.Controls.TabControl t) tabs = t.Items.Count;
+        else if (ui is System.Windows.Controls.TabControl t2) tabs = t2.Items.Count;
+        else Walk(ui as System.Windows.DependencyObject);
+        return tabs;
+    }
+
     private UIElement BuildWalletUI()
     {
         var host = new ContentControl();

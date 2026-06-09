@@ -248,7 +248,7 @@ public sealed class WalletWizard : Window
     /// <summary>The REAL registration: create the encrypted wallet and write the signed identity (index-0
     /// identity key, a sub-key attests). Shared by the live wizard AND the headless self-test, so the test
     /// exercises the exact production code. Static + GUI-free.</summary>
-    public static void RegisterCore(string walletPath, byte[] seed, string password, string pseudonym, string email, string realname)
+    public static void RegisterCore(string walletPath, byte[] seed, string password, string pseudonym, string email, string realname, string? identityDir = null)
     {
         WalletStore.Create(walletPath, seed, password);
         byte[] identityPub = Secp256k1.PublicKey(Wallet.ChildPriv(seed, 0));
@@ -260,10 +260,12 @@ public sealed class WalletWizard : Window
             $"\"attestation_pub\":\"{Tx.ToHex(Secp256k1.PublicKey(attPriv))}\",\"created\":\"{System.DateTime.UtcNow:o}\"" +
             "}";
         byte[] sig = EcdsaSign.Sign(attPriv, System.Text.Encoding.UTF8.GetBytes(profile));
-        string dir = System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData), "Estates");
+        // identityDir lets a TEST write its identity into its own evidence folder, NEVER the user's %APPDATA%.
+        string dir = identityDir ?? System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData), "Estates");
         System.IO.Directory.CreateDirectory(dir);
-        System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "identity.json"), profile + "\n" + Tx.ToHex(sig));
-        System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "identity.txt"), pseudonym);
+        string fname = identityDir is null ? "identity.json" : "identity-" + pseudonym + ".json";
+        System.IO.File.WriteAllText(System.IO.Path.Combine(dir, fname), profile + "\n" + Tx.ToHex(sig));
+        if (identityDir is null) System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "identity.txt"), pseudonym);
         // verify what we just wrote actually verifies (a registration that doesn't verify is a failure)
         if (!EcdsaSign.Verify(Secp256k1.PublicKey(attPriv), System.Text.Encoding.UTF8.GetBytes(profile), sig))
             throw new System.Exception("identity signature failed to verify");

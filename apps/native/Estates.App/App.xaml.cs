@@ -26,6 +26,10 @@ public partial class App : Application
         Exit += (_, _) => HardExit();
         base.OnStartup(e);
 
+        // EVERY wallet write fans out READ-ONLY, never-deleted backups to claude\backups (and a folder beside
+        // the wallet). 1 TB of tiny immutable backups is better than ever losing one seed.
+        try { WalletStore.ExtraBackupDirs.Add(@"D:\claude\backups"); } catch { }
+
         // HEADLESS SELF-TEST: estates.exe --selftest runs the REAL app code 100x with NO window, NO input,
         // NO foreground — writes the result to a file and exits. The compiled EXE is tested without ever
         // touching the user's screen, mouse, or keyboard.
@@ -54,9 +58,12 @@ public partial class App : Application
     /// against the FORKID sighash. Result written to %TEMP%/estates_selftest.txt.</summary>
     private static void RunSelfTest()
     {
-        string outp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "estates_selftest.txt");
-        string tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "estates_st");
-        System.IO.Directory.CreateDirectory(tmp);
+        // EVIDENCE dir on disk next to the EXE — every test wallet is a NEW file kept FOREVER (immutable
+        // proof the test ran). NOTHING here is ever deleted, and the user's %APPDATA% wallet is NEVER touched.
+        string evidence = System.IO.Path.Combine(AppContext.BaseDirectory, "test-evidence", "run-" + System.DateTime.UtcNow.ToString("yyyyMMdd-HHmmss"));
+        System.IO.Directory.CreateDirectory(evidence);
+        string outp = System.IO.Path.Combine(evidence, "SELFTEST-RESULT.txt");
+        var manifest = new System.Text.StringBuilder();
         string[] nets = { "mainnet", "testnet", "regtest" };
         int ok = 0, fail = 0; string firstErr = "";
         for (int i = 1; i <= 100; i++)
@@ -65,22 +72,23 @@ public partial class App : Application
             {
                 byte[] seed = RandomNumberGenerator.GetBytes(32);
                 string pw = "pw" + i + "Aa!"; string net = nets[i % 3];
-                string wpath = System.IO.Path.Combine(tmp, "w" + i + ".dat");
+                string wpath = System.IO.Path.Combine(evidence, $"wallet-{i:0000}.dat");   // a NEW, distinct file
+                if (System.IO.File.Exists(wpath)) throw new System.Exception("evidence wallet already exists — would overwrite; refusing");
 
-                // (1) open / close round-trip with a different key each time; wrong password must be rejected
+                // (1) create this NEW wallet, then open/close/open/close it; wrong password must be rejected
                 WalletStore.Create(wpath, seed, pw);
                 var s2 = WalletStore.Open(wpath, pw);
                 if (s2 is null || !s2.AsSpan().SequenceEqual(seed)) throw new System.Exception("open round-trip mismatch");
                 var bad = WalletStore.Open(wpath, pw + "x");
                 if (bad is not null && bad.AsSpan().SequenceEqual(seed)) throw new System.Exception("wrong password accepted");
-                var s3 = WalletStore.Open(wpath, pw);   // open / close / open / close
+                var s3 = WalletStore.Open(wpath, pw);
                 if (s3 is null || !s3.AsSpan().SequenceEqual(seed)) throw new System.Exception("second open mismatch");
 
                 // (2) construct the REAL wizard GUI (builds the actual control tree; never shown, no input)
                 var wiz = new WalletWizard(); _ = wiz.Title;
 
-                // (3) the REAL registration code (same path the live wizard runs) + signature self-verify
-                WalletWizard.RegisterCore(wpath, seed, pw, "player" + i, "player" + i + "@example.com", "");
+                // (3) the REAL registration code, writing the identity into THIS test's evidence dir only
+                WalletWizard.RegisterCore(wpath, seed, pw, "player" + i, "player" + i + "@example.com", "", evidence);
 
                 // (4) build + SIGN a real spend with this key and verify it against the FORKID sighash
                 var w = new StandaloneWallet(seed, net);
@@ -92,12 +100,19 @@ public partial class App : Application
                 byte[] der = EcdsaSign.SignPrehashDer(w.ChildPriv(1), sh);
                 if (!EcdsaSign.VerifyDerPrehash(w.ChildPub(1), sh, der)) throw new System.Exception("spend sig verify failed");
 
-                System.IO.File.Delete(wpath);
+                // NEVER delete. The wallet file STAYS as immutable evidence.
+                manifest.AppendLine($"wallet-{i:0000}.dat  net={net}  addr1={w.AddressAt(1)}  bytes={new System.IO.FileInfo(wpath).Length}");
                 ok++;
             }
-            catch (System.Exception e) { fail++; if (firstErr.Length == 0) firstErr = "iter " + i + ": " + e.Message; }
+            catch (System.Exception e) { fail++; if (firstErr.Length == 0) firstErr = "iter " + i + ": " + e.Message; manifest.AppendLine($"wallet-{i:0000}.dat  FAILED: {e.Message}"); }
         }
-        try { System.IO.File.WriteAllText(outp, $"SELFTEST {ok}/100 fail={fail}" + (firstErr.Length > 0 ? " firstErr=" + firstErr : "")); } catch { }
+        try
+        {
+            System.IO.File.WriteAllText(outp,
+                $"SELFTEST {ok}/100 fail={fail}  (each line = one NEW wallet file left as evidence; nothing deleted)\n" +
+                $"evidence dir: {evidence}\n" + (firstErr.Length > 0 ? "firstErr=" + firstErr + "\n" : "") + "\n" + manifest);
+        }
+        catch { }
     }
 
     /// <summary>Owners of live resources (the P2P node) add a clean teardown here so a
