@@ -220,6 +220,17 @@ public partial class MainWindow : Window
         return await SpvFetch.BroadcastAsync(rawHex, bnet);
     }
 
+    /// <summary>Broadcast via the network-correct path (BroadcastToNetwork) but return a JsonElement?
+    /// compatible with the legacy sendrawtransaction call sites: non-null (a JSON string = the broadcast
+    /// detail) on success, null on failure. Lets every send site work on regtest AND testnet/mainnet.</summary>
+    private async Task<System.Text.Json.JsonElement?> BroadcastR(string rawHex)
+    {
+        var bc = await BroadcastToNetwork(rawHex);
+        if (!bc.ok) return null;
+        using var doc = System.Text.Json.JsonDocument.Parse("\"" + bc.detail.Replace("\\", "\\\\").Replace("\"", "\\'") + "\"");
+        return doc.RootElement.Clone();
+    }
+
     private int _nextBotId = 1;
     private void RunBot_Click(object sender, RoutedEventArgs e)
     {
@@ -1032,7 +1043,7 @@ public partial class MainWindow : Window
                 var built = SpvSpend.BuildMany(spv2, SpvKeymap(w), new List<(byte[], long)> { (to, bal - 1000) }, 1000, to, null);
                 if (built is null) { cmsg.Text = "build failed"; return; }
                 using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e");
-                var r = await rpc.CallAsync("sendrawtransaction", Tx.ToHex(built.Raw));
+                var r = await BroadcastR(Tx.ToHex(built.Raw));
                 if (r is null) { cmsg.Text = "node rejected"; return; }
                 foreach (var c in built.Tx.Inputs) spv2.Spend(c.PrevTxid + ":" + c.PrevVout); spv2.Save(SpvPathFor()); ShowSpv(); LoadCoins();
                 cmsg.Text = $"consolidated {Fmt(bal - 1000)} into one coin · txid {built.Txid[..16]}…";
@@ -1079,7 +1090,7 @@ public partial class MainWindow : Window
                 var built = SpvSpend.BuildMany(spv2, SpvKeymap(w), outs, 500, change, _frozenCoins);
                 if (built is null) { csOut.Text = "insufficient funds"; return; }
                 using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e");
-                var r = await rpc.CallAsync("sendrawtransaction", Tx.ToHex(built.Raw));
+                var r = await BroadcastR(Tx.ToHex(built.Raw));
                 if (r is null) { csOut.Text = "node rejected the split"; return; }
                 foreach (var c in built.Tx.Inputs) spv2.Spend(c.PrevTxid + ":" + c.PrevVout); spv2.Save(SpvPathFor()); ShowSpv();
                 csOut.Text = $"split into {n} coins · txid {built.Txid[..16]}…";
@@ -1139,7 +1150,7 @@ public partial class MainWindow : Window
             }
             catch (Exception e) { lro.Text = e.Message; }
         };
-        lrb.Click += async (_, _) => { try { using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e"); var r = await rpc.CallAsync("sendrawtransaction", lrt.Text.Trim()); lro.Text = r is null ? "rejected by node" : "broadcast: " + r.Value.ToString(); } catch (Exception e) { lro.Text = e.Message; } };
+        lrb.Click += async (_, _) => { try { var r = await BroadcastR(lrt.Text.Trim()); lro.Text = r is null ? "rejected by the network" : "broadcast: " + r.Value.ToString(); } catch (Exception e) { lro.Text = e.Message; } };
         var lrow = new StackPanel { Orientation = Orientation.Horizontal }; lrow.Children.Add(ldec); lrow.Children.Add(lrb);
         tools.Children.Add(L("raw tx (hex)")); tools.Children.Add(lrt); tools.Children.Add(lrow); tools.Children.Add(lro);
         var ltxid = F(); var lfetch = Btn("Fetch from blockchain (by txid)");
@@ -1281,7 +1292,7 @@ public partial class MainWindow : Window
                 var built = SpvSpend.BuildMany(spv2, SpvKeymap(w), new List<(byte[], long)> { (lockScript, amt) }, 500, change, _frozenCoins);
                 if (built is null) { vOut.Text = "insufficient SPV funds to fund the vault"; return; }
                 using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e");
-                var r = await rpc.CallAsync("sendrawtransaction", Tx.ToHex(built.Raw));
+                var r = await BroadcastR(Tx.ToHex(built.Raw));
                 if (r is null) { vOut.Text = "node rejected vault funding"; return; }
                 foreach (var c in built.Tx.Inputs) spv2.Spend(c.PrevTxid + ":" + c.PrevVout); spv2.Save(SpvPathFor());
                 byte[] ownerRefund = NodeWallet.P2pkhScript(Recovery.Hash160(hotPub));
@@ -1507,7 +1518,7 @@ public partial class MainWindow : Window
                 if (built is not null)
                 {
                     using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e");
-                    var r = await rpc.CallAsync("sendrawtransaction", Tx.ToHex(built.Raw));
+                    var r = await BroadcastR(Tx.ToHex(built.Raw));
                     foreach (var l in _node.LiveLinks()) { try { l.Send(built.Raw); } catch { } }
                     if (r is not null) { foreach (var c in built.Tx.Inputs) spv2.Spend(c.PrevTxid + ":" + c.PrevVout); spv2.Save(SpvPathFor()); txidRec = built.Txid; }
                 }
@@ -1544,7 +1555,7 @@ public partial class MainWindow : Window
                 if (built is not null)
                 {
                     using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e");
-                    var r = await rpc.CallAsync("sendrawtransaction", Tx.ToHex(built.Raw));
+                    var r = await BroadcastR(Tx.ToHex(built.Raw));
                     foreach (var l in _node.LiveLinks()) { try { l.Send(built.Raw); } catch { } }
                     if (r is not null) { foreach (var c in built.Tx.Inputs) spv2.Spend(c.PrevTxid + ":" + c.PrevVout); spv2.Save(SpvPathFor()); txidRec = built.Txid; }
                 }
@@ -1834,7 +1845,7 @@ public partial class MainWindow : Window
             byte[] change = NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(FirstAddr)));
             var built = SpvSpend.BuildMany(spv2, SpvKeymap(w), outs, 500, change, _frozenCoins);
             if (built is null) return "insufficient funds for this invoice";
-            using (var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e")) { try { await rpc.CallAsync("sendrawtransaction", Tx.ToHex(built.Raw)); } catch { } }
+            using (var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e")) { try { await BroadcastR(Tx.ToHex(built.Raw)); } catch { } }
             foreach (var l in _node.LiveLinks()) { try { l.Send(built.Raw); } catch { } }
             foreach (var c in built.Tx.Inputs) spv2.Spend(c.PrevTxid + ":" + c.PrevVout);
             spv2.Save(SpvPathFor());
@@ -1888,7 +1899,7 @@ public partial class MainWindow : Window
                 signedIns.Add(new TxInputN(ins[i].PrevTxid, ins[i].PrevVout, ss.ToArray(), 0xffffffff));
             }
             var signed = new NativeTx(2, signedIns, unsigned.Outputs, 0);
-            var r = await rpc.CallAsync("sendrawtransaction", Tx.ToHex(Tx.Serialize(signed)));
+            var r = await BroadcastR(Tx.ToHex(Tx.Serialize(signed)));
             return r is null ? "node rejected the sweep tx" : $"SWEPT {sum - 500:n0} sat from {fromAddr} → your wallet";
         }
         catch (System.Exception e) { return e.Message; }
@@ -2165,7 +2176,7 @@ public partial class MainWindow : Window
             var built = SpvSpend.Build(spv, SpvKeymap(w), NodeWallet.P2pkhScript(pkh), sat, 500, change);
             if (built is null) return "insufficient SPV funds";
             using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e");
-            var r = await rpc.CallAsync("sendrawtransaction", Tx.ToHex(built.Raw));
+            var r = await BroadcastR(Tx.ToHex(built.Raw));
             if (r is null) return "broadcast rejected by node";
             foreach (var cc in built.Tx.Inputs) spv.Spend(cc.PrevTxid + ":" + cc.PrevVout);
             spv.Save(SpvPathFor());

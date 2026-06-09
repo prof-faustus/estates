@@ -37,6 +37,8 @@ public sealed class BsvPeer : IDisposable
     /// the confirmation that the broadcast reached the network. Carries the txid.</summary>
     public event Action<string>? OnTxSent;
     public event Action<string>? OnLog;
+    /// <summary>Raised with the command name of EVERY message received from the peer (diagnostics).</summary>
+    public event Action<string>? OnRecv;
 
     public BsvPeer(BsvNet net, string host, int port) { _net = net; Host = host; Port = port; }
 
@@ -107,7 +109,7 @@ public sealed class BsvPeer : IDisposable
             while (!ct.IsCancellationRequested)
             {
                 int n = await s.ReadAsync(chunk, ct).ConfigureAwait(false);
-                if (n <= 0) break;                                   // peer closed
+                if (n <= 0) { OnLog?.Invoke($"{Host} closed the connection (EOF)"); break; }   // peer closed
                 buf = Concat(buf, chunk, n);
                 // drain every complete message currently buffered
                 for (;;)
@@ -127,6 +129,7 @@ public sealed class BsvPeer : IDisposable
 
     private async Task HandleAsync(BsvWire.Message m)
     {
+        OnRecv?.Invoke(m.Command);
         switch (m.Command)
         {
             case "version":
