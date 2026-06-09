@@ -66,6 +66,52 @@ public static class SpvFetch
         catch (Exception e) { return new Result(null, "public-proof", "error: " + e.Message); }
     }
 
+    /// <summary>Broadcast a signed transaction to the BSV NETWORK — never to a single local node. Tries
+    /// P2P peers first (announce inv → peer asks getdata → we send the tx), then a public broadcast
+    /// endpoint as backup. Returns (accepted, detail). This is what makes Send work without our own node,
+    /// the same way ElectrumSV reaches the network through its servers.</summary>
+    public static async Task<(bool ok, string detail)> BroadcastAsync(string rawTxHex, BsvNet net, HttpClient http, CancellationToken ct = default)
+    {
+        rawTxHex = (rawTxHex ?? "").Trim();
+        bool p2p = await TryP2PBroadcastAsync(rawTxHex, net, ct).ConfigureAwait(false);   // (1) primary: the network's own peers
+        string api = ApiBase(net);
+        if (api.Length > 0)
+        {
+            try
+            {
+                var content = new System.Net.Http.StringContent("{\"txhex\":\"" + rawTxHex + "\"}", System.Text.Encoding.UTF8, "application/json");
+                var resp = await http.PostAsync($"{api}/tx/raw", content, ct).ConfigureAwait(false);
+                string body = (await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false)).Trim();
+                if (resp.IsSuccessStatusCode) return (true, "accepted by the network · txid " + body.Trim('"'));
+                if (p2p) return (true, "announced to P2P peers (broadcast index said: " + body + ")");
+                return (false, "network rejected: " + body);
+            }
+            catch (Exception e) { return p2p ? (true, "announced to P2P peers (index error: " + e.Message + ")") : (false, "broadcast failed: " + e.Message); }
+        }
+        return p2p ? (true, "announced to P2P peers") : (false, "no broadcast path for this network");
+    }
+
+    private static async Task<bool> TryP2PBroadcastAsync(string rawTxHex, BsvNet net, CancellationToken ct)
+    {
+        byte[] raw; try { raw = Tx.FromHex(rawTxHex); } catch { return false; }
+        foreach (var (host, port) in BsvSeeds.Discover(net, 8))
+        {
+            try
+            {
+                using var peer = new BsvPeer(net, host, port);
+                bool sent = false; peer.OnTxSent += _ => sent = true;
+                await peer.ConnectAsync(0, 5000).ConfigureAwait(false);
+                for (int i = 0; i < 50 && !peer.HandshakeComplete; i++) await Task.Delay(100, ct).ConfigureAwait(false);
+                if (!peer.HandshakeComplete) continue;
+                await peer.BroadcastAsync(raw).ConfigureAwait(false);
+                for (int i = 0; i < 50 && !sent; i++) await Task.Delay(100, ct).ConfigureAwait(false);
+                if (sent) return true;
+            }
+            catch { }
+        }
+        return false;
+    }
+
     /// <summary>Scan the wallet's own addresses for incoming coins: for each address, ask the network which
     /// UTXOs pay it, fetch each one's proof, VERIFY locally, and credit it. This is the "it just works"
     /// path — the user never types a txid. P2P/bloom is the eventual primary; the public UTXO+proof index

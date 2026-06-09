@@ -612,14 +612,14 @@ public partial class MainWindow : Window
                 byte[] changeScript = NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(FirstAddr)));   // change to a sub-key, never index 0
                 var built = SpvSpend.Build(spv, SpvKeymap(w), NodeWallet.P2pkhScript(pkh), amt, 500, changeScript);
                 if (built is null) { sout.Text = "insufficient SPV funds"; return; }
-                int rpcPort = _network == "mainnet" ? 8332 : _network == "testnet" ? 18332 : 18443;
-                using var rpc = new BsvRpc("127.0.0.1", rpcPort, "e", "e");
-                var r = await rpc.CallAsync("sendrawtransaction", Tx.ToHex(built.Raw));
-                if (r is null) { sout.Text = "broadcast rejected by node"; return; }
+                sout.Text = "broadcasting to the BSV network…";
+                BsvNet bnet = _network == "mainnet" ? BsvNet.Mainnet : _network == "testnet" ? BsvNet.Testnet : BsvNet.Regtest;
+                var bc = await SpvFetch.BroadcastAsync(Tx.ToHex(built.Raw), bnet, _http);   // network, NOT my local node
+                if (!bc.ok) { sout.Text = "broadcast FAILED: " + bc.detail + " (txid " + built.Txid + ")"; return; }
                 foreach (var c in built.Tx.Inputs) spv.Spend(c.PrevTxid + ":" + c.PrevVout);
                 spv.Save(spvPath); Dispatcher.Invoke(ShowSpv);
-                _txLog.Insert(0, new Row4 { A = "sent", B = "-" + amt.ToString("n0"), C = built.Txid[..Math.Min(20, built.Txid.Length)] + "…", D = "→ " + target[..Math.Min(16, target.Length)] + "…" });
-                sout.Text = $"SENT · txid {built.Txid[..16]}…";
+                _txLog.Insert(0, new Row4 { A = "sent", B = "-" + amt.ToString("n0"), C = built.Txid[..Math.Min(20, built.Txid.Length)] + "…", D = "→ " + target[..Math.Min(16, target.Length)] + "…", Full = built.Txid });
+                sout.Text = $"SENT · {bc.detail} · txid {built.Txid}";
             }
             catch (System.Exception e) { sout.Text = e.Message; }
         }
@@ -689,15 +689,16 @@ public partial class MainWindow : Window
                 var built = SpvSpend.BuildMany(spv2, SpvKeymap(w), outs, fee, change, _frozenCoins);
                 if (built is null) { so.Text = "insufficient funds (after excluding frozen coins)"; return; }
                 raw.Text = Tx.ToHex(built.Raw);
-                using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e");
-                var r = await rpc.CallAsync("sendrawtransaction", Tx.ToHex(built.Raw));
+                so.Text = "broadcasting to the BSV network…";
+                BsvNet bnet = _network == "mainnet" ? BsvNet.Mainnet : _network == "testnet" ? BsvNet.Testnet : BsvNet.Regtest;
+                var bc = await SpvFetch.BroadcastAsync(Tx.ToHex(built.Raw), bnet, _http);   // network, NOT my local node
                 foreach (var l in _node.LiveLinks()) { try { l.Send(built.Raw); } catch { } }   // IP-to-IP too
-                if (r is null) { so.Text = "built + signed (txid " + built.Txid[..16] + "…); node did not accept — raw below"; return; }
+                if (!bc.ok) { so.Text = "broadcast FAILED: " + bc.detail + "  ·  signed raw is below (txid " + built.Txid + ")"; return; }
                 foreach (var c in built.Tx.Inputs) spv2.Spend(c.PrevTxid + ":" + c.PrevVout);
                 spv2.Save(SpvPathFor()); ShowSpv();
-                _txLog.Insert(0, new Row4 { A = "sent", B = "-" + outs.Sum(o => o.amount).ToString("n0"), C = built.Txid[..Math.Min(20, built.Txid.Length)] + "…", D = outs.Count + " payee, fee " + fee });
+                _txLog.Insert(0, new Row4 { A = "sent", B = "-" + outs.Sum(o => o.amount).ToString("n0"), C = built.Txid[..Math.Min(20, built.Txid.Length)] + "…", D = outs.Count + " payee, fee " + fee, Full = built.Txid });
                 LogEvent("sent", outs.Sum(o => o.amount).ToString("n0") + " sat to " + outs.Count + " payee(s), fee " + fee + ", txid " + built.Txid);
-                so.Text = $"SENT · {outs.Count} payee(s) · fee {fee} sat · txid {built.Txid}";
+                so.Text = $"SENT · {outs.Count} payee(s) · fee {fee} sat · {bc.detail} · txid {built.Txid}";
             }
             catch (Exception e) { so.Text = e.Message; }
         }
