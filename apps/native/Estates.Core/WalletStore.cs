@@ -69,7 +69,8 @@ public static class WalletStore
                     // sequential, never-reused names: estates-wallet-backup-001.dat, -002.dat, …
                     int next = NextBackupNumber(d);
                     string bp;
-                    do { bp = Path.Combine(d, $"estates-wallet-backup-{next:000}.dat"); next++; } while (File.Exists(bp));
+                    // estates-wallet-backup-<seq>-<UTC date-time>.dat  (sequential number + exact date)
+                    do { bp = Path.Combine(d, $"estates-wallet-backup-{next:000}-{DateTime.UtcNow:yyyyMMdd-HHmmss-fffffff}Z.dat"); next++; } while (File.Exists(bp));
                     File.WriteAllBytes(bp, data);
                     File.SetAttributes(bp, FileAttributes.ReadOnly);   // a backup is immutable + read-only
                 }
@@ -81,14 +82,16 @@ public static class WalletStore
 
     private static int NextBackupNumber(string dir)
     {
-        int max = 0;
+        int max = 0; const string pfx = "estates-wallet-backup-";
         try
         {
             foreach (var f in Directory.GetFiles(dir, "estates-wallet-backup-*.dat"))
             {
                 string n = Path.GetFileNameWithoutExtension(f);
-                int dash = n.LastIndexOf('-');
-                if (dash >= 0 && int.TryParse(n[(dash + 1)..], out int v) && v > max) max = v;
+                if (!n.StartsWith(pfx)) continue;
+                string rest = n[pfx.Length..];                       // "<seq>-<date>…"
+                int j = 0; while (j < rest.Length && char.IsDigit(rest[j])) j++;   // leading seq digits
+                if (j > 0 && int.TryParse(rest[..j], out int v) && v > max) max = v;
             }
         }
         catch { }
