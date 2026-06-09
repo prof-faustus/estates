@@ -1392,6 +1392,41 @@ public partial class MainWindow : Window
             RefreshNodes();
         };
         ident.Children.Add(L("handle (your identity name)")); ident.Children.Add(idHandle); ident.Children.Add(idSave); ident.Children.Add(idMsg);
+        // REGISTER ON-CHAIN — an identity is only REAL once written on-chain. This broadcasts the signed
+        // identity (sealed to your identity key) as a transaction to REAL BSV nodes (P2P), then marks it on-chain.
+        ident.Children.Add(L("An identity is real only once it is ON-CHAIN. This writes it as a transaction (needs funds)."));
+        var idOcBtn = Btn("Register identity ON-CHAIN"); var idOcMsg = O();
+        idOcBtn.Click += async (_, _) =>
+        {
+            if (_displayName.Trim().Length == 0) { idOcMsg.Text = "set your handle first"; return; }
+            if (!HasFunds(out string why)) { idOcMsg.Text = "can't register on-chain — " + why; return; }
+            idOcMsg.Text = "building + broadcasting the on-chain identity registration to real nodes…";
+            try
+            {
+                var spv2 = LoadSpvFromDisk(w);
+                byte[] idPub = w.ChildPub(0); byte[] attPriv = w.ChildPriv(1); byte[] attPub = Secp256k1.PublicKey(attPriv);
+                byte[] ownerPkh = Recovery.Hash160(w.ChildPub(FirstAddr));
+                string prof = "{\"pseudonym\":\"" + _displayName + "\",\"identity\":\"" + Tx.ToHex(idPub) + "\",\"attestation_pub\":\"" + Tx.ToHex(attPub) + "\",\"net\":\"" + _network + "\"}";
+                byte[] sig = EcdsaSign.Sign(attPriv, System.Text.Encoding.UTF8.GetBytes(prof));
+                byte[] payload = System.Text.Encoding.UTF8.GetBytes(prof + "\n" + Tx.ToHex(sig));
+                var ring = new KeyRing(_walletSeed!);
+                byte[] carrier = TxMessage.SealCarrier(ring.MessagePriv(idPub, "identity", 0), idPub, TxType.NftMint, payload);   // identity card = a sealed NFT
+                byte[] script = TxTransport.MessageOutput(carrier, ownerPkh);
+                byte[] change = NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(FirstAddr)));
+                var built = SpvSpend.BuildMany(spv2, SpvKeymap(w), new List<(byte[], long)> { (script, 1) }, 500, change, _frozenCoins);
+                if (built is null) { idOcMsg.Text = "insufficient funds to register on-chain"; return; }
+                BsvNet bnet = _network == "mainnet" ? BsvNet.Mainnet : _network == "testnet" ? BsvNet.Testnet : BsvNet.Regtest;
+                var bc = await SpvFetch.BroadcastAsync(Tx.ToHex(built.Raw), bnet);   // REAL nodes, P2P
+                if (!bc.ok) { idOcMsg.Text = "broadcast FAILED: " + bc.detail + " (txid " + built.Txid + ")"; return; }
+                foreach (var c in built.Tx.Inputs) spv2.Spend(c.PrevTxid + ":" + c.PrevVout); spv2.Save(SpvPathFor()); ShowSpv();
+                string dir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Estates"); System.IO.Directory.CreateDirectory(dir);
+                System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "identity-onchain-" + _network + ".txt"), built.Txid);   // now the panel shows ON-CHAIN ✓
+                LogEvent("identity-onchain", "registered '" + _displayName + "' on " + _network + " · txid " + built.Txid);
+                idOcMsg.Text = "identity registered ON-CHAIN · " + bc.detail + " · txid " + built.Txid;
+            }
+            catch (Exception ex) { idOcMsg.Text = ex.Message; }
+        };
+        ident.Children.Add(idOcBtn); ident.Children.Add(idOcMsg);
         ident.Children.Add(L("Identity key (index 0 — ECDH derivation root, NEVER an address; all addresses are HMAC hash-chain sub-keys at index ≥ 1)"));
         var idKey = F(); idKey.IsReadOnly = true; idKey.Text = Tx.ToHex(w.ChildPub(0)); ident.Children.Add(idKey);
         var idCopy = Btn("Copy identity key"); var idCopyMsg = O();
