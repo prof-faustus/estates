@@ -201,6 +201,25 @@ public partial class MainWindow : Window
         return true;
     }
 
+    /// <summary>Broadcast a raw tx to the NETWORK for the current network: regtest goes to the local regtest
+    /// node (regtest IS local — there are no public regtest peers); mainnet/testnet go to REAL public BSV
+    /// nodes over P2P (never the local node). One path for every action.</summary>
+    private async Task<(bool ok, string detail)> BroadcastToNetwork(string rawHex)
+    {
+        if (_network == "regtest")
+        {
+            try
+            {
+                using var rpc = new BsvRpc("127.0.0.1", RpcPort(), "e", "e");
+                var r = await rpc.CallAsync("sendrawtransaction", rawHex);
+                return r is null ? (false, "regtest node rejected the tx") : (true, "accepted by the regtest node");
+            }
+            catch (Exception e) { return (false, "regtest broadcast failed: " + e.Message); }
+        }
+        BsvNet bnet = _network == "mainnet" ? BsvNet.Mainnet : BsvNet.Testnet;
+        return await SpvFetch.BroadcastAsync(rawHex, bnet);
+    }
+
     private int _nextBotId = 1;
     private void RunBot_Click(object sender, RoutedEventArgs e)
     {
@@ -667,7 +686,7 @@ public partial class MainWindow : Window
                 if (built is null) { sout.Text = "insufficient SPV funds"; return; }
                 sout.Text = "broadcasting to the BSV network…";
                 BsvNet bnet = _network == "mainnet" ? BsvNet.Mainnet : _network == "testnet" ? BsvNet.Testnet : BsvNet.Regtest;
-                var bc = await SpvFetch.BroadcastAsync(Tx.ToHex(built.Raw), bnet);   // 100% real-node P2P, never local/HTTP
+                var bc = await BroadcastToNetwork(Tx.ToHex(built.Raw));   // 100% real-node P2P, never local/HTTP
                 if (!bc.ok) { sout.Text = "broadcast FAILED: " + bc.detail + " (txid " + built.Txid + ")"; return; }
                 foreach (var c in built.Tx.Inputs) spv.Spend(c.PrevTxid + ":" + c.PrevVout);
                 spv.Save(spvPath); Dispatcher.Invoke(ShowSpv);
@@ -747,7 +766,7 @@ public partial class MainWindow : Window
                 raw.Text = Tx.ToHex(built.Raw);
                 so.Text = "broadcasting to the BSV network…";
                 BsvNet bnet = _network == "mainnet" ? BsvNet.Mainnet : _network == "testnet" ? BsvNet.Testnet : BsvNet.Regtest;
-                var bc = await SpvFetch.BroadcastAsync(Tx.ToHex(built.Raw), bnet);   // 100% real-node P2P, never local/HTTP
+                var bc = await BroadcastToNetwork(Tx.ToHex(built.Raw));   // 100% real-node P2P, never local/HTTP
                 foreach (var l in _node.LiveLinks()) { try { l.Send(built.Raw); } catch { } }   // IP-to-IP too
                 if (!bc.ok) { so.Text = "broadcast FAILED: " + bc.detail + "  ·  signed raw is below (txid " + built.Txid + ")"; return; }
                 foreach (var c in built.Tx.Inputs) spv2.Spend(c.PrevTxid + ":" + c.PrevVout);
@@ -1416,7 +1435,7 @@ public partial class MainWindow : Window
                 var built = SpvSpend.BuildMany(spv2, SpvKeymap(w), new List<(byte[], long)> { (script, 1) }, 500, change, _frozenCoins);
                 if (built is null) { idOcMsg.Text = "insufficient funds to register on-chain"; return; }
                 BsvNet bnet = _network == "mainnet" ? BsvNet.Mainnet : _network == "testnet" ? BsvNet.Testnet : BsvNet.Regtest;
-                var bc = await SpvFetch.BroadcastAsync(Tx.ToHex(built.Raw), bnet);   // REAL nodes, P2P
+                var bc = await BroadcastToNetwork(Tx.ToHex(built.Raw));   // REAL nodes, P2P
                 if (!bc.ok) { idOcMsg.Text = "broadcast FAILED: " + bc.detail + " (txid " + built.Txid + ")"; return; }
                 foreach (var c in built.Tx.Inputs) spv2.Spend(c.PrevTxid + ":" + c.PrevVout); spv2.Save(SpvPathFor()); ShowSpv();
                 string dir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Estates"); System.IO.Directory.CreateDirectory(dir);
