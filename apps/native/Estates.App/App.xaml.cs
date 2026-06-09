@@ -1,4 +1,7 @@
+using System.Linq;
+using System.Security.Cryptography;
 using System.Windows;
+using Estates.Core;
 
 namespace Estates.App;
 
@@ -23,6 +26,11 @@ public partial class App : Application
         Exit += (_, _) => HardExit();
         base.OnStartup(e);
 
+        // HEADLESS SELF-TEST: estates.exe --selftest runs the REAL app code 100x with NO window, NO input,
+        // NO foreground — writes the result to a file and exits. The compiled EXE is tested without ever
+        // touching the user's screen, mouse, or keyboard.
+        if (e.Args.Any(a => a == "--selftest")) { RunSelfTest(); Shutdown(); return; }
+
         // A bot is a SEPARATE node the human started (estates.exe --bot) and FULLY controls
         // — the same lobby and the same human controls as any player, never automated. The
         // lobby spawns it ONLY when the human clicks "Run a bot".
@@ -38,6 +46,58 @@ public partial class App : Application
         }
         Window w = bot ? new BotWindow(botId, owner, ownerPub) : new MainWindow();   // a bot is NOT a person — its own small window
         w.Show();
+    }
+
+    /// <summary>Run the real wallet lifecycle 100x, headless. NO window is shown, NO input is taken, NO
+    /// foreground stolen — it constructs the REAL wizard GUI, runs the REAL registration, opens/closes the
+    /// encrypted wallet with 100 different keys/passwords/networks, and builds+signs a real spend verified
+    /// against the FORKID sighash. Result written to %TEMP%/estates_selftest.txt.</summary>
+    private static void RunSelfTest()
+    {
+        string outp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "estates_selftest.txt");
+        string tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "estates_st");
+        System.IO.Directory.CreateDirectory(tmp);
+        string[] nets = { "mainnet", "testnet", "regtest" };
+        int ok = 0, fail = 0; string firstErr = "";
+        for (int i = 1; i <= 100; i++)
+        {
+            try
+            {
+                byte[] seed = RandomNumberGenerator.GetBytes(32);
+                string pw = "pw" + i + "Aa!"; string net = nets[i % 3];
+                string wpath = System.IO.Path.Combine(tmp, "w" + i + ".dat");
+
+                // (1) open / close round-trip with a different key each time; wrong password must be rejected
+                WalletStore.Create(wpath, seed, pw);
+                var s2 = WalletStore.Open(wpath, pw);
+                if (s2 is null || !s2.AsSpan().SequenceEqual(seed)) throw new System.Exception("open round-trip mismatch");
+                var bad = WalletStore.Open(wpath, pw + "x");
+                if (bad is not null && bad.AsSpan().SequenceEqual(seed)) throw new System.Exception("wrong password accepted");
+                var s3 = WalletStore.Open(wpath, pw);   // open / close / open / close
+                if (s3 is null || !s3.AsSpan().SequenceEqual(seed)) throw new System.Exception("second open mismatch");
+
+                // (2) construct the REAL wizard GUI (builds the actual control tree; never shown, no input)
+                var wiz = new WalletWizard(); _ = wiz.Title;
+
+                // (3) the REAL registration code (same path the live wizard runs) + signature self-verify
+                WalletWizard.RegisterCore(wpath, seed, pw, "player" + i, "player" + i + "@example.com", "");
+
+                // (4) build + SIGN a real spend with this key and verify it against the FORKID sighash
+                var w = new StandaloneWallet(seed, net);
+                byte[] ourScript = NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(1)));
+                var outs = new System.Collections.Generic.List<TxOutputN> { new TxOutputN(50_000 + i, ourScript) };
+                var ins = new System.Collections.Generic.List<TxInputN> { new TxInputN(new string('b', 64), 0, System.Array.Empty<byte>(), 0xffffffff) };
+                var utx = new NativeTx(2, ins, outs, 0);
+                byte[] sh = Scriptvm.Sighash(utx, 0, ourScript, 100_000 + i, 0x41);
+                byte[] der = EcdsaSign.SignPrehashDer(w.ChildPriv(1), sh);
+                if (!EcdsaSign.VerifyDerPrehash(w.ChildPub(1), sh, der)) throw new System.Exception("spend sig verify failed");
+
+                System.IO.File.Delete(wpath);
+                ok++;
+            }
+            catch (System.Exception e) { fail++; if (firstErr.Length == 0) firstErr = "iter " + i + ": " + e.Message; }
+        }
+        try { System.IO.File.WriteAllText(outp, $"SELFTEST {ok}/100 fail={fail}" + (firstErr.Length > 0 ? " firstErr=" + firstErr : "")); } catch { }
     }
 
     /// <summary>Owners of live resources (the P2P node) add a clean teardown here so a

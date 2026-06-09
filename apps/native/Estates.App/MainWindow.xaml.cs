@@ -614,7 +614,7 @@ public partial class MainWindow : Window
                 if (built is null) { sout.Text = "insufficient SPV funds"; return; }
                 sout.Text = "broadcasting to the BSV network…";
                 BsvNet bnet = _network == "mainnet" ? BsvNet.Mainnet : _network == "testnet" ? BsvNet.Testnet : BsvNet.Regtest;
-                var bc = await SpvFetch.BroadcastAsync(Tx.ToHex(built.Raw), bnet, _http);   // network, NOT my local node
+                var bc = await SpvFetch.BroadcastAsync(Tx.ToHex(built.Raw), bnet);   // 100% real-node P2P, never local/HTTP
                 if (!bc.ok) { sout.Text = "broadcast FAILED: " + bc.detail + " (txid " + built.Txid + ")"; return; }
                 foreach (var c in built.Tx.Inputs) spv.Spend(c.PrevTxid + ":" + c.PrevVout);
                 spv.Save(spvPath); Dispatcher.Invoke(ShowSpv);
@@ -691,7 +691,7 @@ public partial class MainWindow : Window
                 raw.Text = Tx.ToHex(built.Raw);
                 so.Text = "broadcasting to the BSV network…";
                 BsvNet bnet = _network == "mainnet" ? BsvNet.Mainnet : _network == "testnet" ? BsvNet.Testnet : BsvNet.Regtest;
-                var bc = await SpvFetch.BroadcastAsync(Tx.ToHex(built.Raw), bnet, _http);   // network, NOT my local node
+                var bc = await SpvFetch.BroadcastAsync(Tx.ToHex(built.Raw), bnet);   // 100% real-node P2P, never local/HTTP
                 foreach (var l in _node.LiveLinks()) { try { l.Send(built.Raw); } catch { } }   // IP-to-IP too
                 if (!bc.ok) { so.Text = "broadcast FAILED: " + bc.detail + "  ·  signed raw is below (txid " + built.Txid + ")"; return; }
                 foreach (var c in built.Tx.Inputs) spv2.Spend(c.PrevTxid + ":" + c.PrevVout);
@@ -797,42 +797,31 @@ public partial class MainWindow : Window
         recv.Children.Add(L("tx index in block")); recv.Children.Add(imIdx);
         recv.Children.Add(imBtn); recv.Children.Add(imOut);
 
-        // FIND A CONFIRMED PAYMENT BY TXID — fetch the SPV proof from the BSV network (P2P primary; public
-        // proof as backup), build the envelope, VERIFY it locally (PoW + merkle), and credit if it pays you.
-        // The source is never trusted: only a proof that meets proof-of-work is accepted.
-        recv.Children.Add(new TextBlock { Text = "Find a confirmed payment by txid (network proof — verified locally)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 12, 0, 2) });
-        recv.Children.Add(L("enter a confirmed txid; the wallet fetches its merkle proof (P2P first, public proof as backup), verifies proof-of-work + merkle locally, and credits any output paying one of YOUR addresses — no balance is trusted from the source"));
-        var fxTxid = F(); fxTxid.FontFamily = new FontFamily("Consolas"); var fxOut = O(); var fxBtn = Btn("Fetch proof + verify + credit");
+        // RECEIVE FROM THE REAL NETWORK — scan real blocks (P2P, no HTTP/explorer/faucet) for coins paying
+        // this wallet, build each coin's merkle proof FROM THE BLOCK, verify PoW + merkle locally, credit.
+        recv.Children.Add(new TextBlock { Text = "Receive from the real network (scan real blocks via P2P — verified locally)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 12, 0, 2) });
+        recv.Children.Add(L("connects to real BSV nodes over the Bitcoin P2P protocol, pulls real blocks, finds any output paying YOUR addresses, and credits it after verifying proof-of-work + merkle — never a server, explorer, or faucet"));
+        var fxOut = O(); var fxBtn = Btn("Scan real blocks + verify + credit");
         fxBtn.Click += async (_, _) =>
         {
-            string tx = fxTxid.Text.Trim().ToLowerInvariant();
-            if (tx.Length != 64) { fxOut.Text = "enter a 64-hex txid"; return; }
-            fxBtn.IsEnabled = false; fxOut.Text = "fetching proof from the BSV network…";
+            fxBtn.IsEnabled = false; fxOut.Text = "connecting to real BSV nodes…";
             try
             {
                 BsvNet net = _network == "mainnet" ? BsvNet.Mainnet : _network == "testnet" ? BsvNet.Testnet : BsvNet.Regtest;
-                var res = await SpvFetch.FetchAsync(tx, net, _http);
-                if (res.Env is null) { fxOut.Text = "could not get a verifiable proof: " + res.Detail; return; }
+                var addrs = new List<string>();
+                for (int i = FirstAddr; i <= RecvWatch; i++) addrs.Add(w.AddressAt(i));
                 var spv2 = LoadSpvFromDisk(w); long before = spv2.Balance();
-                bool got = spv2.Receive(res.Env);   // re-verifies PoW + merkle, credits owned outputs
-                if (got && spv2.Balance() > before)
-                {
-                    spv2.Save(SpvPathFor()); ShowSpv();
-                    long credited = spv2.Balance() - before;
-                    LogEvent("received", credited.ToString("n0") + " sat via " + res.Source + " txid " + tx);
-                    fxOut.Text = "VERIFIED + credited " + Fmt(credited) + " — " + res.Detail + " [" + res.Source + "]";
-                }
-                else fxOut.Text = got
-                    ? "proof VERIFIED locally (" + res.Detail + "), but no output pays an address in THIS wallet — these funds are not yours/this seed"
-                    : "proof did not verify — not credited";
+                var res = await SpvFetch.ScanAndCreditAsync(addrs, net, spv2, 256, msg => Dispatcher.Invoke(() => fxOut.Text = msg));
+                if (res.coins > 0 && spv2.Balance() > before) { spv2.Save(SpvPathFor()); ShowSpv(); LogEvent("received", res.detail); }
+                fxOut.Text = res.detail;
             }
             catch (Exception e) { fxOut.Text = e.Message; }
             finally { fxBtn.IsEnabled = true; }
         };
-        recv.Children.Add(L("confirmed txid (64 hex)")); recv.Children.Add(fxTxid); recv.Children.Add(fxBtn); recv.Children.Add(fxOut);
+        recv.Children.Add(fxBtn); recv.Children.Add(fxOut);
 
-        // ONE-CLICK: find ALL my coins. Scans this wallet's addresses on the network, fetches each coin's
-        // proof, verifies locally, and credits — the user never needs a txid. This is the "it just works".
+        // ONE-CLICK: find ALL my coins. Scans this wallet's addresses on the real network via P2P, builds each
+        // coin's proof from the block, verifies locally, and credits — the user never needs a txid.
         recv.Children.Add(new TextBlock { Text = "Find all my coins (scan the network for payments to my addresses)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 12, 0, 2) });
         var scanOut = O(); var scanCoinsBtn = Btn("Scan for my coins");
         scanCoinsBtn.Click += async (_, _) =>
@@ -844,10 +833,10 @@ public partial class MainWindow : Window
                 var addrs = new List<string>();
                 for (int i = FirstAddr; i <= RecvWatch; i++) addrs.Add(w.AddressAt(i));
                 var spv2 = LoadSpvFromDisk(w);
-                var res = await SpvFetch.ScanAndCreditAsync(addrs, net, spv2, _http,
+                var res = await SpvFetch.ScanAndCreditAsync(addrs, net, spv2, 256,
                     msg => Dispatcher.Invoke(() => scanOut.Text = msg));
                 if (res.coins > 0) { spv2.Save(SpvPathFor()); ShowSpv(); LogEvent("scan", res.detail); }   // Coins/History auto-refresh on the 4s tick
-                scanOut.Text = res.detail + $"  (scanned {res.scanned} addresses)";
+                scanOut.Text = res.detail;
             }
             catch (Exception e) { scanOut.Text = e.Message; }
             finally { scanCoinsBtn.IsEnabled = true; }

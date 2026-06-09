@@ -52,6 +52,12 @@ public sealed class WalletWizard : Window
         _seedShow.FontFamily = _seedConfirm.FontFamily = _restoreSeed.FontFamily = new FontFamily("Consolas");
         _seedShow.TextWrapping = _seedConfirm.TextWrapping = _restoreSeed.TextWrapping = TextWrapping.Wrap;
         foreach (var btn in new[] { _back, _next, _cancel }) { btn.Background = B("#2d2f34"); btn.Foreground = B("#e6e6e6"); btn.BorderBrush = B("#3a3d42"); btn.Padding = new Thickness(8, 6, 8, 6); }
+        // AutomationIds so the UI test can drive the real wizard reliably (no fragile text matching).
+        void AId(System.Windows.DependencyObject c, string id) => System.Windows.Automation.AutomationProperties.SetAutomationId(c, id);
+        AId(_pseudonym, "wzPseudonym"); AId(_email, "wzEmail"); AId(_realname, "wzRealName");
+        AId(_pw, "wzPw"); AId(_pw2, "wzPw2"); AId(_seedShow, "wzSeedShow"); AId(_seedConfirm, "wzSeedConfirm");
+        AId(_restoreSeed, "wzRestoreSeed"); AId(_restorePw, "wzRestorePw");
+        AId(_back, "wzBack"); AId(_next, "wzNext"); AId(_cancel, "wzCancel"); AId(_msg, "wzMsg");
 
         var nav = new DockPanel { Margin = new Thickness(0, 14, 0, 0) };
         var right = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
@@ -91,6 +97,9 @@ public sealed class WalletWizard : Window
                 var create = Big("➕  Create a new wallet"); create.Click += (_, _) => { _step = Step.NewPassword; Render(); };
                 var restore = Big("↩  Restore from seed"); restore.Click += (_, _) => { _step = Step.Restore; Render(); };
                 var open = Big(exists ? "🔓  Open my existing wallet" : "📂  Open a wallet file…"); open.Click += (_, _) => OpenExisting(exists);
+                System.Windows.Automation.AutomationProperties.SetAutomationId(create, "wzCreate");
+                System.Windows.Automation.AutomationProperties.SetAutomationId(restore, "wzRestore");
+                System.Windows.Automation.AutomationProperties.SetAutomationId(open, "wzOpen");
                 _body.Children.Add(create); _body.Children.Add(restore); _body.Children.Add(open);
                 break;
             }
@@ -230,23 +239,34 @@ public sealed class WalletWizard : Window
     {
         try
         {
-            WalletStore.Create(WalletStore.DefaultPath(), seed, password);
-            byte[] identityPub = Secp256k1.PublicKey(Wallet.ChildPriv(seed, 0));       // index 0 = identity (matches the wallet)
-            byte[] attPriv = Wallet.ChildPriv(seed, 1);                                // a sub-key attests (base never signs)
-            string firstAddr = Address.P2pkh(Recovery.Hash160(Secp256k1.PublicKey(attPriv)), BsvNet.Mainnet);
-            string profile = "{" +
-                $"\"pseudonym\":{J(pseudonym)},\"email\":{J(email)},\"realname\":{J(realname)}," +
-                $"\"identity\":\"{Tx.ToHex(identityPub)}\",\"wallet_address\":\"{firstAddr}\"," +
-                $"\"attestation_pub\":\"{Tx.ToHex(Secp256k1.PublicKey(attPriv))}\",\"created\":\"{System.DateTime.UtcNow:o}\"" +
-                "}";
-            byte[] sig = EcdsaSign.Sign(attPriv, System.Text.Encoding.UTF8.GetBytes(profile));
-            string dir = System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData), "Estates");
-            System.IO.Directory.CreateDirectory(dir);
-            System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "identity.json"), profile + "\n" + Tx.ToHex(sig));
-            System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "identity.txt"), pseudonym);   // handle for the wallet/chat/game
+            RegisterCore(WalletStore.DefaultPath(), seed, password, pseudonym, email, realname);
             Seed = seed; Password = password; Pseudonym = pseudonym; DialogResult = true; Close();
         }
         catch (System.Exception e) { _msg.Text = e.Message; }
+    }
+
+    /// <summary>The REAL registration: create the encrypted wallet and write the signed identity (index-0
+    /// identity key, a sub-key attests). Shared by the live wizard AND the headless self-test, so the test
+    /// exercises the exact production code. Static + GUI-free.</summary>
+    public static void RegisterCore(string walletPath, byte[] seed, string password, string pseudonym, string email, string realname)
+    {
+        WalletStore.Create(walletPath, seed, password);
+        byte[] identityPub = Secp256k1.PublicKey(Wallet.ChildPriv(seed, 0));
+        byte[] attPriv = Wallet.ChildPriv(seed, 1);
+        string firstAddr = Address.P2pkh(Recovery.Hash160(Secp256k1.PublicKey(attPriv)), BsvNet.Mainnet);
+        string profile = "{" +
+            $"\"pseudonym\":{J(pseudonym)},\"email\":{J(email)},\"realname\":{J(realname)}," +
+            $"\"identity\":\"{Tx.ToHex(identityPub)}\",\"wallet_address\":\"{firstAddr}\"," +
+            $"\"attestation_pub\":\"{Tx.ToHex(Secp256k1.PublicKey(attPriv))}\",\"created\":\"{System.DateTime.UtcNow:o}\"" +
+            "}";
+        byte[] sig = EcdsaSign.Sign(attPriv, System.Text.Encoding.UTF8.GetBytes(profile));
+        string dir = System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData), "Estates");
+        System.IO.Directory.CreateDirectory(dir);
+        System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "identity.json"), profile + "\n" + Tx.ToHex(sig));
+        System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "identity.txt"), pseudonym);
+        // verify what we just wrote actually verifies (a registration that doesn't verify is a failure)
+        if (!EcdsaSign.Verify(Secp256k1.PublicKey(attPriv), System.Text.Encoding.UTF8.GetBytes(profile), sig))
+            throw new System.Exception("identity signature failed to verify");
     }
 
     private static string J(string s) => "\"" + (s ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
