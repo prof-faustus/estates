@@ -584,6 +584,14 @@ public partial class MainWindow : Window
                 bool ok = false;
                 try { byte[] attPub = Tx.FromHex(r.GetProperty("attestation_pub").GetString()!); byte[] sig = Tx.FromHex(parts[1].Trim()); ok = EcdsaSign.Verify(attPub, System.Text.Encoding.UTF8.GetBytes(parts[0]), sig); } catch { }
                 info.Children.Add(new TextBlock { Text = "Registered identity", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 10, 0, 2) });
+                // An identity is only REAL once written ON-CHAIN. The local file is just PENDING until then.
+                string onchainMarker = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Estates", "identity-onchain-" + _network + ".txt");
+                bool onChain = System.IO.File.Exists(onchainMarker);
+                var st = new TextBlock { Foreground = onChain ? B("#7bd88f") : B("#f5a623"), FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 2) };
+                st.Text = onChain
+                    ? "status: ON-CHAIN ✓ — registered on the blockchain (permanent)"
+                    : "status: PENDING — local only, NOT yet on-chain. An identity is real ONLY once written on-chain (a transaction). Fund the wallet, then register it on-chain to make it permanent; until then a restart leaves it un-registered.";
+                info.Children.Add(st);
                 info.Children.Add(L($"pseudonym: {ps}   ·   email: {pemail}   ·   registration signature {(ok ? "VERIFIED ✓" : "unverified")}"));
                 info.Children.Add(L($"identity key: {(r.TryGetProperty("identity", out var idk) ? idk.GetString() : "")}"));
                 info.Children.Add(L($"linked wallet address: {(r.TryGetProperty("wallet_address", out var wa) ? wa.GetString() : "")}"));
