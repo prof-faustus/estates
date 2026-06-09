@@ -686,17 +686,20 @@ public partial class MainWindow : Window
         // Copy the address, send BSV to it; it appears once the node-backed wallet sees it on-chain.
         var fund = new StackPanel();
         fund.Children.Add(new TextBlock { Text = "Fund the wallet", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
-        fund.Children.Add(L("Funding is a real payment SENT TO YOUR ADDRESS below. Copy it and send BSV to it — it appears here once the node sees it on-chain. There is no manual import."));
-        fund.Children.Add(L("Your receive address (click to select; or use Copy):"));
-        var fa = F(); fa.IsReadOnly = true; fa.Text = w.AddressAt(FirstAddr); fa.FontFamily = new FontFamily("Consolas");
+        fund.Children.Add(L("Funding is a real payment SENT TO YOUR ADDRESS below. EVERY address is SINGLE-USE — this is the next fresh, never-used address; once it receives a coin the wallet moves to the next one. Send BSV to it; it appears once a node sees it on-chain. No manual import."));
+        fund.Children.Add(L("Your fresh single-use receive address:"));
+        var fa = F(); fa.IsReadOnly = true; fa.FontFamily = new FontFamily("Consolas");
+        fa.Text = FreshReceiveAddress(w);   // the lowest-index address that has NOT yet received — never reused
         fa.GotKeyboardFocus += (_, _) => fa.SelectAll();
         fa.PreviewMouseLeftButtonUp += (_, _) => fa.SelectAll();
         fund.Children.Add(fa);
         var fundQr = new System.Windows.Controls.Image { Stretch = System.Windows.Media.Stretch.None, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 8, 0, 8) };
-        RenderQr(fundQr, w.AddressAt(FirstAddr)); fund.Children.Add(fundQr);
-        var fcopy = Btn("Copy address"); var fmsg = O();
-        fcopy.Click += (_, _) => { try { System.Windows.Clipboard.SetText(w.AddressAt(FirstAddr)); fmsg.Text = "address copied — send BSV to it"; } catch (System.Exception e) { fmsg.Text = e.Message; } };
-        fund.Children.Add(fcopy); fund.Children.Add(fmsg);
+        RenderQr(fundQr, fa.Text); fund.Children.Add(fundQr);
+        var fcopy = Btn("Copy address"); var fnew = Btn("New single-use address"); var fmsg = O();
+        fcopy.Click += (_, _) => { try { System.Windows.Clipboard.SetText(fa.Text); fmsg.Text = "address copied — send BSV to it (single-use)"; } catch (System.Exception e) { fmsg.Text = e.Message; } };
+        fnew.Click += (_, _) => { fa.Text = NextRecvAddress(w); RenderQr(fundQr, fa.Text); fmsg.Text = "new fresh single-use address (the old one is never reused)"; };
+        var frow = new StackPanel { Orientation = Orientation.Horizontal }; frow.Children.Add(fcopy); frow.Children.Add(fnew);
+        fund.Children.Add(frow); fund.Children.Add(fmsg);
         tabs.Items.Add(Tab("Fund", fund));
 
         // ===== SEND — PAY-TO-MANY, fee in sat/kB, coin control (frozen coins excluded), SPV-signed,
@@ -801,7 +804,7 @@ public partial class MainWindow : Window
         var recv = new StackPanel();
         recv.Children.Add(new TextBlock { Text = "Receive", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold });
         recv.Children.Add(L("a FRESH, never-before-used receive address (HMAC sub-key, index ≥ 1; identity index 0 is never an address)"));
-        var ra = F(); ra.IsReadOnly = true; ra.Text = w.AddressAt(FirstAddr); ra.FontFamily = new FontFamily("Consolas");
+        var ra = F(); ra.IsReadOnly = true; ra.Text = FreshReceiveAddress(w); ra.FontFamily = new FontFamily("Consolas");
         var rAmt = F(); var rReq = O();
         var qrImg = new System.Windows.Controls.Image { Stretch = System.Windows.Media.Stretch.None, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 8, 0, 8) };
         RenderQr(qrImg, ra.Text);
@@ -2028,6 +2031,21 @@ public partial class MainWindow : Window
 
     private string RecvIndexPath() => System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"estates_recvidx_{_network}.txt");
     private string NextRecvAddress(StandaloneWallet w) { int i = _recvIndex; _recvIndex = _recvIndex + 1 >= RecvWatch ? 1 : _recvIndex + 1; try { System.IO.File.WriteAllText(RecvIndexPath(), _recvIndex.ToString()); } catch { } return w.AddressAt(i); }
+
+    /// <summary>The next FRESH, never-used receive address: the lowest-index sub-key whose script holds no
+    /// coin (has not received). Receiving is ALWAYS a single-use address; one that has received is never
+    /// offered again. Falls back beyond the watch window if every watched address has been used.</summary>
+    private string FreshReceiveAddress(StandaloneWallet w)
+    {
+        var used = new HashSet<string>();
+        foreach (var u in LoadSpvFromDisk(w).Utxos()) used.Add(Tx.ToHex(u.script));
+        for (int i = FirstAddr; i <= RecvWatch; i++)
+        {
+            string scr = Tx.ToHex(NodeWallet.P2pkhScript(Recovery.Hash160(w.ChildPub(i))));
+            if (!used.Contains(scr)) return w.AddressAt(i);
+        }
+        return w.AddressAt(RecvWatch + 1);
+    }
 
     // post a local status line into the chat (not sent to peers) — for \help, \balance, results.
     private void PostLocal(string text) { _conv.Apply(Messenger.Text(MyPub(), "ℹ " + text)); RenderChat(); }
