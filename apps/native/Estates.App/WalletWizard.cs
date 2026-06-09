@@ -18,14 +18,18 @@ public sealed class WalletWizard : Window
     public byte[]? Seed { get; private set; }
     public string Password { get; private set; } = "";
     public string Pseudonym { get; private set; } = "";
+    public string WalletPath { get; private set; } = WalletStore.DefaultPath();   // WHERE the wallet file is saved
+    public string Network { get; private set; } = "mainnet";                      // chosen on create AND load
 
-    private enum Step { Splash, Choose, NewPassword, SeedShow, SeedConfirm, Register, Restore }
+    private enum Step { Splash, Choose, NewWalletFile, NewPassword, SeedShow, SeedConfirm, Register, Restore }
     private Step _step = Step.Splash;
     private Step _registerFrom = Step.SeedConfirm;   // where the Register page was reached FROM (for correct Back)
     private byte[] _pending = System.Array.Empty<byte>();
     private readonly TextBox _pseudonym = new();
     private readonly TextBox _email = new();
     private readonly TextBox _realname = new();
+    private readonly TextBox _walletPathBox = new() { Text = WalletStore.DefaultPath() };
+    private string _netChoice = "mainnet";
 
     private static SolidColorBrush B(string h) => new((Color)ColorConverter.ConvertFromString(h));
     private readonly TextBlock _title = new() { Foreground = B("#e6e6e6"), FontSize = 20, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 4) };
@@ -47,7 +51,7 @@ public sealed class WalletWizard : Window
     {
         Title = "ESTATES — wallet setup"; Width = 560; Height = 460;
         WindowStartupLocation = WindowStartupLocation.CenterScreen; Background = B("#1b1d1e"); ResizeMode = ResizeMode.NoResize;
-        foreach (var f in new Control[] { _pw, _pw2, _seedShow, _seedConfirm, _restoreSeed, _restorePw, _pseudonym, _email, _realname })
+        foreach (var f in new Control[] { _pw, _pw2, _seedShow, _seedConfirm, _restoreSeed, _restorePw, _pseudonym, _email, _realname, _walletPathBox })
         { f.Background = B("#171819"); f.Foreground = B("#e6e6e6"); f.BorderThickness = new Thickness(0); f.Padding = new Thickness(8); f.Margin = new Thickness(0, 4, 0, 8); f.FontSize = 13; }
         _seedShow.FontFamily = _seedConfirm.FontFamily = _restoreSeed.FontFamily = new FontFamily("Consolas");
         _seedShow.TextWrapping = _seedConfirm.TextWrapping = _restoreSeed.TextWrapping = TextWrapping.Wrap;
@@ -57,7 +61,7 @@ public sealed class WalletWizard : Window
         AId(_pseudonym, "wzPseudonym"); AId(_email, "wzEmail"); AId(_realname, "wzRealName");
         AId(_pw, "wzPw"); AId(_pw2, "wzPw2"); AId(_seedShow, "wzSeedShow"); AId(_seedConfirm, "wzSeedConfirm");
         AId(_restoreSeed, "wzRestoreSeed"); AId(_restorePw, "wzRestorePw");
-        AId(_back, "wzBack"); AId(_next, "wzNext"); AId(_cancel, "wzCancel"); AId(_msg, "wzMsg");
+        AId(_back, "wzBack"); AId(_next, "wzNext"); AId(_cancel, "wzCancel"); AId(_msg, "wzMsg"); AId(_walletPathBox, "wzWalletPath");
 
         var nav = new DockPanel { Margin = new Thickness(0, 14, 0, 0) };
         var right = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
@@ -91,16 +95,44 @@ public sealed class WalletWizard : Window
                 break;
             case Step.Choose:
             {
-                _title.Text = "Choose your wallet"; _subtitle.Text = "Create a new wallet, restore one from your seed, or open an existing wallet file.";
+                _title.Text = "Choose your network & wallet";
+                _subtitle.Text = "First pick the NETWORK this wallet is for, then create or open a wallet. Everything is on-chain; nothing in the program runs without a loaded wallet.";
                 _next.Visibility = Visibility.Collapsed;
+                _body.Children.Add(Lab("which wallet do you want — mainnet, testnet, or regtest? (chosen now, used on create AND load)"));
+                foreach (var net in new[] { "mainnet", "testnet", "regtest" })
+                {
+                    var rb = new RadioButton { Content = net, Foreground = B("#e6e6e6"), Margin = new Thickness(0, 3, 0, 3), GroupName = "wznet", IsChecked = _netChoice == net, FontSize = 13 };
+                    System.Windows.Automation.AutomationProperties.SetAutomationId(rb, "wzNet_" + net);
+                    string cap = net; rb.Checked += (_, _) => { _netChoice = cap; Network = cap; };
+                    _body.Children.Add(rb);
+                }
+                Network = _netChoice;
+                _body.Children.Add(new TextBlock { Height = 10 });
                 bool exists = WalletStore.Exists(WalletStore.DefaultPath());
-                var create = Big("➕  Create a new wallet"); create.Click += (_, _) => { _step = Step.NewPassword; Render(); };
-                var restore = Big("↩  Restore from seed"); restore.Click += (_, _) => { _step = Step.Restore; Render(); };
-                var open = Big(exists ? "🔓  Open my existing wallet" : "📂  Open a wallet file…"); open.Click += (_, _) => OpenExisting(exists);
+                var create = Big("➕  Create a new wallet"); create.Click += (_, _) => { Network = _netChoice; _step = Step.NewWalletFile; Render(); };
+                var restore = Big("↩  Restore from seed"); restore.Click += (_, _) => { Network = _netChoice; _step = Step.Restore; Render(); };
+                var open = Big(exists ? "🔓  Open my existing wallet" : "📂  Open a wallet file…"); open.Click += (_, _) => { Network = _netChoice; OpenExisting(exists); };
                 System.Windows.Automation.AutomationProperties.SetAutomationId(create, "wzCreate");
                 System.Windows.Automation.AutomationProperties.SetAutomationId(restore, "wzRestore");
                 System.Windows.Automation.AutomationProperties.SetAutomationId(open, "wzOpen");
                 _body.Children.Add(create); _body.Children.Add(restore); _body.Children.Add(open);
+                break;
+            }
+            case Step.NewWalletFile:
+            {
+                _title.Text = $"Choose where to save your {_netChoice} wallet";
+                _subtitle.Text = "YOU choose the file and the drive. The wallet is never overwritten and is backed up read-only on every write, so it can't be lost.";
+                _body.Children.Add(Lab("wallet file (your encrypted keys are saved here)"));
+                _body.Children.Add(_walletPathBox);
+                var browse = new Button { Content = "Browse…", Width = 120, HorizontalAlignment = HorizontalAlignment.Left, Background = B("#2d2f34"), Foreground = B("#e6e6e6"), BorderBrush = B("#3a3d42"), Padding = new Thickness(8, 6, 8, 6), Margin = new Thickness(0, 0, 0, 12) };
+                System.Windows.Automation.AutomationProperties.SetAutomationId(browse, "wzBrowse");
+                browse.Click += (_, _) =>
+                {
+                    var dlg = new Microsoft.Win32.SaveFileDialog { Title = "Choose your new wallet file", Filter = "wallet (*.dat)|*.dat|all files|*.*", FileName = System.IO.Path.GetFileName(_walletPathBox.Text), OverwritePrompt = true };
+                    try { dlg.InitialDirectory = System.IO.Path.GetDirectoryName(_walletPathBox.Text); } catch { }
+                    if (dlg.ShowDialog() == true) _walletPathBox.Text = dlg.FileName;
+                };
+                _body.Children.Add(browse);
                 break;
             }
             case Step.NewPassword:
@@ -140,7 +172,8 @@ public sealed class WalletWizard : Window
         _step = _step switch
         {
             Step.Choose => Step.Splash,
-            Step.NewPassword => Step.Choose,
+            Step.NewWalletFile => Step.Choose,
+            Step.NewPassword => Step.NewWalletFile,
             Step.SeedShow => Step.NewPassword,
             Step.SeedConfirm => Step.SeedShow,
             Step.Register => _registerFrom,
@@ -155,6 +188,16 @@ public sealed class WalletWizard : Window
         switch (_step)
         {
             case Step.Splash: _step = Step.Choose; Render(); break;
+            case Step.NewWalletFile:
+            {
+                string wp = _walletPathBox.Text.Trim();
+                if (wp.Length == 0) { _msg.Text = "choose where to save your wallet file"; return; }
+                try { var dir = System.IO.Path.GetDirectoryName(wp); if (!string.IsNullOrEmpty(dir)) System.IO.Directory.CreateDirectory(dir); }
+                catch (System.Exception ex) { _msg.Text = "cannot use that folder: " + ex.Message; return; }
+                if (System.IO.File.Exists(wp)) { _msg.Text = "a wallet ALREADY exists there — choose a new file (a wallet is never overwritten)"; return; }
+                WalletPath = wp; Network = _netChoice;
+                _step = Step.NewPassword; Render(); break;
+            }
             case Step.NewPassword:
                 if (_pw.Password != _pw2.Password) { _msg.Text = "passwords do not match"; return; }
                 Password = _pw.Password; _step = Step.SeedShow; Render(); break;
@@ -239,7 +282,7 @@ public sealed class WalletWizard : Window
     {
         try
         {
-            RegisterCore(WalletStore.DefaultPath(), seed, password, pseudonym, email, realname);
+            RegisterCore(WalletPath, seed, password, pseudonym, email, realname);   // the file location YOU chose
             Seed = seed; Password = password; Pseudonym = pseudonym; DialogResult = true; Close();
         }
         catch (System.Exception e) { _msg.Text = e.Message; }

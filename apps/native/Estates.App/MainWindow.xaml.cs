@@ -75,12 +75,17 @@ public partial class MainWindow : Window
             if (wz.ShowDialog() == true && wz.Seed is not null)
             {
                 _walletSeed = wz.Seed; _wallet = null;
+                _network = wz.Network;                                      // network chosen on create/load
+                try { System.IO.File.WriteAllText(NetworkPath(), _network); } catch { }
                 if (wz.Pseudonym.Length > 0) { _displayName = wz.Pseudonym; SaveHandle(_displayName); _node.Name = _displayName; }
-                WalletHost.Content = BuildWalletUI();   // wallet is now registered/unlocked
+                WalletHost.Content = BuildWalletUI();   // wallet is now registered/unlocked — you CAN check it
                 RefreshNodes();
+                return;
             }
         }
         catch { }
+        // HARD RULE: no wallet loaded = no program. Cancelling/closing wallet setup ends the app.
+        App.HardExit();
     }
 
     // Network dialog (ported from SVP _show_network_dialog): network, SPV model, node reachability, peers.
@@ -174,9 +179,25 @@ public partial class MainWindow : Window
     private bool RequireFunding(string net)
     {
         var w = EnsureWallet();
-        if (w is null) { StartMsg.Text = "Unlock or create your wallet (Wallet tab), then fund it, before starting a game."; return false; }
-        if (w.Balance() <= 0) { StartMsg.Text = "Your wallet holds 0 — this is a real-value game. Fund it (Wallet → Fund) before starting."; return false; }
+        if (w is null) { StartMsg.Text = "Open or create your wallet first."; return false; }
+        if (net == "regtest") { StartMsg.Text = ""; return true; }     // regtest is self-funded — proceed
+        // EVERY action (chat, game, NFT, …) is an on-chain transaction → needs real funds. The wallet itself
+        // always works for CHECKING; you just can't ACT until it holds value. (Single source: the SPV coins.)
+        long bal = LoadSpvFromDisk(w).Balance();
+        if (bal <= 0) { StartMsg.Text = $"Your {net} wallet holds 0 sat. Every action is an on-chain transaction — fund the wallet (Wallet → Receive) before you can chat, play, or act."; return false; }
         StartMsg.Text = "";
+        return true;
+    }
+
+    /// <summary>The funded gate for ANY action (chat/game/NFT/etc.). Same rule as RequireFunding but returns
+    /// a reason instead of writing to StartMsg, so any action handler can use it.</summary>
+    private bool HasFunds(out string why)
+    {
+        why = "";
+        var w = EnsureWallet();
+        if (w is null) { why = "open or create your wallet first"; return false; }
+        if (_network == "regtest") return true;
+        if (LoadSpvFromDisk(w).Balance() <= 0) { why = $"0 sat on {_network} — every action is an on-chain tx; fund the wallet first (Wallet → Receive)"; return false; }
         return true;
     }
 
@@ -1969,7 +1990,8 @@ public partial class MainWindow : Window
     private void SendChat(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return;
-        if (ChatCommands.Is(text)) { HandleChatCommand(text); return; }   // \help \address \pay \request \balance
+        if (ChatCommands.Is(text)) { HandleChatCommand(text); return; }   // \help \balance etc. are local — always allowed
+        if (!HasFunds(out string why)) { PostLocal("can't send — " + why); return; }   // a chat message IS an on-chain tx
         Broadcast(Messenger.Text(MyPub(), text));
     }
 
