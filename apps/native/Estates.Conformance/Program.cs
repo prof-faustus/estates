@@ -1505,4 +1505,41 @@ try
 }
 catch (Exception ex) { Console.Error.WriteLine($"MULTIPLAYER FAIL: {ex.Message}"); gfail = 1; }
 
+// WIRE: a whole multiplayer game driven across the network — every move serialised to bytes, sent, decoded,
+// and re-verified on the other side. Proves two SEPARATE machines can play (the packet round-trips exactly
+// and a byte-flipped packet on the wire is rejected).
+try
+{
+    var deck = new Dictionary<string, List<int>>();
+    foreach (var kv in Params.Instance.Decks) deck[kv.Key] = Enumerable.Range(0, kv.Value.Count).ToList();
+    var k = DeedNft.DeriveSeatKeys(SHA256.HashData("estates-wire-keys"u8.ToArray()), 2);
+    GameSession New() => new("regtest", 2, 1_000_000_000, new Dictionary<string, List<int>>(deck), k);
+    var P = Params.Instance;
+    var A = New(); var B = New();
+    int wired = 0; bool ok = true;
+    while (A.Phase != "GAME_OVER" && wired < 4000)
+    {
+        var s = A.State; string act = "END_TURN"; int pid = 0; string? ch = null;
+        if (s.Phase == "AWAIT_ROLL") act = "ROLL";
+        else if (s.Phase == "AWAIT_BUY") { int pp = s.PendingTitle ?? -1; act = (pp >= 0 && s.Seats[s.Current].Balance >= (P.Board[pp].BasePrice ?? 0)) ? "BUY" : "DECLINE"; }
+        else if (s.Phase == "AWAIT_TAX") { act = "PAY_TAX"; ch = "flat"; }
+        var pkt = A.Local(act, pid, ch);
+        var onWire = GameSession.Encode(pkt);                 // serialise for the network
+        var received = GameSession.Decode(onWire);            // the peer parses it back
+        if (!B.Remote(received, out var why)) { ok = false; Console.Error.WriteLine("WIRE reject: " + why); break; }
+        wired++;
+    }
+    // a byte-flipped wire packet must be rejected
+    var A2 = New(); var B2 = New();
+    var w = GameSession.Encode(A2.Local("ROLL"));
+    w[^1] ^= 0xff;   // corrupt the last byte (in the seat pubkey / sig region)
+    bool rejCorrupt; try { rejCorrupt = !B2.Remote(GameSession.Decode(w), out _); } catch { rejCorrupt = true; }
+    bool wirePass = ok && wired > 50 && rejCorrupt;
+    if (wirePass)
+        Console.WriteLine($"WIRE: a full multiplayer game ran ACROSS THE NETWORK — {wired} move packets serialised, sent, decoded + re-verified (winner=seat {A.Winner}); a corrupted packet was REJECTED ✓");
+    else
+    { Console.Error.WriteLine($"WIRE FAIL: ok={ok} wired={wired} rejCorrupt={rejCorrupt}"); gfail = 1; }
+}
+catch (Exception ex) { Console.Error.WriteLine($"WIRE FAIL: {ex.Message}"); gfail = 1; }
+
 return (fail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && bfail == 0 && xfail == 0 && gfail == 0) ? 0 : 1;

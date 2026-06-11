@@ -110,4 +110,36 @@ public sealed class GameSession
         }
         return TxProtocol.Stamp(action == "ROLL" ? TxType.Reveal : TxType.Move, inner.ToArray());
     }
+
+    // ---- wire format: a MovePacket serialises to bytes for the network and parses back EXACTLY, so two
+    // separate machines exchange moves over P2P and each still re-verifies dice + signature + legality.
+    public static byte[] Encode(MovePacket p)
+    {
+        var o = new List<byte>();
+        void U16(int n) { o.Add((byte)((n >> 8) & 0xff)); o.Add((byte)(n & 0xff)); }
+        void Str(string? s) { var b = s is null ? System.Array.Empty<byte>() : System.Text.Encoding.UTF8.GetBytes(s); o.Add((byte)b.Length); o.AddRange(b); }
+        void Blob(byte[]? b) { b ??= System.Array.Empty<byte>(); U16(b.Length); o.AddRange(b); }
+        Str(p.Action); U16(p.Seat); U16(p.Turn); U16(p.PropertyId); Str(p.Choice);
+        o.Add((byte)(p.Dice is null ? 0 : 1)); if (p.Dice is not null) { o.Add((byte)p.Dice[0]); o.Add((byte)p.Dice[1]); }
+        o.Add((byte)(p.Commits?.Count ?? 0)); foreach (var c in p.Commits ?? new List<Commitment>()) { U16(c.Seat); Blob(c.C); }
+        o.Add((byte)(p.Reveals?.Count ?? 0)); foreach (var r in p.Reveals ?? new List<Reveal>()) { U16(r.Seat); Blob(r.Secret); }
+        Blob(p.Payload); Blob(p.Sig); Blob(p.SeatPub);
+        return o.ToArray();
+    }
+
+    public static MovePacket Decode(byte[] data)
+    {
+        int i = 0;
+        int U16() { int n = (data[i] << 8) | data[i + 1]; i += 2; return n; }
+        string Str() { int len = data[i++]; var s = System.Text.Encoding.UTF8.GetString(data, i, len); i += len; return s; }
+        byte[] Blob() { int len = U16(); var b = data[i..(i + len)]; i += len; return b; }
+        string action = Str(); int seat = U16(); int turn = U16(); int pid = U16();
+        string choiceRaw = Str(); string? choice = choiceRaw.Length == 0 ? null : choiceRaw;
+        int[]? dice = null; if (data[i++] == 1) { dice = new[] { (int)data[i], (int)data[i + 1] }; i += 2; }
+        int nc = data[i++]; var commits = new List<Commitment>(); for (int k = 0; k < nc; k++) { int sn = U16(); commits.Add(new Commitment(sn, Blob())); }
+        int nr = data[i++]; var reveals = new List<Reveal>(); for (int k = 0; k < nr; k++) { int sn = U16(); reveals.Add(new Reveal(sn, Blob())); }
+        byte[] payload = Blob(); byte[] sig = Blob(); byte[] seatPub = Blob();
+        return new MovePacket(action, seat, turn, pid, choice, dice,
+            commits.Count > 0 ? commits : null, reveals.Count > 0 ? reveals : null, payload, sig, seatPub);
+    }
 }
