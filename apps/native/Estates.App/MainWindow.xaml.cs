@@ -407,6 +407,16 @@ public partial class MainWindow : Window
             string act = a; btn.Click += (_, _) => DoAction(act);
             bar.Children.Add(btn);
         }
+        if (g.Winner is null && g.Phase == "AWAIT_POST" && !_botSeats.Contains(g.Current))
+        {
+            int bb = BestBuildGui(g);
+            if (bb >= 0)
+            {
+                var bbtn = new Button { Content = $"Build on {Params.Instance.Board[bb].Name}", Margin = new Thickness(5), FontSize = 15 };
+                int cap = bb; bbtn.Click += (_, _) => DoBuild(cap);
+                bar.Children.Add(bbtn);
+            }
+        }
         inner.Children.Add(bar);
         var leave = new Button { Content = "Leave game", HorizontalAlignment = HorizontalAlignment.Center, Background = B("#3a3d42") };
         leave.Click += (_, _) => { _game = null; GameHost.Content = null; Tabs.SelectedIndex = 0; RefreshNodes(); };
@@ -497,6 +507,12 @@ public partial class MainWindow : Window
     private void BotStep()
     {
         var g = _game; if (g is null) return;
+        if (g.Phase == "AWAIT_POST")   // develop monopolies, then end the turn
+        {
+            int bb = BestBuildGui(g);
+            if (bb >= 0) { DoBuild(bb); return; }
+            DoAction("END_TURN"); return;
+        }
         string type = g.Phase switch
         {
             "AWAIT_ROLL" => "ROLL",
@@ -505,6 +521,37 @@ public partial class MainWindow : Window
             _ => "END_TURN",
         };
         DoAction(type);   // applies (beacon roll / deed mint / …), re-renders, and re-schedules the next bot move
+    }
+
+    /// <summary>Apply BUILD on a property (houses → estate). Building develops a fully-owned colour group;
+    /// rent escalates, which is what drives a game to a winner.</summary>
+    private void DoBuild(int pid)
+    {
+        var g = _game; if (g is null) return;
+        var res = Engine.Apply(g, new Estates.Core.Action("BUILD") { PropertyId = pid });
+        if (res.Ok && res.State is not null) { _game = res.State; _game.Log.Add($"built on {Params.Instance.Board[pid].Name}"); }
+        else g.Log.Add($"(build rejected: {res.Code})");
+        RenderGame();
+        ScheduleBots();
+    }
+
+    /// <summary>Cheapest evenly-buildable property in a fully-owned, unmortgaged group the current seat can
+    /// afford — or -1 if none. Same rule the engine enforces (even building across the group).</summary>
+    private static int BestBuildGui(GameState s)
+    {
+        var P = Params.Instance; int id = s.Current, pick = -1, lvl = 99;
+        foreach (var sp in P.Board)
+        {
+            if (sp.Type != "property" || sp.Group is null) continue;
+            if (!s.Titles.TryGetValue(sp.Id, out var t) || t.Owner != id || t.Mortgaged) continue;
+            var m = P.Groups.TryGetValue(sp.Group, out var gg) ? gg.MemberPropertyIds : (IReadOnlyList<int>)System.Array.Empty<int>();
+            if (m.Count == 0 || !m.All(x => s.Titles[x].Owner == id && !s.Titles[x].Mortgaged)) continue;
+            if (t.BuildLevel >= 5 || t.BuildLevel > m.Min(x => s.Titles[x].BuildLevel)) continue;
+            if (s.Seats[id].Balance < P.BuildCost(sp.Group) + 100) continue;
+            if ((t.BuildLevel + 1 == 5 ? s.EstatesRemaining : s.HousesRemaining) < 1) continue;
+            if (t.BuildLevel < lvl) { pick = sp.Id; lvl = t.BuildLevel; }
+        }
+        return pick;
     }
 
     private static int Die() => RandomNumberGenerator.GetInt32(1, 7);
