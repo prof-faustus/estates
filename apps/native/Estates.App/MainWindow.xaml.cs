@@ -1793,6 +1793,43 @@ public partial class MainWindow : Window
         var ctName = F(); var ctAddr = F(); var ctMsg = O(); var ctAdd = Btn("Add contact");
         ctAdd.Click += (_, _) => { string nm = ctName.Text.Trim(); string ad = ctAddr.Text.Trim(); if (nm.Length == 0 || Base58.CheckDecode(ad, out _) is not { Length: 20 }) { ctMsg.Text = "enter a name + a valid address"; return; } _contacts.Add((nm, ad)); SaveContactsDisk(); LoadContacts(); ctMsg.Text = $"added contact '{nm}' (saved)"; ctName.Clear(); ctAddr.Clear(); };
         contacts.Children.Add(ctGrid); contacts.Children.Add(L("name")); contacts.Children.Add(ctName); contacts.Children.Add(L("address")); contacts.Children.Add(ctAddr); contacts.Children.Add(ctAdd); contacts.Children.Add(ctMsg);
+
+        // ---- IDENTITIES — persistent (handle, identity-pubkey) you can MESSAGE (broadcast-encrypt to). Add by
+        // pasting their identity pubkey, or import any live peer / bot. These exist offline, so you can put them
+        // in a group and send to them whether or not they're online right now.
+        if (!_idLoaded) { LoadIdDisk(); _idLoaded = true; }
+        contacts.Children.Add(new TextBlock { Text = "Identities — who you can message (broadcast-encrypt to)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 16, 0, 4) });
+        var mgGrid = Grid4("Handle", "Identity pubkey", "", "", 360);
+        void LoadMgi() { mgGrid.ItemsSource = _idContacts.Select(c => new Row4 { A = c.name, B = c.pubHex }).ToList(); }
+        LoadMgi();
+        var mgMenu = new ContextMenu();
+        var mgDel = new MenuItem { Header = "Delete identity" }; mgDel.Click += (_, _) => { if (mgGrid.SelectedItem is Row4 r) { _idContacts.RemoveAll(c => c.name == r.A); SaveIdDisk(); LoadMgi(); } };
+        mgMenu.Items.Add(mgDel); mgGrid.ContextMenu = mgMenu;
+        var mgName = F(); var mgPub = F(); var mgMsg = O(); var mgAdd = Btn("Add identity");
+        mgAdd.Click += (_, _) => { string nm = mgName.Text.Trim(); string pk = mgPub.Text.Trim().ToLowerInvariant(); if (nm.Length == 0 || !IsPub(pk)) { mgMsg.Text = "enter a handle + a 66-hex identity pubkey (02/03…)"; return; } if (_idContacts.Any(c => c.name == nm)) { mgMsg.Text = "a contact with that handle exists"; return; } _idContacts.Add((nm, pk)); SaveIdDisk(); LoadMgi(); mgMsg.Text = $"added identity '{nm}' (saved — you can now message them or add them to a group)"; mgName.Clear(); mgPub.Clear(); };
+        // import live peers + bots in one click
+        var mgImport = Btn("Import live peers + bots");
+        mgImport.Click += (_, _) => { int n = 0; foreach (var p in _node.Peers()) { if (p.WalletPub.Length != 66 || !IsPub(p.WalletPub)) continue; string nm = string.IsNullOrWhiteSpace(p.Name) ? p.WalletPub[..8] : p.Name; if (_idContacts.Any(c => c.pubHex == p.WalletPub.ToLowerInvariant())) continue; string uniq = nm; int k = 1; while (_idContacts.Any(c => c.name == uniq)) uniq = nm + "#" + (++k); _idContacts.Add((uniq, p.WalletPub.ToLowerInvariant())); n++; } SaveIdDisk(); LoadMgi(); mgMsg.Text = n == 0 ? "no new live peers/bots to import" : $"imported {n} identit{(n == 1 ? "y" : "ies")} (saved)"; };
+        contacts.Children.Add(mgGrid); contacts.Children.Add(L("handle")); contacts.Children.Add(mgName); contacts.Children.Add(L("identity pubkey (66-hex)")); contacts.Children.Add(mgPub);
+        var mgRow2 = new WrapPanel(); mgRow2.Children.Add(mgAdd); mgRow2.Children.Add(mgImport); contacts.Children.Add(mgRow2); contacts.Children.Add(mgMsg);
+
+        // ---- GROUPS — a named subset of identities. Send to a group = one broadcast-encrypted ciphertext only
+        // that group's members can open (GB 2623780 B). Pick members from the identities above (incl. bots).
+        contacts.Children.Add(new TextBlock { Text = "Groups — named sets of identities (send to all of them at once)", Foreground = B("#e6e6e6"), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 16, 0, 4) });
+        var grGrid = Grid4("Group", "Members", "", "", 360);
+        void LoadGroups() { grGrid.ItemsSource = _msgGroups.Select(g => new Row4 { A = g.name, B = string.Join(", ", g.pubsHex.Select(h => _idContacts.FirstOrDefault(c => c.pubHex == h).name ?? h[..8])) }).ToList(); }
+        LoadGroups();
+        var grMenu = new ContextMenu();
+        var grDel = new MenuItem { Header = "Delete group" }; grDel.Click += (_, _) => { if (grGrid.SelectedItem is Row4 r) { _msgGroups.RemoveAll(g => g.name == r.A); SaveIdDisk(); LoadGroups(); } };
+        grMenu.Items.Add(grDel); grGrid.ContextMenu = grMenu;
+        var grName = F(); var grMsg = O();
+        var grMembers = new StackPanel();   // a checkbox per identity
+        void RebuildMemberChecks() { grMembers.Children.Clear(); foreach (var c in _idContacts) { var cb = new CheckBox { Content = c.name, Foreground = B("#cfd2d6"), Margin = new Thickness(0, 1, 0, 1), Tag = c.pubHex }; grMembers.Children.Add(cb); } }
+        RebuildMemberChecks();
+        var grAdd = Btn("Create / update group");
+        grAdd.Click += (_, _) => { string nm = grName.Text.Trim(); if (nm.Length == 0) { grMsg.Text = "name the group"; return; } var members = grMembers.Children.OfType<CheckBox>().Where(c => c.IsChecked == true).Select(c => (string)c.Tag).ToList(); if (members.Count == 0) { grMsg.Text = "tick at least one identity"; return; } _msgGroups.RemoveAll(g => g.name == nm); _msgGroups.Add((nm, members)); SaveIdDisk(); LoadGroups(); grMsg.Text = $"group '{nm}' saved with {members.Count} member(s) — pick it in chat's Send-as"; };
+        contacts.Children.Add(grGrid); contacts.Children.Add(L("group name")); contacts.Children.Add(grName); contacts.Children.Add(L("members")); contacts.Children.Add(grMembers); contacts.Children.Add(grAdd); contacts.Children.Add(grMsg);
+
         tabs.Items.Add(Tab("Contacts", contacts));
 
         // ===== LABELS — name your addresses & transactions (persisted; shown in Coins) =====
@@ -2281,6 +2318,39 @@ public partial class MainWindow : Window
     private void LoadContactsDisk() { try { if (!System.IO.File.Exists(ContactsPath())) return; foreach (var ln in System.IO.File.ReadAllLines(ContactsPath())) { var p = ln.Split('\t'); if (p.Length == 2 && !_contacts.Any(c => c.name == p[0])) _contacts.Add((p[0], p[1])); } } catch { } }
     private void SaveContactsDisk() { try { System.IO.File.WriteAllLines(ContactsPath(), _contacts.Select(c => c.name + "\t" + c.address)); } catch { } }
 
+    // ---- IDENTITIES + GROUPS for messaging. An identity-contact is a persistent (handle, identity-pubkey)
+    // pair you can add by hand (paste pubkey) or import from a live peer / bot — so you can address someone
+    // who is OFFLINE, and put them (or bots) in a group. A group is a named subset of identity pubkeys. Both
+    // are saved to disk so they survive restarts and don't depend on anyone being online. This is what feeds
+    // the GB 2623780 B broadcast encryption (send to one / all / a chosen group).
+    private readonly List<(string name, string pubHex)> _idContacts = new();
+    private readonly List<(string name, List<string> pubsHex)> _msgGroups = new();
+    private bool _idLoaded;
+    private static string IdContactsPath() { string d = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Estates"); System.IO.Directory.CreateDirectory(d); return System.IO.Path.Combine(d, "idcontacts.tsv"); }
+    private static string GroupsPath() { string d = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Estates"); System.IO.Directory.CreateDirectory(d); return System.IO.Path.Combine(d, "msggroups.tsv"); }
+    private void LoadIdDisk()
+    {
+        try { if (System.IO.File.Exists(IdContactsPath())) foreach (var ln in System.IO.File.ReadAllLines(IdContactsPath())) { var p = ln.Split('\t'); if (p.Length == 2 && IsPub(p[1]) && !_idContacts.Any(c => c.name == p[0])) _idContacts.Add((p[0], p[1].ToLowerInvariant())); } } catch { }
+        try { if (System.IO.File.Exists(GroupsPath())) foreach (var ln in System.IO.File.ReadAllLines(GroupsPath())) { var p = ln.Split('\t'); if (p.Length >= 1 && p[0].Length > 0) _msgGroups.Add((p[0], p.Skip(1).Where(IsPub).Select(x => x.ToLowerInvariant()).ToList())); } } catch { }
+    }
+    private void SaveIdDisk()
+    {
+        try { System.IO.File.WriteAllLines(IdContactsPath(), _idContacts.Select(c => c.name + "\t" + c.pubHex)); } catch { }
+        try { System.IO.File.WriteAllLines(GroupsPath(), _msgGroups.Select(g => g.name + "\t" + string.Join("\t", g.pubsHex))); } catch { }
+    }
+    private static bool IsPub(string h) { h = h.Trim(); return h.Length == 66 && h.All(Uri.IsHexDigit) && (h.StartsWith("02") || h.StartsWith("03")); }
+    /// <summary>Resolve a friendly recipient token (identity-contact name, "bot#id"/handle of a live peer, or a
+    /// raw 66-hex pubkey) to its identity pubkey bytes, searching the persistent contacts AND live peers.</summary>
+    private byte[]? ResolveIdentityPub(string token)
+    {
+        token = token.Trim();
+        var c = _idContacts.FirstOrDefault(x => string.Equals(x.name, token, StringComparison.OrdinalIgnoreCase));
+        if (c.pubHex is not null) { try { return Tx.FromHex(c.pubHex); } catch { } }
+        if (IsPub(token)) { try { return Tx.FromHex(token); } catch { } }
+        foreach (var p in _node.Peers()) if (p.WalletPub.Length == 66 && (string.Equals(p.Name, token, StringComparison.OrdinalIgnoreCase))) { try { return Tx.FromHex(p.WalletPub); } catch { } }
+        return null;
+    }
+
     // Render a QR code (real in-tree encoder) into a WPF Image — used for the receive address / URI.
     private static void RenderQr(System.Windows.Controls.Image img, string text)
     {
@@ -2513,6 +2583,17 @@ public partial class MainWindow : Window
     // Broadcast recipients: null => everyone live; non-null => a chosen subset (e.g. 10 of 100). Broadcast
     // uses the GB 2623780 B key-graph (broadcast encryption) — ONE ciphertext only the subset can open.
     private List<byte[]>? _chatBroadcastSubset;
+    private readonly List<System.Action> _chatModeApply = new();   // parallel to the chat mode combo items
+    /// <summary>Every identity we can broadcast to: saved identity-contacts ∪ live peers (deduped). This is the
+    /// recipient set for "Broadcast — everyone", so it includes offline contacts and bots, not just who's live.</summary>
+    private List<byte[]> AllKnownPubs()
+    {
+        var seen = new HashSet<string>(); var outp = new List<byte[]>();
+        void Add(string hex) { hex = hex.ToLowerInvariant(); if (IsPub(hex) && seen.Add(hex)) { try { outp.Add(Tx.FromHex(hex)); } catch { } } }
+        foreach (var c in _idContacts) Add(c.pubHex);
+        foreach (var p in _node.Peers()) if (p.WalletPub.Length == 66) Add(p.WalletPub);
+        return outp;
+    }
 
     private UIElement BuildChatUI()
     {
@@ -2528,35 +2609,27 @@ public partial class MainWindow : Window
         // Direct (one peer, CHAT-2P) or Broadcast (everyone, CHAT-GROUP) — the required selection.
         var modeRow = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
         var modeLbl = new TextBlock { Text = "Send as:", Foreground = B("#9aa0a6"), FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
-        var modeBox = new ComboBox { MinWidth = 220 };
+        var modeBox = new ComboBox { MinWidth = 260 };
+        // each combo item has a matching apply-action in _chatModeApply, so adding groups/contacts needs no
+        // brittle index math: send to ONE identity (Direct), ALL (everyone in contacts ∪ live), or a GROUP.
         void RefreshModes()
         {
+            if (!_idLoaded) { LoadIdDisk(); _idLoaded = true; }
             int keep = modeBox.SelectedIndex;
-            modeBox.Items.Clear();
-            modeBox.Items.Add("Broadcast (everyone)");
-            modeBox.Items.Add("Broadcast (choose recipients…)");
-            foreach (var p in _node.Peers()) modeBox.Items.Add($"Direct: {p.Name}");
+            modeBox.Items.Clear(); _chatModeApply.Clear();
+            void Mode(string label, System.Action apply) { modeBox.Items.Add(label); _chatModeApply.Add(apply); }
+            Mode("Broadcast — everyone (contacts + live)", () => { _chatDirectTo = null; _chatBroadcastSubset = AllKnownPubs(); });
+            Mode("Broadcast — choose recipients…", () => { _chatDirectTo = null; var p = PickRecipients(); if (p is { Count: > 0 }) _chatBroadcastSubset = p; else { _chatBroadcastSubset = null; modeBox.SelectedIndex = 0; } });
+            foreach (var g in _msgGroups)
+            { var gg = g; Mode($"Group: {gg.name} ({gg.pubsHex.Count})", () => { _chatDirectTo = null; _chatBroadcastSubset = gg.pubsHex.Select(h => { try { return Tx.FromHex(h); } catch { return null; } }).Where(b => b is not null).Select(b => b!).ToList(); }); }
+            foreach (var c in _idContacts)
+            { var cc = c; Mode($"Direct: {cc.name}", () => { _chatBroadcastSubset = null; try { _chatDirectTo = Tx.FromHex(cc.pubHex); } catch { _chatDirectTo = null; } }); }
+            foreach (var p in _node.Peers()) if (p.WalletPub.Length == 66 && !_idContacts.Any(c => c.pubHex == p.WalletPub.ToLowerInvariant()))
+            { var pp = p; Mode($"Direct (live): {pp.Name}", () => { _chatBroadcastSubset = null; try { _chatDirectTo = Tx.FromHex(pp.WalletPub); } catch { _chatDirectTo = null; } }); }
             modeBox.SelectedIndex = keep >= 0 && keep < modeBox.Items.Count ? keep : 0;
         }
         modeBox.DropDownOpened += (_, _) => RefreshModes();
-        modeBox.SelectionChanged += (_, _) =>
-        {
-            int i = modeBox.SelectedIndex;
-            if (i == 0) { _chatDirectTo = null; _chatBroadcastSubset = null; return; }   // Broadcast: everyone
-            if (i == 1)                                                                  // Broadcast: chosen subset (key-graph)
-            {
-                _chatDirectTo = null;
-                var picked = PickRecipients();
-                if (picked is { Count: > 0 }) _chatBroadcastSubset = picked;
-                else { _chatBroadcastSubset = null; modeBox.SelectedIndex = 0; }
-                return;
-            }
-            _chatBroadcastSubset = null;                                                 // Direct (1:1)
-            var peers = _node.Peers();
-            int pi = i - 2;
-            if (pi >= 0 && pi < peers.Count && peers[pi].WalletPub.Length > 0) { try { _chatDirectTo = Tx.FromHex(peers[pi].WalletPub); } catch { _chatDirectTo = null; } }
-            else _chatDirectTo = null;
-        };
+        modeBox.SelectionChanged += (_, _) => { int i = modeBox.SelectedIndex; if (i >= 0 && i < _chatModeApply.Count) _chatModeApply[i](); };
         RefreshModes();
         DockPanel.SetDock(modeLbl, Dock.Left); modeRow.Children.Add(modeLbl); modeRow.Children.Add(modeBox);
         DockPanel.SetDock(modeRow, Dock.Top); root.Children.Add(modeRow);
@@ -2789,7 +2862,7 @@ public partial class MainWindow : Window
 
         // BROADCAST: the key-graph (broadcast encryption) to a chosen subset — ONE ciphertext only those
         // recipients can open. null subset => everyone live right now. Carried AS a transaction.
-        var recipients = (_chatBroadcastSubset is { Count: > 0 } sub ? sub : _node.PeerWalletPubs().ToList());
+        var recipients = (_chatBroadcastSubset is { Count: > 0 } sub ? sub : AllKnownPubs());
         if (recipients.Count == 0) return;                       // no one to broadcast to
         string b64 = System.Convert.ToBase64String(payload);     // exact byte round-trip through the key-graph
         System.Threading.Tasks.Task.Run(() =>

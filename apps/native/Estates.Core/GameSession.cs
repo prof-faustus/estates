@@ -96,6 +96,31 @@ public sealed class GameSession
         return true;
     }
 
+    /// <summary>Enable opt-in auctions for this session (a declined title goes to auction). Both peers call
+    /// this identically at table setup so they stay in lock-step.</summary>
+    public void EnableAuctions() => _state.AuctionsEnabled = true;
+
+    /// <summary>Apply a deterministic auction BID from the seat whose turn it is to act (AuctionActor). Every
+    /// peer applying the same amount lands on the identical state, so the bidding stays in lock-step exactly
+    /// like a signed move.</summary>
+    public bool Bid(long amount, out string reason)
+    {
+        reason = "ok";
+        var r = Engine.Apply(_state, new Action("BID") { Amount = amount });
+        if (!r.Ok) { reason = $"{r.Code} {r.Context}"; return false; }
+        _state = r.State!; return true;
+    }
+
+    /// <summary>Apply a deterministic auction PASS from the current bidder; ends the auction when only the high
+    /// bidder remains.</summary>
+    public bool PassBid(out string reason)
+    {
+        reason = "ok";
+        var r = Engine.Apply(_state, new Action("PASS_BID"));
+        if (!r.Ok) { reason = $"{r.Code} {r.Context}"; return false; }
+        _state = r.State!; return true;
+    }
+
     /// <summary>Apply a trade that BOTH players have agreed to (the consent happens out of band via offer/
     /// accept frames). Because TRADE is deterministic and acts from the current seat, every peer that calls
     /// this with the same (pid, counterparty, amount, choice) lands on the identical state — so the two
