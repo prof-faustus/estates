@@ -1542,4 +1542,43 @@ try
 }
 catch (Exception ex) { Console.Error.WriteLine($"WIRE FAIL: {ex.Message}"); gfail = 1; }
 
+// NET: the same game over a REAL TCP socket between two peers (loopback host/dialer). Proves the transport,
+// not just the format — moves cross an actual network connection and are re-verified on the far side.
+try
+{
+    var deck = new Dictionary<string, List<int>>();
+    foreach (var kv in Params.Instance.Decks) deck[kv.Key] = Enumerable.Range(0, kv.Value.Count).ToList();
+    var k = DeedNft.DeriveSeatKeys(SHA256.HashData("estates-net-keys"u8.ToArray()), 2);
+    GameSession New() => new("regtest", 2, 1_000_000_000, new Dictionary<string, List<int>>(deck), k);
+    var P = Params.Instance;
+    int port = 50000 + new Random().Next(5000);
+    var listener = GameNet.Listen(port);
+    GameNet? dialer = null;
+    var connectTask = System.Threading.Tasks.Task.Run(() => dialer = GameNet.Connect("127.0.0.1", port));
+    var host = GameNet.Accept(listener);          // host side (verifier)
+    connectTask.Wait(5000); listener.Stop();
+    var A = New(); var B = New();                  // A = dialer (mover), B = host (verifier)
+    int over = 0; bool ok = true;
+    for (int step = 0; step < 60 && A.Phase != "GAME_OVER"; step++)
+    {
+        var s = A.State; string act = "END_TURN"; int pid = 0; string? ch = null;
+        if (s.Phase == "AWAIT_ROLL") act = "ROLL";
+        else if (s.Phase == "AWAIT_BUY") { int pp = s.PendingTitle ?? -1; act = (pp >= 0 && s.Seats[s.Current].Balance >= (P.Board[pp].BasePrice ?? 0)) ? "BUY" : "DECLINE"; }
+        else if (s.Phase == "AWAIT_TAX") { act = "PAY_TAX"; ch = "flat"; }
+        var pkt = A.Local(act, pid, ch);
+        dialer!.Send(pkt);                          // goes out over the TCP socket
+        var recv = host.Receive();                  // comes in on the other end
+        if (!B.Remote(recv, out var why)) { ok = false; Console.Error.WriteLine("NET reject: " + why); break; }
+        if (A.State.Current != B.State.Current || A.State.TurnIndex != B.State.TurnIndex) { ok = false; break; }
+        over++;
+    }
+    dialer?.Dispose(); host.Dispose();
+    bool netPass = ok && over >= 25;
+    if (netPass)
+        Console.WriteLine($"NET: {over} moves crossed a REAL TCP socket between two peers and were re-verified on the far side, in sync ✓");
+    else
+    { Console.Error.WriteLine($"NET FAIL: ok={ok} over={over}"); gfail = 1; }
+}
+catch (Exception ex) { Console.Error.WriteLine($"NET FAIL: {ex.Message}"); gfail = 1; }
+
 return (fail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && bfail == 0 && xfail == 0 && gfail == 0) ? 0 : 1;
