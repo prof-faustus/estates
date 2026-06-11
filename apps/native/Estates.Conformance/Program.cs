@@ -270,6 +270,272 @@ void X(string what, bool ok) { if (ok) xpass++; else { Console.Error.WriteLine($
     X("key-wrap yields nothing with the wrong key", Cipher.Unwrap(RandomNumberGenerator.GetBytes(32), wrapped) is null);
 }
 
+// MENTAL POKER (the user's commutative-encryption scheme, ported): a dealerless 2-player deal where the
+// recipient learns ONLY their card, a non-recipient CANNOT identify it, the full deal is a bijection, and
+// every shuffle/remask is audited (commit→reveal). No server, no trust — pure curve math.
+{
+    int N = 52;
+    var deck = MentalPokerEC.BaseDeck(N);
+    byte[] cA = MentalPokerEC.NewScalar(), cB = MentalPokerEC.NewScalar();
+    int[] permA = Deck.Permutation(SHA256.HashData("mp-A"u8.ToArray()), N);
+    int[] permB = Deck.Permutation(SHA256.HashData("mp-B"u8.ToArray()), N);
+    byte[] commitA = ShuffleProof.CommitShuffle(cA, permA);
+    var afterA = MentalPokerEC.ShuffleMask(deck, cA, permA);
+    var afterB = MentalPokerEC.ShuffleMask(afterA, cB, permB);
+    X("mental-poker: A's shuffle pass verifies against its commitment", ShuffleProof.VerifyShuffle(deck, afterA, cA, permA, commitA));
+    var dA = MentalPokerEC.NewPerCardScalars(N); var dB = MentalPokerEC.NewPerCardScalars(N);
+    byte[] commitRA = ShuffleProof.CommitRemask(cA, dA);
+    var remA = MentalPokerEC.Remask(afterB, cA, dA);
+    var remB = MentalPokerEC.Remask(remA, cB, dB);
+    X("mental-poker: A's remask pass verifies against its commitment", ShuffleProof.VerifyRemask(afterB, remA, cA, dA, commitRA));
+    // deal position 0 to A: B privately hands A its d_B[0]; A strips d_A[0] + d_B[0] and identifies the card
+    int recovered = MentalPokerEC.Identify(MentalPokerEC.Unmask(remB[0], new[] { dA[0], dB[0] }), N);
+    X("mental-poker: the recipient recovers a valid card", recovered is >= 0 and < 52);
+    // a non-recipient who strips ONLY their own scalar cannot identify the card (unconditional privacy)
+    X("mental-poker: a non-recipient CANNOT identify the card", MentalPokerEC.Identify(MentalPokerEC.Unmask(remB[0], new[] { dB[0] }), N) == -1);
+    // the WHOLE deal is a bijection — 52 distinct cards, none dropped, none duplicated
+    var seen = new HashSet<int>();
+    for (int i = 0; i < N; i++) seen.Add(MentalPokerEC.Identify(MentalPokerEC.Unmask(remB[i], new[] { dA[i], dB[i] }), N));
+    X("mental-poker: the full deal is a 52-card bijection (none lost/duplicated)", seen.Count == N && !seen.Contains(-1));
+    // hostile: a lied shuffle (wrong global) is rejected by the proof
+    X("mental-poker: a lied shuffle is rejected", !ShuffleProof.VerifyShuffle(deck, afterA, MentalPokerEC.NewScalar(), permA, commitA));
+    // hostile: a duplicated card (malformed deck) is rejected on sight
+    var dupes = (byte[][])deck.Clone(); dupes[1] = dupes[0];
+    X("mental-poker: a deck with a duplicated card is rejected", !MentalPokerEC.IsWellFormedDeck(dupes));
+}
+
+// THRESHOLD DEAL (the collusion-proof card deal): a card dealt to a recipient opens ONLY with the recipient's
+// MANDATORY secret AND any t of the other players' shares. The others colluding (all of them, lacking the
+// recipient's secret) CANNOT open it; the recipient alone (below threshold of others) CANNOT either.
+{
+    byte[] face = "Boardwalk title deed — encrypted face"u8.ToArray();
+    byte[] aliceSecret = ThresholdDeal.NewSecret();     // Alice's MANDATORY share — never shared
+    byte[] othersSecret = ThresholdDeal.NewSecret();    // the others' (Bob/Charlie/Dave) joint secret
+    var dealt = ThresholdDeal.Seal(face, aliceSecret, othersSecret, t: 2, others: 3);
+    bool Eq(byte[]? a, byte[] b) => a is not null && a.AsSpan().SequenceEqual(b);
+    X("threshold deal: recipient + any 2-of-3 others opens the card",
+        Eq(ThresholdDeal.Open(dealt.Sealed, aliceSecret, new[] { dealt.OtherShares[0], dealt.OtherShares[2] }), face));
+    X("threshold deal: a DIFFERENT 2-of-3 also opens (robust to one offline/hostile other)",
+        Eq(ThresholdDeal.Open(dealt.Sealed, aliceSecret, new[] { dealt.OtherShares[1], dealt.OtherShares[2] }), face));
+    byte[] notAlice = ThresholdDeal.NewSecret();
+    X("threshold deal: the other 3 COLLUDING cannot open (no recipient secret)",
+        !Eq(ThresholdDeal.Open(dealt.Sealed, notAlice, dealt.OtherShares), face));
+    X("threshold deal: recipient + only 1-of-3 cannot open (below threshold)",
+        !Eq(ThresholdDeal.Open(dealt.Sealed, aliceSecret, new[] { dealt.OtherShares[0] }), face));
+}
+
+// MENTAL-POKER DECK (the full deal): provably-random dealerless shuffle, THEN the collusion-proof threshold
+// deal on the actual masked deck. deck[k] = (∏ of every player's per-card scalar)·M_{σ(k)}; the recipient
+// unmasks with their own scalar + any t of the OTHERS' Shamir-shared combined mask.
+{
+    int N = 52, nPlayers = 4;
+    var deck = MentalPokerEC.BaseDeck(N);
+    var globals = new byte[nPlayers][];
+    var percard = new byte[nPlayers][][];
+    for (int p = 0; p < nPlayers; p++)   // SHUFFLE: every player masks + permutes (provably random)
+    {
+        globals[p] = MentalPokerEC.NewScalar();
+        int[] perm = Deck.Permutation(SHA256.HashData(System.Text.Encoding.ASCII.GetBytes("mpd-shuf-" + p)), N);
+        deck = MentalPokerEC.ShuffleMask(deck, globals[p], perm);
+    }
+    for (int p = 0; p < nPlayers; p++)   // REMASK: each swaps global for independent per-card scalars
+    {
+        percard[p] = MentalPokerEC.NewPerCardScalars(N);
+        deck = MentalPokerEC.Remask(deck, globals[p], percard[p]);
+    }
+    int k = 0, R = 0;                     // deal position 0 to player 0; others = players 1,2,3 (threshold 2-of-3)
+    var others = new List<byte[]>();
+    for (int p = 0; p < nPlayers; p++) if (p != R) others.Add(percard[p][k]);
+    byte[] othersCombined = MentalPokerDeck.CombineOthers(others);
+    var shares = MentalPokerDeck.ShareOthers(othersCombined, 2, 3);
+    int card = MentalPokerDeck.Deal(deck[k], percard[R][k], new[] { shares[0], shares[1] }, N);
+    X("mp-deck: recipient deals a valid card (own scalar + any 2-of-3 others)", card is >= 0 and < 52);
+    X("mp-deck: a DIFFERENT 2-of-3 yields the SAME card (robust + consistent)",
+        MentalPokerDeck.Deal(deck[k], percard[R][k], new[] { shares[1], shares[2] }, N) == card && card >= 0);
+    X("mp-deck: the 3 others COLLUDING cannot identify the card (no recipient scalar)",
+        MentalPokerDeck.Deal(deck[k], MentalPokerEC.NewScalar(), shares, N) == -1);
+    X("mp-deck: recipient + only 1-of-3 cannot deal (below threshold)",
+        MentalPokerDeck.Deal(deck[k], percard[R][k], new[] { shares[0] }, N) == -1);
+
+    // REVEAL-WITH-PROOF (showdown): reveal ALL players' scalars for position k; anyone recomputes the card and
+    // verifies it matches the claim. The true card verifies; a lying claim is rejected; a missing scalar fails.
+    var allK = new List<byte[]>();
+    for (int p = 0; p < nPlayers; p++) allK.Add(percard[p][k]);
+    int revealed = RevealProof.RevealedCard(deck[k], allK, N);
+    X("reveal-proof: the revealed card equals the card the recipient was dealt", revealed == card && card >= 0);
+    X("reveal-proof: an honest claim verifies", RevealProof.Verify(deck[k], allK, revealed, N));
+    X("reveal-proof: a LYING claim (wrong card) is rejected", !RevealProof.Verify(deck[k], allK, (revealed + 1) % N, N));
+    X("reveal-proof: a reveal missing one scalar cannot reproduce the card",
+        RevealProof.RevealedCard(deck[k], new[] { percard[0][k], percard[1][k], percard[2][k] }, N) != revealed);
+}
+
+// END-OF-GAME RECLAIM COVENANT: at game end all card NFTs are spent back to the deck/bank (nLockTime). A
+// well-formed reclaim verifies; tampering (final input, wrong lockTime, omitting a card, wrong destination) fails.
+{
+    var cards = new List<OutpointN> {
+        new OutpointN(new string('a', 64), 0), new OutpointN(new string('b', 64), 1), new OutpointN(new string('c', 64), 0) };
+    byte[] bank = NodeWallet.P2pkhScript(Recovery.Hash160(Secp256k1.PublicKey(RandomNumberGenerator.GetBytes(32))));
+    long lockTime = 850000;
+    var reclaim = ReclaimCovenant.BuildReclaim(cards, bank, lockTime);
+    X("reclaim: a well-formed end-of-game reclaim verifies", ReclaimCovenant.Verify(reclaim, cards, bank, lockTime).ok);
+    var finalIn = reclaim with { Inputs = new[] { reclaim.Inputs[0] with { Sequence = 0xffffffff }, reclaim.Inputs[1], reclaim.Inputs[2] } };
+    X("reclaim: a FINAL input (lockTime unenforced) is rejected", !ReclaimCovenant.Verify(finalIn, cards, bank, lockTime).ok);
+    X("reclaim: a wrong lockTime is rejected", !ReclaimCovenant.Verify(reclaim, cards, bank, lockTime + 1).ok);
+    var partial = ReclaimCovenant.BuildReclaim(cards.Take(2).ToList(), bank, lockTime);
+    X("reclaim: a reclaim that omits a card is rejected", !ReclaimCovenant.Verify(partial, cards, bank, lockTime).ok);
+    byte[] notBank = NodeWallet.P2pkhScript(Recovery.Hash160(Secp256k1.PublicKey(RandomNumberGenerator.GetBytes(32))));
+    X("reclaim: dust sent NOT to the bank/deck is rejected", !ReclaimCovenant.Verify(reclaim, cards, notBank, lockTime).ok);
+}
+
+// ON-CHAIN DECK ISSUANCE: the shuffled masked deck issues as 1-sat NFT carriers (no OP_RETURN) and reads back
+// byte-for-byte — this is how the shared encrypted deck lives on chain for every peer to read.
+{
+    int N = 52;
+    var deck = MentalPokerEC.ShuffleMask(MentalPokerEC.BaseDeck(N), MentalPokerEC.NewScalar(),
+        Deck.Permutation(SHA256.HashData("ocd-shuffle"u8.ToArray()), N));
+    byte[] tablePkh = Recovery.Hash160(Secp256k1.PublicKey(RandomNumberGenerator.GetBytes(32)));
+    var scripts = OnChainDeck.DeckScripts(deck, tablePkh);
+    bool roundTrip = scripts.Count == N;
+    for (int i = 0; i < N; i++) { var pt = OnChainDeck.ReadDeckPoint(scripts[i]); if (pt is null || !pt.AsSpan().SequenceEqual(deck[i])) roundTrip = false; }
+    X("on-chain deck: 52 masked cards issue as 1-sat carriers and read back byte-for-byte", roundTrip);
+    X("on-chain deck: a plain P2PKH is not misread as a deck card", OnChainDeck.ReadDeckPoint(NodeWallet.P2pkhScript(tablePkh)) is null);
+}
+
+// FULL MENTAL-POKER HAND (end-to-end orchestrator the game calls): shuffle -> issue on-chain -> threshold-deal
+// to players -> showdown reveal -> end-of-game reclaim. Proves the whole composed flow of a real Estates hand.
+{
+    var hand = new MentalPokerHand(52, 4);
+    byte[] tablePkh = Recovery.Hash160(Secp256k1.PublicKey(RandomNumberGenerator.GetBytes(32)));
+    X("full hand: the deck issues as 52 on-chain card NFTs", hand.IssueScripts(tablePkh).Count == 52);
+    var s0 = hand.DealShares(0, 0, 2); int c0 = hand.Deal(0, 0, new[] { s0[0], s0[2] });
+    var s1 = hand.DealShares(1, 1, 2); int c1 = hand.Deal(1, 1, new[] { s1[0], s1[1] });
+    X("full hand: player 0 is dealt a valid card (own scalar + 2-of-3 others)", c0 is >= 0 and < 52);
+    X("full hand: player 1 is dealt a valid card", c1 is >= 0 and < 52);
+    X("full hand: the two dealt cards differ (permutation is a bijection)", c0 != c1 && c0 >= 0);
+    X("full hand: showdown reveal matches player 0's dealt card", hand.Reveal(0) == c0);
+    X("full hand: showdown reveal matches player 1's dealt card", hand.Reveal(1) == c1);
+    var outs = new List<OutpointN> { new OutpointN(new string('1', 64), 0), new OutpointN(new string('2', 64), 0) };
+    byte[] bank = NodeWallet.P2pkhScript(tablePkh);
+    X("full hand: end-of-game reclaim of the dealt cards verifies",
+        ReclaimCovenant.Verify(ReclaimCovenant.BuildReclaim(outs, bank, 900000), outs, bank, 900000).ok);
+}
+
+// RED-TEAM (hostile-negative): malformed points/scalars, garbage deck NFTs, and tampered reclaims must all be
+// rejected fail-closed — a hostile player/server cannot inject bad inputs into the mental-poker deal.
+{
+    byte[] badPoint = new byte[33]; badPoint[0] = 0x02;          // 0x02||0 — not a usable card point
+    byte[] zero = new byte[32];
+    byte[] okScalar = MentalPokerEC.NewScalar();
+    byte[] okPoint = Secp256k1.CardBasePoint(0);
+    bool t;
+    t = false; try { Secp256k1.PointMul(badPoint, okScalar); } catch { t = true; } X("redteam: PointMul rejects an off-curve point", t);
+    t = false; try { Secp256k1.PointMul(okPoint, zero); } catch { t = true; } X("redteam: PointMul rejects a zero scalar", t);
+    t = false; try { Secp256k1.ScalarMul(zero, okScalar); } catch { t = true; } X("redteam: ScalarMul rejects a zero scalar", t);
+    t = false; try { Secp256k1.ScalarInverse(zero); } catch { t = true; } X("redteam: ScalarInverse rejects a zero scalar", t);
+    X("redteam: IsValidPoint rejects 0x02||00..0", !Secp256k1.IsValidPoint(badPoint));
+    X("redteam: a garbage deck NFT (bad point payload) is rejected on read",
+        OnChainDeck.ReadDeckPoint(OnChainActions.CarrierScript(TxProtocol.Stamp(TxType.Deal, badPoint), Recovery.Hash160(okPoint))) is null);
+    var rcards = new List<OutpointN> { new OutpointN(new string('d', 64), 0), new OutpointN(new string('e', 64), 0) };
+    byte[] rbank = NodeWallet.P2pkhScript(Recovery.Hash160(Secp256k1.PublicKey(MentalPokerEC.NewScalar())));
+    var rgood = ReclaimCovenant.BuildReclaim(rcards, rbank, 800001);
+    X("redteam: reclaim rejects a duplicate input", !ReclaimCovenant.Verify(rgood with { Inputs = new[] { rgood.Inputs[0], rgood.Inputs[0] } }, rcards, rbank, 800001).ok);
+    X("redteam: reclaim rejects a wrong dust value", !ReclaimCovenant.Verify(rgood with { Outputs = new[] { rgood.Outputs[0] with { Value = 999 } } }, rcards, rbank, 800001).ok);
+    X("redteam: reclaim rejects a duplicate card in the spec", !ReclaimCovenant.Verify(rgood, new List<OutpointN> { rcards[0], rcards[0] }, rbank, 800001).ok);
+}
+
+// FUZZ the untrusted-input decoders: thousands of random/garbage byte strings must NEVER crash — every parser
+// of attacker-controlled data fails closed (null / false / -1), never throws.
+{
+    bool anyThrew = false; string firstThrow = "";
+    for (int i = 0; i < 3000 && !anyThrew; i++)
+    {
+        byte[] junk = RandomNumberGenerator.GetBytes(1 + (i % 256));
+        try
+        {
+            _ = Tx.Parse(junk);
+            _ = TxTransport.ReadCarrier(junk);
+            _ = TxMessage.OpenCarrier(junk, MentalPokerEC.NewScalar());
+            _ = OnChainActions.ReadType(junk);
+            _ = OnChainDeck.ReadDeckPoint(junk);
+            _ = Secp256k1.IsValidPoint(junk);
+            _ = Secp256k1.IsValidScalar(junk);
+            _ = MentalPokerEC.IsWellFormedDeck(new[] { junk });
+            _ = new SpvEnvelope(junk, junk, new List<string>(), 0).Verify();
+            _ = ReclaimCovenant.Verify(new NativeTx(1, new List<TxInputN>(), new List<TxOutputN>(), 0), new List<OutpointN>(), junk, 0);
+        }
+        catch (Exception e) { anyThrew = true; firstThrow = e.Message; }
+    }
+    X("fuzz: 3000 random inputs never crash any decoder (fail-closed) " + (anyThrew ? "THREW: " + firstThrow : ""), !anyThrew);
+}
+
+// ON-CHAIN DECK ISSUANCE FROM THE WALLET: a funded wallet mints the whole shuffled deck as 1-sat NFTs in ONE
+// signed transaction; each output reads back as a deck card; the spend verifies locally (no node).
+{
+    var hand = new MentalPokerHand(52, 4);
+    byte[] tablePkh = Recovery.Hash160(Secp256k1.PublicKey(MentalPokerEC.NewScalar()));
+    var scripts = hand.IssueScripts(tablePkh);
+    byte[] seed = SHA256.HashData("estates/deck-issue/selftest"u8.ToArray());
+    var w = new StandaloneWallet(seed, "regtest");
+    w.AddCoin(Tx.ToHex(RandomNumberGenerator.GetBytes(32)), 0, 1_000_000, 0);
+    var built = OnChainActions.IssueDeck(w, scripts, 1000);
+    int deckOuts = 0;
+    foreach (var o in built.Tx.Outputs) if (o.Value == 1 && OnChainDeck.ReadDeckPoint(o.Script) is not null) deckOuts++;
+    X("issue-deck: the issuance tx mints 52 readable 1-sat deck-card NFTs", deckOuts == 52);
+    X("issue-deck: the issuance tx is signed and verifies locally (no node)", w.VerifySpend(built));
+}
+
+// ON-CHAIN THRESHOLD-DEAL DELIVERY: the others SEAL their shares to the recipient on-chain (only the recipient
+// can open them); the recipient opens, parses, reconstructs, and deals their card; a non-recipient cannot open.
+{
+    var hand = new MentalPokerHand(52, 4);
+    int k = 0, R = 0;
+    byte[] recipPriv = MentalPokerEC.NewScalar(); byte[] recipPub = Secp256k1.PublicKey(recipPriv);
+    var shares = hand.DealShares(k, R, 2);                       // 3 shares for the 3 others, threshold 2
+    var sealedCarriers = new List<byte[]>();
+    foreach (var sh in new[] { shares[0], shares[2] })          // any 2 of the 3 others deliver, sealed to recipient
+        sealedCarriers.Add(TxMessage.SealCarrier(MentalPokerEC.NewScalar(), recipPub, TxType.Reveal, OnChainDeck.ShareBytes(sh)));
+    var got = new List<Shamir.Share>();
+    foreach (var c in sealedCarriers)
+    {
+        var m = TxMessage.OpenCarrier(c, recipPriv);
+        var s = m is null ? null : OnChainDeck.ParseShare(m.Value.plaintext);
+        if (s is not null) got.Add(s);
+    }
+    int card = hand.Deal(k, R, got);
+    X("on-chain deal: recipient opens 2-of-3 sealed shares and deals a valid card", got.Count == 2 && card is >= 0 and < 52);
+    X("on-chain deal: a non-recipient cannot open the sealed shares", TxMessage.OpenCarrier(sealedCarriers[0], MentalPokerEC.NewScalar()) is null);
+    X("on-chain deal: the dealt card matches the showdown reveal", hand.Reveal(k) == card);
+}
+
+// DISTRIBUTED (P2P) SHUFFLE: the deck is passed player-to-player as serialized bytes; each player COMMITS to
+// their pass before applying it, and any auditor re-verifies every pass against its commitment (ShuffleProof).
+// This is the real multiplayer shuffle that runs over the Estates P2P transport — no central dealer.
+{
+    int N = 52, players = 4;
+    byte[][] deck = MentalPokerEC.BaseDeck(N);
+    var globals = new byte[players][]; var perms = new int[players][]; var commits = new byte[players][];
+    int wireLen = 0;
+    for (int p = 0; p < players; p++)
+    {
+        byte[] wire = OnChainDeck.SerializeDeck(deck);            // sent over the wire to player p
+        var received = OnChainDeck.DeserializeDeck(wire);          // player p validates every card on receipt
+        wireLen = received?.Length ?? -1;
+        globals[p] = MentalPokerEC.NewScalar();
+        perms[p] = Deck.Permutation(SHA256.HashData(System.Text.Encoding.ASCII.GetBytes("dist-" + p)), N);
+        commits[p] = ShuffleProof.CommitShuffle(globals[p], perms[p]);   // commit BEFORE applying
+        deck = MentalPokerEC.ShuffleMask(received!, globals[p], perms[p]);
+    }
+    bool allVerify = true;
+    byte[][] cur = MentalPokerEC.BaseDeck(N);
+    for (int p = 0; p < players; p++) { var outp = MentalPokerEC.ShuffleMask(cur, globals[p], perms[p]); if (!ShuffleProof.VerifyShuffle(cur, outp, globals[p], perms[p], commits[p])) allVerify = false; cur = outp; }
+    X("dist-shuffle: the deck passes over the wire (serialize/deserialize round-trips, every card validated)", wireLen == N);
+    X("dist-shuffle: every player's pass verifies against its prior commitment (fully audited)", allVerify);
+    X("dist-shuffle: a wire deck with an invalid card is rejected on receipt",
+        OnChainDeck.DeserializeDeck(new byte[33]) is null);
+    X("dist-shuffle: a player using the WRONG commitment is caught",
+        !ShuffleProof.VerifyShuffle(MentalPokerEC.BaseDeck(N), MentalPokerEC.ShuffleMask(MentalPokerEC.BaseDeck(N), globals[0], perms[0]), globals[0], perms[0], commits[1]));
+}
+
 // Standalone wallet: a real P2PKH spend built + signed entirely in-process — NO node, NO RPC,
 // NO network. Proves the exe can hold coins and produce spend-valid BSV transactions on its own.
 {

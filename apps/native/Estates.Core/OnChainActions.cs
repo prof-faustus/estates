@@ -59,6 +59,17 @@ public static class OnChainActions
     /// <summary>REVEAL (#7) — opening a prior commitment.</summary>
     public static StandaloneWallet.BuiltTx Reveal(StandaloneWallet w, byte[] secret, long feeSats) => Typed(w, TxType.Reveal, secret, feeSats);
 
+    /// <summary>ISSUE the mental-poker SHARED ENCRYPTED DECK on-chain: one transaction that mints every masked
+    /// card as a 1-sat NFT (OnChainDeck carriers), funded by the wallet. This is the on-chain birth of the
+    /// dealerless shuffled deck — every peer reads it from chain; no card is legible until threshold-dealt.</summary>
+    public static StandaloneWallet.BuiltTx IssueDeck(StandaloneWallet w, IReadOnlyList<byte[]> deckScripts, long feeSats)
+    {
+        if (deckScripts == null || deckScripts.Count == 0) throw new ArgumentException("empty deck");
+        var outs = new List<TxOutputN>(deckScripts.Count);
+        foreach (var s in deckScripts) outs.Add(new TxOutputN(1, s));   // each card is a 1-sat NFT
+        return w.BuildAndSign(outs.ToArray(), feeSats, 0);
+    }
+
     /// <summary>TABLE-OPEN (#14) — open a table on-chain.</summary>
     public static StandaloneWallet.BuiltTx TableOpen(StandaloneWallet w, byte[] tableParams, long feeSats) => Typed(w, TxType.TableOpen, tableParams, feeSats);
     /// <summary>GAME-START (#15) — start a game on-chain.</summary>
@@ -115,6 +126,38 @@ public static class OnChainActions
     {
         if (nftData.Length < 33 + 12) return null;
         return Cipher.EcdhOpen(ownerPriv, nftData[..33], new Cipher.EcdhSealed(nftData[33..45], nftData[45..]), CardAad);
+    }
+
+    public sealed record OwnedToken(string Outpoint, TxType Type, byte[] Face, bool IsIdentity);
+
+    /// <summary>Decode ONE of the wallet's COINS as an NFT token it OWNS — using the SAME on-chain carrier
+    /// format the app writes (TxTransport.ReadCarrier + TxMessage.OpenCarrier). Returns null unless the coin's
+    /// script carries a typed NFT (mint/transfer) that decrypts with `recipientPriv` (only the true owner can
+    /// open it — the scarcity proof). This is how the wallet reads its tokens straight from its coins, with NO
+    /// side files: the token IS the coin.</summary>
+    public static OwnedToken? DecodeOwnedToken(string outpoint, byte[] script, byte[] recipientPriv)
+    {
+        var carrier = TxTransport.ReadCarrier(script); if (carrier is null) return null;
+        var m = TxMessage.OpenCarrier(carrier, recipientPriv); if (m is null) return null;   // not ours / can't open
+        if (m.Value.type != TxType.NftMint && m.Value.type != TxType.NftTransfer) return null;
+        return new OwnedToken(outpoint, m.Value.type, m.Value.plaintext, IsIdentityFace(m.Value.plaintext));
+    }
+
+    /// <summary>Every NFT token the wallet owns, read live from its on-chain coins (no side files). `coins`
+    /// are (outpoint, lockingScript) from the SPV wallet; `recipientPriv` is the key the tokens are sealed to
+    /// (the index-0 identity key). Identity tokens are flagged via IsIdentity.</summary>
+    public static List<OwnedToken> WalletTokens(IEnumerable<(string outpoint, byte[] script)> coins, byte[] recipientPriv)
+    {
+        var o = new List<OwnedToken>();
+        foreach (var (op, sc) in coins) { var t = DecodeOwnedToken(op, sc, recipientPriv); if (t is not null) o.Add(t); }
+        return o;
+    }
+
+    /// <summary>True if a decrypted NFT face is the IDENTITY token (a signed identity profile), not a card/deed.</summary>
+    public static bool IsIdentityFace(byte[] face)
+    {
+        try { string s = System.Text.Encoding.UTF8.GetString(face); return s.TrimStart().StartsWith("{") && s.Contains("\"identity\"") && s.Contains("\"pseudonym\""); }
+        catch { return false; }
     }
 
     /// <summary>Encrypted ON-CHAIN chat: ECDH+AES-seal the message to `recipientPub` and carry it on-chain

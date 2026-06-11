@@ -35,6 +35,11 @@ public partial class App : Application
         // touching the user's screen, mouse, or keyboard.
         if (e.Args.Any(a => a == "--selftest")) { RunSelfTest(); Shutdown(); return; }
 
+        // HEADLESS MENTAL-POKER HAND: estates.exe --mphand runs a FULL dealerless on-chain mental-poker hand
+        // (shuffle -> issue deck as NFTs -> threshold-deal hole cards -> showdown reveal -> end-of-game reclaim)
+        // with NO window, and writes a result file. Proves the game's cryptographic core works in the real exe.
+        if (e.Args.Any(a => a == "--mphand")) { RunMpHand(); Shutdown(); return; }
+
         // HEADLESS LIVE-NETWORK P2P TEST (signoff plumbing): estates.exe --p2ptest <testnet|mainnet|regtest>
         // [--scan <address>] [--broadcast <rawhex>] — discovers REAL public BSV nodes, handshakes, syncs the
         // header chain, and (optionally) scans for a coin / broadcasts a tx. Proves the testnet/mainnet
@@ -147,6 +152,42 @@ public partial class App : Application
                 $"evidence dir: {evidence}\n" + (firstErr.Length > 0 ? "firstErr=" + firstErr + "\n" : "") + "\n" + manifest);
         }
         catch { }
+    }
+
+    /// <summary>Run a FULL dealerless on-chain mental-poker hand headless and write the evidence: shuffle ->
+    /// issue the masked deck as NFTs -> threshold-deal hole cards to 4 players -> showdown reveal (verified) ->
+    /// end-of-game reclaim. Proves the game's cryptographic core works in the shipped exe, no window.</summary>
+    private static void RunMpHand()
+    {
+        string outp = System.IO.Path.Combine(AppContext.BaseDirectory, $"mphand-{DateTime.UtcNow:yyyyMMdd-HHmmss}Z.txt");
+        var sb = new System.Text.StringBuilder();
+        void W(string s) { sb.AppendLine(s); try { System.IO.File.WriteAllText(outp, sb.ToString()); } catch { } }
+        try
+        {
+            W($"ESTATES mental-poker hand — {DateTime.UtcNow:o}");
+            var hand = new MentalPokerHand(52, 4);
+            byte[] tablePkh = Recovery.Hash160(Secp256k1.PublicKey(MentalPokerEC.NewScalar()));
+            var scripts = hand.IssueScripts(tablePkh);
+            W($"shuffle + issue: {scripts.Count} masked card NFTs minted (the shared encrypted deck)");
+            var dealt = new int[4];
+            for (int p = 0; p < 4; p++)
+            {
+                var sh = hand.DealShares(p, p, 2);
+                dealt[p] = hand.Deal(p, p, new[] { sh[0], sh[1] });
+                W($"  player {p}: dealt card index {dealt[p]} (own mandatory scalar + 2-of-3 others)");
+            }
+            bool allMatch = true;
+            for (int p = 0; p < 4; p++) { int r = hand.Reveal(p); if (r != dealt[p]) allMatch = false; W($"  player {p}: showdown reveal {r} {(r == dealt[p] ? "MATCHES" : "MISMATCH")}"); }
+            var outs = new List<OutpointN>();
+            for (int p = 0; p < 4; p++) outs.Add(new OutpointN(new string((char)('1' + p), 64), 0));
+            byte[] bank = NodeWallet.P2pkhScript(tablePkh);
+            bool reclaimOk = ReclaimCovenant.Verify(ReclaimCovenant.BuildReclaim(outs, bank, 999000), outs, bank, 999000).ok;
+            bool distinct = dealt.Distinct().Count() == 4;
+            W($"reclaim: end-of-game reclaim of {outs.Count} cards verifies = {reclaimOk}");
+            bool pass = allMatch && reclaimOk && distinct && scripts.Count == 52;
+            W($"RESULT: {(pass ? "PASS — full on-chain mental-poker hand works in the shipped exe" : "FAIL")}");
+        }
+        catch (Exception e) { W("FATAL: " + e); }
     }
 
     /// <summary>Headless live-network proof: discover real public BSV nodes, handshake, sync headers, and

@@ -75,8 +75,9 @@ public partial class MainWindow : Window
             if (wz.ShowDialog() == true && wz.Seed is not null)
             {
                 _walletSeed = wz.Seed; _wallet = null;
-                _network = wz.Network;                                      // network chosen on create/load
-                try { System.IO.File.WriteAllText(NetworkPath(), _network); } catch { }
+                // ONE identity, ALL networks: the wizard does NOT pick a network. The current network is just the
+                // last-used view (restored in the ctor; mainnet by default) and is switched live via the global
+                // Network selector — always the SAME seed/identity, never a different wallet.
                 if (wz.Pseudonym.Length > 0) { _displayName = wz.Pseudonym; SaveHandle(_displayName); _node.Name = _displayName; }
                 WalletHost.Content = BuildWalletUI();   // wallet is now registered/unlocked — you CAN check it
                 RefreshNodes();
@@ -159,6 +160,7 @@ public partial class MainWindow : Window
     private void Start_Click(object sender, RoutedEventArgs e)
     {
         var (net, n) = Config();
+        if (!RequireIdentity(net)) return;
         if (!RequireFunding(net)) return;
         if (_node.Peers().Count == 0) { StartMsg.Text = "You can't start a game alone — run a bot (a node you control) or wait for another player to join, then start."; return; }
         StartGame(net, n);
@@ -167,11 +169,43 @@ public partial class MainWindow : Window
     private void Join_Click(object sender, RoutedEventArgs e)
     {
         var (net, n) = Config();
+        if (!RequireIdentity(net)) return;
         if (!RequireFunding(net)) return;
         var tables = _node.Peers().Where(p => p.TableId != null).ToList();
         if (tables.Count == 0) { StartMsg.Text = "No table to join — run a bot or wait for someone to open a table."; return; }
         _node.Connect(tables[0]);
         StartGame(net, n);
+    }
+
+    // HARD RULE: a game CANNOT start without an on-chain IDENTITY. Your identity is a single, unique,
+    // permanent, NON-TRANSFERABLE NFT bound to this wallet, and it exists ONLY on-chain. The wallet and the
+    // rest of the program work fully WITHOUT an identity — you just cannot start or join a GAME until your
+    // identity is registered on-chain for this network. (Identity is checked by its per-network on-chain marker.)
+    private bool RequireIdentity(string net)
+    {
+        if (HasOnChainIdentity(net)) { return true; }
+        StartMsg.Text = $"You need an on-chain IDENTITY to play. Your identity is a single, permanent, non-transferable NFT on the blockchain — it cannot be sold or moved. The wallet works without it, but to start a game: fund the wallet, then register your identity on-chain (Wallet → Info → “Register identity ON-CHAIN”). Until then you can use everything except starting a game.";
+        return false;
+    }
+
+    /// <summary>True iff this wallet HOLDS its identity NFT on-chain for the given network. Read straight from
+    /// the wallet's TOKEN COINS (the token IS the coin — no side files): an identity coin is a carrier UTXO the
+    /// index-0 identity key can decrypt to a signed identity profile. Falls back to the legacy on-chain marker
+    /// for identities registered before coin-enumeration existed, so none are lost.</summary>
+    private bool HasOnChainIdentity(string net)
+    {
+        try
+        {
+            var w = EnsureWallet();
+            if (w is not null)
+            {
+                var coins = new List<(string, byte[])>();
+                foreach (var c in LoadSpvFromDisk(w).TokenCoins()) coins.Add((c.outpoint, c.script));
+                foreach (var t in OnChainActions.WalletTokens(coins, w.ChildPriv(0))) if (t.IsIdentity) return true;
+            }
+        }
+        catch { }
+        return System.IO.File.Exists(System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Estates", "identity-onchain-" + net + ".txt"));
     }
 
     // HARD RULE: a game is real-value, so it cannot start with an empty wallet. The check is
@@ -262,6 +296,7 @@ public partial class MainWindow : Window
     private GameState? _game;
     private readonly List<(int id, string name, string txid)> _heldNfts = new();   // deed/card NFTs you hold
     private string? _genesisTxid;   // local table id for the current game (no node)
+    private MentalPokerHand? _mpHand;   // this table's dealerless, provably-shuffled ENCRYPTED card deck
 
     private void StartGame(string network, int seats)
     {
@@ -275,6 +310,23 @@ public partial class MainWindow : Window
         _game = Engine.InitialState(network, seats, 1_000_000, deckOrder, false);
         RenderGame();
         Tabs.SelectedIndex = 1;
+
+        // MENTAL POKER (dealerless, provably-random, collusion-proof): shuffle + prepare this table's shared
+        // ENCRYPTED card deck on a BACKGROUND thread so the UI never blocks. Non-breaking — any failure is just
+        // logged and the game still opens. The prepared hand backs threshold-dealt cards + showdown reveal.
+        System.Threading.Tasks.Task.Run(() =>
+        {
+            try
+            {
+                var hand = new MentalPokerHand(52, System.Math.Max(2, seats));
+                var w = EnsureWallet();
+                byte[] tablePkh = w is not null ? Recovery.Hash160(w.ChildPub(FirstAddr)) : new byte[20];
+                int n = hand.IssueScripts(tablePkh).Count;
+                _mpHand = hand;
+                Dispatcher.Invoke(() => LogEvent("mp-deck", $"dealerless mental-poker deck ready for the table: {n} provably-shuffled encrypted card NFTs"));
+            }
+            catch (System.Exception ex) { try { Dispatcher.Invoke(() => LogEvent("mp-deck-err", ex.Message)); } catch { } }
+        });
     }
 
     private static readonly Dictionary<string, string> GroupColor = new()
@@ -955,8 +1007,17 @@ public partial class MainWindow : Window
         void LoadHistory()
         {
             var rows = new List<Row4>();
-            foreach (var (txid, credited, ncoins) in LoadSpvFromDisk(w).ReceivedHistory())
-                rows.Add(new Row4 { A = "received", B = "+" + credited.ToString("n0"), C = txid[..Math.Min(20, txid.Length)] + "…", D = ncoins + " coin (SPV proof)", Full = txid });
+            var sp = LoadSpvFromDisk(w);
+            // THREE separate received states, never mixed (the user's rule):
+            // 1) CONFIRMED — merkle-proven on a PoW header; spendable.
+            foreach (var (txid, credited, ncoins) in sp.ReceivedHistory())
+                rows.Add(new Row4 { A = "received ✓ confirmed", B = "+" + credited.ToString("n0"), C = txid[..Math.Min(20, txid.Length)] + "…", D = ncoins + " coin · SPV proof verified (on-chain)", Full = txid });
+            // 2) UNCONFIRMED — raw tx received, no proof yet; NOT spendable; watched for confirmation.
+            foreach (var (txid, credited, ncoins) in sp.PendingReceived())
+                rows.Add(new Row4 { A = "received ⏳ UNCONFIRMED", B = "+" + credited.ToString("n0"), C = txid[..Math.Min(20, txid.Length)] + "…", D = ncoins + " coin · awaiting merkle proof / inclusion — not yet spendable", Full = txid });
+            // 3) DOUBLE-SPEND / INVALID — flagged; never spendable.
+            foreach (var (txid, reason) in sp.InvalidReceived())
+                rows.Add(new Row4 { A = "received ✗ DOUBLE-SPEND", B = "—", C = txid[..Math.Min(20, txid.Length)] + "…", D = "INVALID · " + reason, Full = txid });
             rows.AddRange(_txLog);
             string q = hSearch.Text.Trim();
             if (q.Length > 0) rows = rows.Where(r => (r.A + r.B + r.C + r.D + Label(r.C)).Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();

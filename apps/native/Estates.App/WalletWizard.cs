@@ -19,7 +19,9 @@ public sealed class WalletWizard : Window
     public string Password { get; private set; } = "";
     public string Pseudonym { get; private set; } = "";
     public string WalletPath { get; private set; } = WalletStore.DefaultPath();   // WHERE the wallet file is saved
-    public string Network { get; private set; } = "mainnet";                      // chosen on create AND load
+    // The wallet/identity is network-AGNOSTIC: ONE seed works on mainnet, testnet, and regtest. The wizard does
+    // NOT choose a network (that is a runtime view toggle in the main window). This stays only as a harmless default.
+    public string Network { get; } = "mainnet";
 
     private enum Step { Splash, Choose, NewWalletFile, NewPassword, SeedShow, SeedConfirm, Register, Restore }
     private Step _step = Step.Splash;
@@ -29,7 +31,6 @@ public sealed class WalletWizard : Window
     private readonly TextBox _email = new();
     private readonly TextBox _realname = new();
     private readonly TextBox _walletPathBox = new() { Text = WalletStore.DefaultPath() };
-    private string _netChoice = "mainnet";
 
     private static SolidColorBrush B(string h) => new((Color)ColorConverter.ConvertFromString(h));
     private readonly TextBlock _title = new() { Foreground = B("#e6e6e6"), FontSize = 20, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 4) };
@@ -95,23 +96,15 @@ public sealed class WalletWizard : Window
                 break;
             case Step.Choose:
             {
-                _title.Text = "Choose your network & wallet";
-                _subtitle.Text = "First pick the NETWORK this wallet is for, then create or open a wallet. Everything is on-chain; nothing in the program runs without a loaded wallet.";
+                _title.Text = "Your wallet";
+                _subtitle.Text = "ONE wallet, ONE identity — the same keys work on EVERY network (mainnet, testnet, regtest) at once. You log in ONCE; the network is just a view you switch inside the app, never a different wallet. Create, restore, or open your wallet.";
                 _next.Visibility = Visibility.Collapsed;
-                _body.Children.Add(Lab("which wallet do you want — mainnet, testnet, or regtest? (chosen now, used on create AND load)"));
-                foreach (var net in new[] { "mainnet", "testnet", "regtest" })
-                {
-                    var rb = new RadioButton { Content = net, Foreground = B("#e6e6e6"), Margin = new Thickness(0, 3, 0, 3), GroupName = "wznet", IsChecked = _netChoice == net, FontSize = 13 };
-                    System.Windows.Automation.AutomationProperties.SetAutomationId(rb, "wzNet_" + net);
-                    string cap = net; rb.Checked += (_, _) => { _netChoice = cap; Network = cap; };
-                    _body.Children.Add(rb);
-                }
-                Network = _netChoice;
-                _body.Children.Add(new TextBlock { Height = 10 });
+                // NO network choice here: an identity spans all networks. (Network is a runtime selector in the
+                // main window, applied to this same seed — it is NOT part of choosing/opening the wallet.)
                 bool exists = WalletStore.Exists(WalletStore.DefaultPath());
-                var create = Big("➕  Create a new wallet"); create.Click += (_, _) => { Network = _netChoice; _step = Step.NewWalletFile; Render(); };
-                var restore = Big("↩  Restore from seed"); restore.Click += (_, _) => { Network = _netChoice; _step = Step.Restore; Render(); };
-                var open = Big(exists ? "🔓  Open my existing wallet" : "📂  Open a wallet file…"); open.Click += (_, _) => { Network = _netChoice; OpenExisting(exists); };
+                var create = Big("➕  Create a new wallet"); create.Click += (_, _) => { _step = Step.NewWalletFile; Render(); };
+                var restore = Big("↩  Restore from seed"); restore.Click += (_, _) => { _step = Step.Restore; Render(); };
+                var open = Big(exists ? "🔓  Open my existing wallet" : "📂  Open a wallet file…"); open.Click += (_, _) => OpenExisting(exists);
                 System.Windows.Automation.AutomationProperties.SetAutomationId(create, "wzCreate");
                 System.Windows.Automation.AutomationProperties.SetAutomationId(restore, "wzRestore");
                 System.Windows.Automation.AutomationProperties.SetAutomationId(open, "wzOpen");
@@ -120,7 +113,7 @@ public sealed class WalletWizard : Window
             }
             case Step.NewWalletFile:
             {
-                _title.Text = $"Choose where to save your {_netChoice} wallet";
+                _title.Text = "Choose where to save your wallet";
                 _subtitle.Text = "YOU choose the file and the drive. The wallet is never overwritten and is backed up read-only on every write, so it can't be lost.";
                 _body.Children.Add(Lab("wallet file (your encrypted keys are saved here)"));
                 _body.Children.Add(_walletPathBox);
@@ -195,7 +188,7 @@ public sealed class WalletWizard : Window
                 try { var dir = System.IO.Path.GetDirectoryName(wp); if (!string.IsNullOrEmpty(dir)) System.IO.Directory.CreateDirectory(dir); }
                 catch (System.Exception ex) { _msg.Text = "cannot use that folder: " + ex.Message; return; }
                 if (System.IO.File.Exists(wp)) { _msg.Text = "a wallet ALREADY exists there — choose a new file (a wallet is never overwritten)"; return; }
-                WalletPath = wp; Network = _netChoice;
+                WalletPath = wp;
                 _step = Step.NewPassword; Render(); break;
             }
             case Step.NewPassword:
@@ -204,23 +197,19 @@ public sealed class WalletWizard : Window
             case Step.SeedShow: _step = Step.SeedConfirm; Render(); break;
             case Step.SeedConfirm:
                 if (_seedConfirm.Text.Trim().ToLowerInvariant() != Tx.ToHex(_pending)) { _msg.Text = "that does not match the seed — check your backup"; return; }
-                _registerFrom = Step.SeedConfirm; _step = Step.Register; Render(); break;
-            case Step.Register:
-            {
-                string ps = _pseudonym.Text.Trim();
-                if (ps.Length == 0) { _msg.Text = "a PSEUDONYM is required — this is your identity (not your real name)"; return; }
-                string em = _email.Text.Trim();
-                if (!EmailOk(em)) { _msg.Text = "enter a valid email — format must be name@domain.tld and the domain must resolve"; return; }
-                Pseudonym = ps;
-                FinishRegistered(_pending, Password, ps, em, _realname.Text.Trim());
-                break;
-            }
+                // NO identity here. An identity is ON-CHAIN ONLY and needs funds, so it CANNOT exist at wallet
+                // creation. Create the wallet and ENTER the program; the wallet works at 0 balance for checking.
+                // You register your identity (a real on-chain tx) and fund it later, from inside the app.
+                Finish(_pending, Password); break;
             case Step.Restore:
             {
                 string h = _restoreSeed.Text.Trim();
                 if (h.Length != 64) { _msg.Text = "seed must be 64 hex characters"; return; }
                 byte[] s; try { s = Tx.FromHex(h); } catch { _msg.Text = "seed is not valid hex"; return; }
-                _pending = s; Password = _restorePw.Password; _registerFrom = Step.Restore; _step = Step.Register; Render(); break;   // restore ALSO registers a pseudonym
+                Password = _restorePw.Password;
+                // restore at the chosen file location and ENTER — no identity at login (identity is on-chain, later)
+                if (System.IO.File.Exists(WalletPath)) { _msg.Text = "a wallet already exists at the default location — open it instead, or this would overwrite it"; return; }
+                Finish(s, Password); break;
             }
         }
     }
@@ -239,17 +228,18 @@ public sealed class WalletWizard : Window
         {
             var s = WalletStore.Open(path, pwWin.Value);
             if (s is null) { _msg.Text = "wrong password, or not a wallet file"; return; }
-            // EXISTING wallet but NOT yet registered → force identity registration (pseudonym + email).
-            string idjson = System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData), "Estates", "identity.json");
-            if (!System.IO.File.Exists(idjson)) { _pending = s; Password = pwWin.Value; _registerFrom = Step.Choose; _step = Step.Register; Render(); return; }
+            // Just open and ENTER. Identity is NOT required to get in (it is an on-chain step done later,
+            // after funding). The wallet always opens for checking, even at 0 balance.
             Seed = s; Password = pwWin.Value; DialogResult = true; Close();
         }
         catch (System.Exception e) { _msg.Text = e.Message; }
     }
 
+    // Create the encrypted wallet at the chosen file and ENTER. NO identity is written here — identity is an
+    // on-chain action taken later, after funding, from inside the app.
     private void Finish(byte[] seed, string password)
     {
-        try { WalletStore.Create(WalletStore.DefaultPath(), seed, password); Seed = seed; Password = password; DialogResult = true; Close(); }
+        try { WalletStore.Create(WalletPath, seed, password); Seed = seed; Password = password; DialogResult = true; Close(); }
         catch (System.Exception e) { _msg.Text = e.Message; }
     }
 

@@ -19,6 +19,14 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+# wallets / private keys — NEVER (public repo)
+*.dat
+*.key
+*-key.txt
+*.seed
+seedhex*
+DECISION-LOG.md
+transcripts/
 
 # Local scratch / logs
 *.log

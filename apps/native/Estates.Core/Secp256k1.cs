@@ -51,18 +51,57 @@ public static class Secp256k1
         return new Point(rx, ry, false);
     }
 
+    // ---- FAST scalar multiply via JACOBIAN coordinates (X,Y,Z) ~ affine (X/Z², Y/Z³), a=0. This does ONE
+    //      modular inverse at the very end instead of one per point-addition — ~10-50x faster than the affine
+    //      double-and-add, which is what makes a 52-card multi-player mental-poker shuffle practical. Standard
+    //      formulas (dbl-2009-l, madd-2007-bl); results are identical to the affine math (proven by the vectors).
+    private static (BigInteger X, BigInteger Y, BigInteger Z) JDouble((BigInteger X, BigInteger Y, BigInteger Z) p)
+    {
+        if (p.Z.IsZero || p.Y.IsZero) return (1, 1, 0);   // infinity
+        BigInteger A = Mod(p.X * p.X, P);
+        BigInteger B = Mod(p.Y * p.Y, P);
+        BigInteger C = Mod(B * B, P);
+        BigInteger D = Mod(2 * (Mod((p.X + B) * (p.X + B), P) - A - C), P);
+        BigInteger E = Mod(3 * A, P);
+        BigInteger F = Mod(E * E, P);
+        BigInteger X3 = Mod(F - 2 * D, P);
+        BigInteger Y3 = Mod(E * (D - X3) - 8 * C, P);
+        BigInteger Z3 = Mod(2 * p.Y * p.Z, P);
+        return (X3, Y3, Z3);
+    }
+    private static (BigInteger X, BigInteger Y, BigInteger Z) JAddAffine((BigInteger X, BigInteger Y, BigInteger Z) p, Point q)
+    {
+        if (p.Z.IsZero) return (q.X, q.Y, 1);
+        BigInteger Z1Z1 = Mod(p.Z * p.Z, P);
+        BigInteger U2 = Mod(q.X * Z1Z1, P);
+        BigInteger S2 = Mod(q.Y * p.Z * Z1Z1, P);
+        BigInteger H = Mod(U2 - p.X, P);
+        if (H.IsZero) { return Mod(S2 - p.Y, P).IsZero ? JDouble(p) : (1, 1, 0); }
+        BigInteger HH = Mod(H * H, P);
+        BigInteger I = Mod(4 * HH, P);
+        BigInteger J = Mod(H * I, P);
+        BigInteger r = Mod(2 * (S2 - p.Y), P);
+        BigInteger V = Mod(p.X * I, P);
+        BigInteger X3 = Mod(r * r - J - 2 * V, P);
+        BigInteger Y3 = Mod(r * (V - X3) - 2 * p.Y * J, P);
+        BigInteger Z3 = Mod(Mod((p.Z + H) * (p.Z + H), P) - Z1Z1 - HH, P);
+        return (X3, Y3, Z3);
+    }
+
     public static Point Mul(BigInteger k, Point p)
     {
         k = Mod(k, N);
-        var r = Point.Identity;
-        var addend = p;
-        while (k > 0)
+        if (k.IsZero || p.Inf) return Point.Identity;
+        var acc = ((BigInteger)0, (BigInteger)0, (BigInteger)0);   // infinity (Z=0)
+        for (int i = (int)k.GetBitLength() - 1; i >= 0; i--)
         {
-            if (!k.IsEven) r = Add(r, addend);
-            addend = Double(addend);
-            k >>= 1;
+            acc = JDouble(acc);
+            if (!((k >> i) & 1).IsZero) acc = JAddAffine(acc, p);
         }
-        return r;
+        if (acc.Item3.IsZero) return Point.Identity;
+        BigInteger zinv = InvMod(acc.Item3, P);
+        BigInteger zinv2 = Mod(zinv * zinv, P);
+        return new Point(Mod(acc.Item1 * zinv2, P), Mod(acc.Item2 * zinv2 * zinv, P), false);
     }
 
     // ---- scalars / encoding ----
@@ -109,6 +148,66 @@ public static class Secp256k1
     public static byte[] EcdhCompressed(byte[] priv, byte[] peerPub) => Compress(Mul(Scalar(priv), Decompress(peerPub)));
     /// <summary>ECDH shared secret = the X coordinate (32 bytes) of priv·peerPub.</summary>
     public static byte[] EcdhX(byte[] priv, byte[] peerPub) => To32(Mul(Scalar(priv), Decompress(peerPub)).X);
+
+    // ---- MENTAL-POKER primitives (commutative encryption on the curve). A card i is the fixed public point
+    //      Mᵢ = (i+1)·G; "encrypting" a card is scalar-multiplying its point; masks COMMUTE (a·(b·P)=b·(a·P)),
+    //      so they strip in any order. These are thin wrappers over the field/point math above. ----
+
+    /// <summary>The fixed PUBLIC base point for card index i: Mᵢ = (i+1)·G (compressed).</summary>
+    public static byte[] CardBasePoint(int i)
+    {
+        if (i < 0) throw new ArgumentOutOfRangeException(nameof(i));
+        return Compress(Mul(i + 1, G));
+    }
+
+    /// <summary>Scalar-multiply a compressed point by a 32-byte scalar: returns (scalar·P) compressed. This is
+    /// one mask/unmask step. Throws on a malformed/off-curve point or a zero/invalid scalar — a hostile player
+    /// cannot inject a bad point or a zero scalar into the deal.</summary>
+    public static byte[] PointMul(byte[] point33, byte[] scalar)
+    {
+        if (!IsValidScalar(scalar)) throw new ArgumentException("invalid scalar");
+        if (!IsValidPoint(point33)) throw new ArgumentException("invalid/off-curve point");
+        return Compress(Mul(Scalar(scalar), Decompress(point33)));
+    }
+
+    /// <summary>The modular inverse (mod N) of a scalar, as 32 bytes — used to STRIP a mask (multiply by k⁻¹).
+    /// Throws on a zero/invalid scalar (not invertible).</summary>
+    public static byte[] ScalarInverse(byte[] scalar)
+    {
+        if (!IsValidScalar(scalar)) throw new ArgumentException("scalar not invertible (zero or out of range)");
+        return To32(InvMod(FromBytes(scalar), N));
+    }
+
+    /// <summary>(a * b) mod N as 32 bytes — multiply two scalars (used to COMBINE per-card masks into one).
+    /// Both inputs must be valid scalars in [1, N-1]; the product mod the prime N is never zero, so the result
+    /// is always a valid, invertible scalar. Throws on a zero/out-of-range input.</summary>
+    public static byte[] ScalarMul(byte[] a, byte[] b)
+    {
+        if (!IsValidScalar(a) || !IsValidScalar(b)) throw new ArgumentException("invalid scalar in ScalarMul");
+        return To32(Mod(FromBytes(a) * FromBytes(b), N));
+    }
+
+    /// <summary>A scalar is valid iff it is 32 bytes encoding a value in [1, N-1].</summary>
+    public static bool IsValidScalar(byte[] s)
+    {
+        if (s is not { Length: 32 }) return false;
+        var x = FromBytes(s);
+        return x > 0 && x < N;
+    }
+
+    /// <summary>A point is valid iff it is a 33-byte compressed point that lies on the curve and is not the
+    /// point at infinity. Total — never throws.</summary>
+    public static bool IsValidPoint(byte[] p)
+    {
+        try
+        {
+            if (p is not { Length: 33 } || (p[0] != 0x02 && p[0] != 0x03)) return false;
+            var pt = Decompress(p);
+            if (pt.Inf || pt.X <= 0 || pt.X >= P) return false;
+            return Mod(pt.Y * pt.Y - (BigInteger.ModPow(pt.X, 3, P) + 7), P) == 0;   // y² = x³ + 7
+        }
+        catch { return false; }
+    }
 
     // ---- ECDSA (fresh CSPRNG random nonce k, low-S). Each signature draws a new uniformly-random
     //      k in [1, n-1] from the OS CSPRNG via rejection sampling. ----
