@@ -1385,6 +1385,32 @@ try
 }
 catch (Exception ex) { Console.Error.WriteLine($"REPRIEVE FAIL: {ex.Message}"); gfail = 1; }
 
+// AUCTION (opt-in): a declined title goes to auction; the highest bidder wins and pays; an all-pass auction
+// leaves it unsold. Default-off keeps the audited DECLINE->bank vectors byte-identical (proven above: 17/17).
+try
+{
+    var deck = new Dictionary<string, List<int>>();
+    foreach (var kv in Params.Instance.Decks) deck[kv.Key] = Enumerable.Range(0, kv.Value.Count).ToList();
+    int pid = Params.Instance.Board.First(sp => sp.Type == "property" && sp.Group != null).Id;
+    GameState Setup() { var g = Engine.InitialState("regtest", 2, 1_000_000, deck, false); g.AuctionsEnabled = true; g.Phase = "AWAIT_BUY"; g.Current = 0; g.PendingTitle = pid; return g; }
+    var started = Engine.Apply(Setup(), new Estates.Core.Action("DECLINE"));
+    bool ok1 = started.Ok && started.State!.Phase == "AWAIT_AUCTION" && started.State.AuctionProperty == pid;
+    var s = started.State!; long b1 = s.Seats[1].Balance;
+    s = Engine.Apply(s, new Estates.Core.Action("BID") { Amount = 30 }).State!;     // seat 0
+    s = Engine.Apply(s, new Estates.Core.Action("BID") { Amount = 60 }).State!;     // seat 1
+    var fin = Engine.Apply(s, new Estates.Core.Action("PASS_BID"));                 // seat 0 drops -> seat 1 wins
+    bool won = fin.Ok && fin.State!.Titles[pid].Owner == 1 && fin.State.Seats[1].Balance == b1 - 60 && fin.State.Phase == "AWAIT_POST";
+    var u = Engine.Apply(Setup(), new Estates.Core.Action("DECLINE")).State!;
+    u = Engine.Apply(u, new Estates.Core.Action("PASS_BID")).State!;                // seat 0 passes
+    var ufin = Engine.Apply(u, new Estates.Core.Action("PASS_BID"));                // seat 1 passes -> unsold
+    bool unsold = ufin.Ok && ufin.State!.Titles[pid].Owner is null && ufin.State.Phase == "AWAIT_POST";
+    if (ok1 && won && unsold)
+        Console.WriteLine("AUCTION: a declined title went to auction, the high bidder won and paid; an all-pass auction left it unsold ✓");
+    else
+    { Console.Error.WriteLine($"AUCTION FAIL: started={ok1} won={won} unsold={unsold}"); gfail = 1; }
+}
+catch (Exception ex) { Console.Error.WriteLine($"AUCTION FAIL: {ex.Message}"); gfail = 1; }
+
 // FULL GAME -> REAL SIGNED BSV TX CHAIN: compile the whole game into actual signed transactions (one per
 // move), each FORKID-signed and locally spend-verified, threaded into a real change-spend chain. No node.
 try

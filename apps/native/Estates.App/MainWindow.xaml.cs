@@ -348,6 +348,7 @@ public partial class MainWindow : Window
         else
         {
             _game = Engine.InitialState(network, seats, 1_000_000, deckOrder, false);
+            _game.AuctionsEnabled = true;   // declined titles go to auction (local/vs-bots)
             for (int i = 1; i < seats; i++) _botSeats.Add(i);   // you are seat 0; the rest are played by the computer
         }
         RenderGame();
@@ -469,6 +470,30 @@ public partial class MainWindow : Window
             }
         }
         inner.Children.Add(bar);
+
+        // AUCTION — when a title is declined it goes under the hammer; bidders take turns until one is left.
+        if (g.Phase == "AWAIT_AUCTION" && g.AuctionProperty is int apid)
+        {
+            int human = _session is null ? 0 : _mySeat;   // local: you are seat 0
+            var ap = new StackPanel { Margin = new Thickness(0, 4, 0, 6) };
+            ap.Children.Add(new TextBlock { Text = $"🔨 Auction: {Params.Instance.Board[apid].Name}", Foreground = B("#ffd54f"), FontSize = 16, FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center });
+            string hi = g.AuctionHighSeat >= 0 ? $"high bid {g.AuctionHighBid} by seat {g.AuctionHighSeat}" : "no bids yet";
+            ap.Children.Add(new TextBlock { Text = $"{hi} · seat {g.AuctionActor} to act", Foreground = B("#cfe8d4"), FontSize = 12, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 2, 0, 4) });
+            if (g.AuctionActor == human && !_botSeats.Contains(human))
+            {
+                var row = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Center };
+                long suggested = g.AuctionHighBid + System.Math.Max(1, (Params.Instance.Board[apid].BasePrice ?? 100) / 20);
+                var bidBox = new TextBox { Width = 90, Margin = new Thickness(2), FontSize = 12, Text = suggested.ToString() };
+                var bidBtn = new Button { Content = "Bid", Margin = new Thickness(3, 0, 3, 0), FontSize = 13, Padding = new Thickness(10, 2, 10, 2), Background = B("#2e7d32"), Foreground = B("#ffffff") };
+                bidBtn.Click += (_, _) => { if (long.TryParse(bidBox.Text.Trim(), out var v)) DoAction("BID", v); };
+                var passBtn = new Button { Content = "Pass", Margin = new Thickness(3, 0, 3, 0), FontSize = 13, Padding = new Thickness(10, 2, 10, 2), Background = B("#5a2030"), Foreground = B("#ffffff") };
+                passBtn.Click += (_, _) => DoAction("PASS_BID");
+                row.Children.Add(bidBox); row.Children.Add(bidBtn); row.Children.Add(passBtn);
+                ap.Children.Add(row);
+            }
+            else ap.Children.Add(new TextBlock { Text = "waiting for the other bidders…", Foreground = B("#9aa0a6"), FontSize = 11, HorizontalAlignment = HorizontalAlignment.Center });
+            inner.Children.Add(new Border { Background = B("#10322a"), CornerRadius = new CornerRadius(6), Padding = new Thickness(8), Margin = new Thickness(0, 0, 0, 8), Child = ap });
+        }
 
         // MANAGE YOUR ESTATE — mortgage to raise cash, lift mortgages, or sell buildings back. Engine-backed
         // (MORTGAGE / UNMORTGAGE / SELL_BUILD), available on your own turn in the post-roll phase. This is how
@@ -592,7 +617,7 @@ public partial class MainWindow : Window
         return dice;
     }
 
-    private void DoAction(string type)
+    private void DoAction(string type, long amount = 0)
     {
         var g = _game;
         if (g is null) return;
@@ -619,6 +644,7 @@ public partial class MainWindow : Window
         {
             "ROLL" => new Estates.Core.Action("ROLL") { Dice = BeaconRoll() },
             "PAY_TAX" => new Estates.Core.Action("PAY_TAX") { Choice = "flat" },
+            "BID" => new Estates.Core.Action("BID") { Amount = amount },
             _ => new Estates.Core.Action(type),
         };
         var res = Engine.Apply(g, a);
@@ -761,12 +787,17 @@ public partial class MainWindow : Window
     /// game play out. Chains itself (each move re-schedules) until it's your turn again or the game ends.</summary>
     private void ScheduleBots()
     {
-        if (_game is null || _game.Winner is not null || !_botSeats.Contains(_game.Current)) return;
-        var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(650) };
+        if (_game is null || _game.Winner is not null) return;
+        // during an auction the actor is AuctionActor (any seat); otherwise it's the current seat
+        int actor = _game.Phase == "AWAIT_AUCTION" ? _game.AuctionActor : _game.Current;
+        if (!_botSeats.Contains(actor)) return;
+        var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(550) };
         t.Tick += (_, _) =>
         {
             t.Stop();
-            if (_game is not null && _game.Winner is null && _botSeats.Contains(_game.Current)) BotStep();
+            if (_game is null || _game.Winner is not null) return;
+            int who = _game.Phase == "AWAIT_AUCTION" ? _game.AuctionActor : _game.Current;
+            if (_botSeats.Contains(who)) BotStep();
         };
         t.Start();
     }
@@ -774,6 +805,17 @@ public partial class MainWindow : Window
     private void BotStep()
     {
         var g = _game; if (g is null) return;
+        if (g.Phase == "AWAIT_AUCTION")   // a bot is the active bidder: bid up to a sane cap, else drop out
+        {
+            int who = g.AuctionActor;
+            long basePrice = Params.Instance.Board[g.AuctionProperty ?? 0].BasePrice ?? 0;
+            long cap = basePrice * 6 / 10;                       // bots value a contested title at ~60% of list
+            long next = g.AuctionHighBid + System.Math.Max(1, basePrice / 20);
+            if (next <= cap && g.Seats[who].Balance >= next && g.AuctionHighSeat != who)
+                DoAction("BID", amount: next);
+            else DoAction("PASS_BID");
+            return;
+        }
         if (g.Phase == "AWAIT_POST")   // develop monopolies, then end the turn
         {
             int bb = BestBuildGui(g);

@@ -49,6 +49,13 @@ public sealed class GameState
     public int? PendingTitle;
     public int? Winner;
     public List<string> Log = new();
+    // ---- auctions (opt-in; default off keeps the audited DECLINE->bank behaviour byte-identical) ----
+    public bool AuctionsEnabled;
+    public int? AuctionProperty;     // the title under the hammer (null = no auction running)
+    public long AuctionHighBid;      // current highest bid (0 = no bid yet)
+    public int AuctionHighSeat = -1; // current highest bidder (-1 = none)
+    public int AuctionActor;         // whose turn it is to bid or pass
+    public List<int> AuctionPassed = new();   // seats that have dropped out of the current auction
 
     public GameState DeepClone()
     {
@@ -71,6 +78,12 @@ public sealed class GameState
             PendingTitle = PendingTitle,
             Winner = Winner,
             Log = new List<string>(Log),
+            AuctionsEnabled = AuctionsEnabled,
+            AuctionProperty = AuctionProperty,
+            AuctionHighBid = AuctionHighBid,
+            AuctionHighSeat = AuctionHighSeat,
+            AuctionActor = AuctionActor,
+            AuctionPassed = new List<int>(AuctionPassed),
         };
         return g;
     }
@@ -148,6 +161,7 @@ public static class Engine
         "AWAIT_BUY" => new() { "BUY", "DECLINE" },
         "AWAIT_TAX" => new() { "PAY_TAX" },
         "AWAIT_POST" => new() { "BUILD", "SELL_BUILD", "MORTGAGE", "UNMORTGAGE", "END_TURN" },
+        "AWAIT_AUCTION" => new() { "BID", "PASS_BID" },
         _ => new(),
     };
 
@@ -410,6 +424,8 @@ public static class Engine
             "UNMORTGAGE" => DoUnmortgage(s, a.PropertyId),
             "TRADE" => DoTrade(s, a.PropertyId, a.SeatIndex, a.Amount, a.Choice),
             "USE_REPRIEVE" => DoUseReprieve(s),
+            "BID" => DoBid(s, a.Amount),
+            "PASS_BID" => DoPassBid(s),
             "FORFEIT" => DoForfeit(s),
             "END_TURN" => DoEndTurn(s),
             _ => ApplyResult.Reject("WRONG_PHASE", $"unknown action {a.Type}"),
@@ -532,9 +548,76 @@ public static class Engine
     private static ApplyResult DoDecline(GameState s)
     {
         if (s.Phase != "AWAIT_BUY") return ApplyResult.Reject("WRONG_PHASE", $"cannot DECLINE in {s.Phase}");
-        Note(s, $"seat {s.Current} declines {Space(s.PendingTitle!.Value).Name}; returns to bank unsold");
+        int pid = s.PendingTitle!.Value;
+        // OPT-IN auction: when enabled, a declined title goes under the hammer instead of back to the bank.
+        // Default off, so the audited DECLINE->bank behaviour (and the conformance vectors) is unchanged.
+        if (s.AuctionsEnabled && s.Seats.Count(x => !x.Bankrupt) > 0)
+        {
+            s.AuctionProperty = pid; s.AuctionHighBid = 0; s.AuctionHighSeat = -1; s.AuctionPassed = new List<int>();
+            s.PendingTitle = null; s.Phase = "AWAIT_AUCTION";
+            s.AuctionActor = FirstActiveBidder(s, 0);
+            Note(s, $"seat {s.Current} declines {Space(pid).Name}; it goes to auction");
+            return ApplyResult.OkState(s);
+        }
+        Note(s, $"seat {s.Current} declines {Space(pid).Name}; returns to bank unsold");
         s.Phase = "AWAIT_POST"; s.PendingTitle = null;
         return ApplyResult.OkState(s);
+    }
+
+    private static int FirstActiveBidder(GameState s, int start)
+    {
+        for (int i = 0; i < s.Seats.Count; i++)
+        {
+            int id = (start + i) % s.Seats.Count;
+            if (!SeatOf(s, id).Bankrupt && !s.AuctionPassed.Contains(id)) return id;
+        }
+        return -1;
+    }
+
+    private static ApplyResult DoBid(GameState s, long amount)
+    {
+        if (s.Phase != "AWAIT_AUCTION") return ApplyResult.Reject("WRONG_PHASE", $"cannot BID in {s.Phase}");
+        int id = s.AuctionActor;
+        if (SeatOf(s, id).Bankrupt || s.AuctionPassed.Contains(id)) return ApplyResult.Reject("NOT_BIDDING", $"seat {id} is not bidding");
+        if (amount <= s.AuctionHighBid) return ApplyResult.Reject("BID_TOO_LOW", $"bid must exceed {s.AuctionHighBid}");
+        if (SeatOf(s, id).Balance < amount) return ApplyResult.Reject("INSUFFICIENT_FUNDS", $"seat {id} cannot cover {amount}");
+        s.AuctionHighBid = amount; s.AuctionHighSeat = id;
+        Note(s, $"seat {id} bids {amount} for {Space(s.AuctionProperty!.Value).Name}");
+        AdvanceAuction(s);
+        return ApplyResult.OkState(s);
+    }
+
+    private static ApplyResult DoPassBid(GameState s)
+    {
+        if (s.Phase != "AWAIT_AUCTION") return ApplyResult.Reject("WRONG_PHASE", $"cannot PASS_BID in {s.Phase}");
+        int id = s.AuctionActor;
+        if (!s.AuctionPassed.Contains(id)) s.AuctionPassed.Add(id);
+        Note(s, $"seat {id} passes on {Space(s.AuctionProperty!.Value).Name}");
+        AdvanceAuction(s);
+        return ApplyResult.OkState(s);
+    }
+
+    /// <summary>Move the auction on: if at most one bidder is still active it ends (the high bidder, if any,
+    /// buys at their bid), otherwise the turn passes to the next active bidder.</summary>
+    private static void AdvanceAuction(GameState s)
+    {
+        var active = s.Seats.Where(x => !x.Bankrupt && !s.AuctionPassed.Contains(x.Id)).Select(x => x.Id).ToList();
+        // ends when everyone has dropped out, or only the standing high bidder is left
+        if (active.Count == 0 || (active.Count == 1 && active[0] == s.AuctionHighSeat))
+        {
+            int pid = s.AuctionProperty!.Value;
+            if (s.AuctionHighSeat >= 0 && s.AuctionHighBid > 0)
+            {
+                int w = s.AuctionHighSeat; long bid = s.AuctionHighBid;
+                SeatOf(s, w).Balance -= bid; s.BankReserve += bid; s.Titles[pid].Owner = w;
+                Note(s, $"seat {w} wins {Space(pid).Name} at auction for {bid}");
+            }
+            else Note(s, $"{Space(pid).Name} draws no bids; stays unsold");
+            s.AuctionProperty = null; s.AuctionHighBid = 0; s.AuctionHighSeat = -1; s.AuctionPassed = new List<int>();
+            s.Phase = "AWAIT_POST";
+            return;
+        }
+        s.AuctionActor = FirstActiveBidder(s, (s.AuctionActor + 1) % s.Seats.Count);
     }
 
     private static ApplyResult DoTax(GameState s, string choice)
