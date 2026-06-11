@@ -40,6 +40,11 @@ public partial class App : Application
         // with NO window, and writes a result file. Proves the game's cryptographic core works in the real exe.
         if (e.Args.Any(a => a == "--mphand")) { RunMpHand(); Shutdown(); return; }
 
+        // HEADLESS FULL GAME: estates.exe --game plays a COMPLETE Estates game to a winner with provably-fair
+        // beacon dice, then verifies it trustlessly from the transcript, authenticates every move, and proves
+        // each title deed is an owner-only encrypted NFT — all in the shipped binary, no window, no node.
+        if (e.Args.Any(a => a == "--game")) { RunGame(); Shutdown(); return; }
+
         // HEADLESS LIVE-NETWORK P2P TEST (signoff plumbing): estates.exe --p2ptest <testnet|mainnet|regtest>
         // [--scan <address>] [--broadcast <rawhex>] — discovers REAL public BSV nodes, handshakes, syncs the
         // header chain, and (optionally) scans for a coin / broadcasts a tx. Proves the testnet/mainnet
@@ -152,6 +157,48 @@ public partial class App : Application
                 $"evidence dir: {evidence}\n" + (firstErr.Length > 0 ? "firstErr=" + firstErr + "\n" : "") + "\n" + manifest);
         }
         catch { }
+    }
+
+    /// <summary>Play a COMPLETE Estates game headless and write the evidence: a full game to a winner with
+    /// provably-fair beacon dice, trustless transcript verification (every roll re-derived from the beacon),
+    /// per-seat move authentication, and owner-only encrypted title deeds. Proves the whole product in the
+    /// shipped exe with no window and no node.</summary>
+    private static void RunGame()
+    {
+        string outp = System.IO.Path.Combine(AppContext.BaseDirectory, $"game-{DateTime.UtcNow:yyyyMMdd-HHmmss}Z.txt");
+        var sb = new System.Text.StringBuilder();
+        void W(string s) { sb.AppendLine(s); try { System.IO.File.WriteAllText(outp, sb.ToString()); } catch { } }
+        try
+        {
+            W($"ESTATES full on-chain game — {DateTime.UtcNow:o}");
+            var seed = SHA256.HashData("estates-exe-game-v1"u8.ToArray());
+            var g = GamePlay.PlayToEnd("regtest", 2, 1_000_000_000, seed);
+            int rolls = g.Moves.Count(m => m.Action == "ROLL");
+            W($"PLAYED: winner=seat {g.Winner}, {g.Turns} turns, {g.OnChainTxCount} on-chain txs, {rolls} provable-dice rolls");
+
+            var tr = GameTranscript.Verify(g);
+            W($"TRUSTLESS VERIFY: ok={tr.Ok} winner={tr.Winner} rollsReDerivedFromBeacon={tr.RollsVerified} movesReplayed={tr.MovesReplayed} ({tr.Reason})");
+
+            var keys = DeedNft.DeriveSeatKeys(SHA256.HashData("estates-exe-seat-keys"u8.ToArray()), g.Seats);
+            var signed = MoveAuth.SignGame(g, keys);
+            var (authOk, verified, rejected) = MoveAuth.VerifyGame(signed, keys);
+            W($"MOVE AUTH: {verified} moves signed by their acting seat, verified={authOk}, rejected={rejected}");
+
+            int deeds = g.FinalOwners.Count, ownerOnly = 0;
+            foreach (var kv in g.FinalOwners)
+            {
+                var face = DeedNft.DeedFace(kv.Key, Params.Instance.Board[kv.Key].Name, kv.Value);
+                var data = DeedNft.Seal(keys[kv.Value].Priv, keys[kv.Value].Pub, face);
+                bool ownerOpens = DeedNft.Unseal(keys[kv.Value].Priv, data) is not null;
+                bool otherBlind = DeedNft.Unseal(keys[(kv.Value + 1) % g.Seats].Priv, data) is null;
+                if (ownerOpens && otherBlind) ownerOnly++;
+            }
+            W($"DEEDS: {deeds} encrypted title deeds, owner-only verified={ownerOnly}/{deeds}");
+
+            bool pass = g.Finished && tr.Ok && authOk && rejected == 0 && ownerOnly == deeds && deeds > 0;
+            W($"RESULT: {(pass ? "PASS — a complete Estates game: played to a winner, verified trustless from the chain, every move authenticated, every deed owner-only" : "FAIL")}");
+        }
+        catch (Exception e) { W("FATAL: " + e); }
     }
 
     /// <summary>Run a FULL dealerless on-chain mental-poker hand headless and write the evidence: shuffle ->
