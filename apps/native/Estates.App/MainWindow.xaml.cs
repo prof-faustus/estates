@@ -31,7 +31,7 @@ public partial class MainWindow : Window
         string nodeName = _displayName.Length > 0 ? _displayName : (bot ? "bot-" : "player-") + Tx.ToHex(_walletPub)[..6];
         _node = new P2PNode(nodeName, Tx.ToHex(_walletPub));   // advertise the handle so peers can find/pay me by identity
         App.Teardowns.Add(() => { try { _node.Dispose(); } catch { } });
-        _node.OnPeerDiscovered += _ => Dispatcher.Invoke(RefreshNodes);
+        _node.OnPeerDiscovered += p => Dispatcher.Invoke(() => { RefreshNodes(); if (p.WalletPub.Length == 66) System.Threading.Tasks.Task.Run(() => FlushOutboxFor(p.WalletPub)); });
         _node.OnPeerLost += _ => Dispatcher.Invoke(RefreshNodes);
         _node.OnLink += link => link.OnFrame += (l, f) => Dispatcher.Invoke(() => OnChatFrame(l, f));
         Closing += OnHumanClosing;                       // bots close + refund me FIRST, then I close
@@ -2595,6 +2595,46 @@ public partial class MainWindow : Window
         return outp;
     }
 
+    // ---- OFFLINE store-and-forward. A message for someone offline is held in a durable outbox (per recipient
+    // identity) and re-delivered the moment that identity reconnects — so "send it now, it arrives when they
+    // come back" works even across an app restart. The wire frame is the broadcast-encrypted carrier itself,
+    // so only the intended recipient can open it; duplicates are harmless (the conversation dedupes by id).
+    private readonly List<(string toPub, string rawHex)> _outbox = new();
+    private bool _outboxLoaded;
+    private static string OutboxPath() { string d = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Estates"); System.IO.Directory.CreateDirectory(d); return System.IO.Path.Combine(d, "outbox.tsv"); }
+    private void LoadOutbox() { if (_outboxLoaded) return; _outboxLoaded = true; try { if (System.IO.File.Exists(OutboxPath())) foreach (var ln in System.IO.File.ReadAllLines(OutboxPath())) { var p = ln.Split('\t'); if (p.Length == 2 && p[0].Length == 66 && p[1].Length > 0) _outbox.Add((p[0].ToLowerInvariant(), p[1])); } } catch { } }
+    private void SaveOutbox() { try { lock (_outbox) System.IO.File.WriteAllLines(OutboxPath(), _outbox.Select(o => o.toPub + "\t" + o.rawHex)); } catch { } }
+    /// <summary>Queue a broadcast-encrypted carrier for an identity so an offline recipient still gets it on
+    /// reconnect. Bounded per identity so a long-offline peer can't grow it without limit.</summary>
+    private void Enqueue(byte[] toPub, byte[] raw)
+    {
+        LoadOutbox();
+        string hex = Tx.ToHex(toPub).ToLowerInvariant(), rawHex = Tx.ToHex(raw);
+        lock (_outbox)
+        {
+            if (_outbox.Any(o => o.toPub == hex && o.rawHex == rawHex)) return;
+            _outbox.Add((hex, rawHex));
+            while (_outbox.Count(o => o.toPub == hex) > 200) _outbox.Remove(_outbox.First(o => o.toPub == hex));
+        }
+        SaveOutbox();
+    }
+    /// <summary>A peer came online: flush every queued message addressed to that identity to the live links
+    /// (it decrypts the ones meant for it), then drop them from the outbox.</summary>
+    private void FlushOutboxFor(string peerPubHex)
+    {
+        LoadOutbox();
+        if (string.IsNullOrEmpty(peerPubHex) || peerPubHex.Length != 66) return;
+        peerPubHex = peerPubHex.ToLowerInvariant();
+        List<string> pending;
+        lock (_outbox) pending = _outbox.Where(o => o.toPub == peerPubHex).Select(o => o.rawHex).ToList();
+        if (pending.Count == 0) return;
+        var links = _node.LiveLinks();
+        foreach (var rawHex in pending) { try { byte[] raw = Tx.FromHex(rawHex); foreach (var l in links) l.Send(raw); } catch { } }
+        lock (_outbox) _outbox.RemoveAll(o => o.toPub == peerPubHex);
+        SaveOutbox();
+        try { Dispatcher.Invoke(() => LogEvent("outbox", $"delivered {pending.Count} held message(s) to {peerPubHex[..8]}… now online")); } catch { }
+    }
+
     private UIElement BuildChatUI()
     {
         var root = new DockPanel { Margin = new Thickness(0, 12, 0, 0) };
@@ -2854,6 +2894,7 @@ public partial class MainWindow : Window
                     byte[] carrier = TxMessage.SealCarrier(ring.MessagePriv(directTo, conv, seq), directTo, TxType.Chat2P, payload);
                     byte[] raw = Tx.Serialize(MsgTx(carrier, myPkh));
                     foreach (var l in links) l.Send(raw);
+                    Enqueue(directTo, raw);   // held + redelivered if the recipient is/goes offline
                 }
                 catch (System.Exception ex) { App.CrashLog("chat-send-direct", ex); }
             });
@@ -2873,6 +2914,7 @@ public partial class MainWindow : Window
                 if (frame is null) return;
                 byte[] raw = Tx.Serialize(MsgTx(frame, myPkh));              // the frame IS the carrier (already ciphertext)
                 foreach (var l in links) l.Send(raw);
+                foreach (var r in recipients) Enqueue(r, raw);   // each recipient gets it on reconnect if offline now
             }
             catch (System.Exception ex) { App.CrashLog("chat-send-broadcast", ex); }
         });
