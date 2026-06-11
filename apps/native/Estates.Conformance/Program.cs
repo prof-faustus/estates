@@ -1441,4 +1441,68 @@ try
 }
 catch (Exception ex) { Console.Error.WriteLine($"AUTH FAIL: {ex.Message}"); gfail = 1; }
 
+// MULTIPLAYER: two mutually-distrusting peers each run a GameSession with NO server. Peer A makes each move;
+// peer B independently verifies (signature + dice re-derived from the beacon + engine legality) and applies.
+// They must stay in lock-step the whole game; a forged or dice-tampered move MUST be rejected by B.
+try
+{
+    var deck = new Dictionary<string, List<int>>();
+    foreach (var kv in Params.Instance.Decks) deck[kv.Key] = Enumerable.Range(0, kv.Value.Count).ToList();
+    var mpKeys = DeedNft.DeriveSeatKeys(SHA256.HashData("estates-mp-keys"u8.ToArray()), 2);
+    GameSession NewS() => new("regtest", 2, 1_000_000_000, new Dictionary<string, List<int>>(deck), mpKeys);
+    var P = Params.Instance;
+    int BestBuild(GameState s)
+    {
+        int id = s.Current, pick = -1, lvl = 99;
+        foreach (var sp in P.Board)
+        {
+            if (sp.Type != "property" || sp.Group is null) continue;
+            if (!s.Titles.TryGetValue(sp.Id, out var t) || t.Owner != id || t.Mortgaged) continue;
+            var m = P.Groups.TryGetValue(sp.Group, out var gg) ? gg.MemberPropertyIds : (IReadOnlyList<int>)Array.Empty<int>();
+            if (m.Count == 0 || !m.All(x => s.Titles[x].Owner == id && !s.Titles[x].Mortgaged)) continue;
+            if (t.BuildLevel >= 5 || t.BuildLevel > m.Min(x => s.Titles[x].BuildLevel)) continue;
+            if (s.Seats[id].Balance < P.BuildCost(sp.Group) + 100) continue;
+            if ((t.BuildLevel + 1 == 5 ? s.EstatesRemaining : s.HousesRemaining) < 1) continue;
+            if (t.BuildLevel < lvl) { pick = sp.Id; lvl = t.BuildLevel; }
+        }
+        return pick;
+    }
+    bool Same(GameState a, GameState b)
+        => a.Phase == b.Phase && a.Current == b.Current && a.Winner == b.Winner && a.TurnIndex == b.TurnIndex
+           && a.Seats.Select(x => x.Balance).SequenceEqual(b.Seats.Select(x => x.Balance))
+           && a.Titles.All(kv => b.Titles[kv.Key].Owner == kv.Value.Owner && b.Titles[kv.Key].BuildLevel == kv.Value.BuildLevel);
+
+    var A = NewS(); var B = NewS();
+    int moved = 0; bool inSync = true; string desync = "";
+    while (A.Phase != "GAME_OVER" && moved < 6000)
+    {
+        var s = A.State; string act = "END_TURN"; int pid = 0; string? ch = null;
+        switch (s.Phase)
+        {
+            case "AWAIT_ROLL": act = "ROLL"; break;
+            case "AWAIT_BUY": { int pp = s.PendingTitle ?? -1; act = (pp >= 0 && s.Seats[s.Current].Balance >= (P.Board[pp].BasePrice ?? 0)) ? "BUY" : "DECLINE"; break; }
+            case "AWAIT_TAX": act = "PAY_TAX"; ch = "flat"; break;
+            case "AWAIT_POST": { int bb = BestBuild(s); if (bb >= 0) { act = "BUILD"; pid = bb; } else act = "END_TURN"; break; }
+        }
+        var pkt = A.Local(act, pid, ch);
+        if (!B.Remote(pkt, out var why)) { inSync = false; desync = "B rejected honest move: " + why; break; }
+        if (!Same(A.State, B.State)) { inSync = false; desync = "state diverged after " + act; break; }
+        moved++;
+    }
+    // hostile: tampered dice + forged signature on a fresh roll must both be rejected
+    var A2 = NewS(); var B2 = NewS();
+    var good = A2.Local("ROLL");
+    var badDice = good with { Dice = new[] { (good.Dice![0] % 6) + 1, good.Dice[1] } };
+    bool rejDice = !B2.Remote(badDice, out _);
+    var badSig = good with { Sig = new byte[good.Sig.Length] };
+    bool rejSig = !B2.Remote(badSig, out _);
+
+    bool ok = inSync && moved > 50 && rejDice && rejSig;
+    if (ok)
+        Console.WriteLine($"MULTIPLAYER: two peers stayed in lock-step for {moved} verified moves (winner=seat {A.Winner}); a dice-tampered move and a forged signature were both REJECTED ✓");
+    else
+    { Console.Error.WriteLine($"MULTIPLAYER FAIL: inSync={inSync} moved={moved} ({desync}) rejDice={rejDice} rejSig={rejSig}"); gfail = 1; }
+}
+catch (Exception ex) { Console.Error.WriteLine($"MULTIPLAYER FAIL: {ex.Message}"); gfail = 1; }
+
 return (fail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && bfail == 0 && xfail == 0 && gfail == 0) ? 0 : 1;
