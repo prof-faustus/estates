@@ -163,7 +163,12 @@ public partial class MainWindow : Window
         if (!RequireIdentity(net)) return;
         if (!RequireFunding(net)) return;
         if (_node.Peers().Count == 0) { StartMsg.Text = "You can't start a game alone — run a bot (a node you control) or wait for another player to join, then start."; return; }
-        StartGame(net, n);
+        // HOST the table: derive a shared root from our identity so a joiner builds the identical session, then
+        // advertise it so a joiner can find it and seed off the same root. You are Seat 0.
+        string root = Tx.ToHex(SHA256.HashData(System.Text.Encoding.ASCII.GetBytes($"table:{net}:{n}:{Tx.ToHex(_walletPub)}")));
+        _node.Advertised = (root, $"{net} · {n} seats");
+        StartGame(net, n, mySeat: 0, sharedRoot: root);
+        StartMsg.Text = "Table open — you are Seat 0. Moves are signed and verified peer-to-peer.";
     }
 
     private void Join_Click(object sender, RoutedEventArgs e)
@@ -173,8 +178,12 @@ public partial class MainWindow : Window
         if (!RequireFunding(net)) return;
         var tables = _node.Peers().Where(p => p.TableId != null).ToList();
         if (tables.Count == 0) { StartMsg.Text = "No table to join — run a bot or wait for someone to open a table."; return; }
-        _node.Connect(tables[0]);
-        StartGame(net, n);
+        var host = tables[0];
+        _node.Connect(host);
+        // JOIN: seed off the host's advertised root so both peers run the identical verified session. You are Seat 1.
+        StartGame(net, host.TableInfo is string info && info.Contains("seats") && int.TryParse(info.Split(' ')[2], out int hs) ? hs : n,
+            mySeat: 1, sharedRoot: host.TableId);
+        StartMsg.Text = "Joined the table — you are Seat 1. Moves are signed and verified peer-to-peer.";
     }
 
     // HARD RULE: a game CANNOT start without an on-chain IDENTITY. Your identity is a single, unique,
@@ -296,23 +305,49 @@ public partial class MainWindow : Window
     private GameState? _game;
     private byte[] _prevBeacon = Beacon.ZeroBeacon;   // chained dealerless dice beacon for the live game
     private readonly HashSet<int> _botSeats = new();   // seats the computer plays (so you can play solo)
+    // ---- networked play: when _session is non-null the game is over the network (verified P2P), and _mySeat
+    // is the only seat you control. Moves go out over the _node links and incoming peer moves are re-verified.
+    private GameSession? _session;
+    private int _mySeat = -1;
+    private static readonly byte[] MoveFrameMagic = { 0xE5, 0x70, 0x4D, 0x56 };   // "ESMV" — a game-move frame
     private readonly List<(int id, string name, string txid)> _heldNfts = new();   // deed/card NFTs you hold
     private string? _genesisTxid;   // local table id for the current game (no node)
     private MentalPokerHand? _mpHand;   // this table's dealerless, provably-shuffled ENCRYPTED card deck
 
-    private void StartGame(string network, int seats)
+    private void StartGame(string network, int seats, int mySeat = -1, string? sharedRoot = null)
     {
         // STANDALONE: the table opens locally and play proceeds peer-to-peer. The table-setup and
         // per-move transactions are built + signed in-process by the standalone wallet (no node);
         // settlement to the chain is handed off peer-to-peer, never reached out for here.
-        _genesisTxid = Tx.ToHex(SHA256.HashData(System.Text.Encoding.ASCII.GetBytes($"table:{network}:{seats}:{Tx.ToHex(_walletPub)}:{DateTime.UtcNow.Ticks}")));
+        //
+        // NETWORKED (sharedRoot != null): both peers seed an identical table from the SAME shared root so
+        // they derive the same seat keys + deck and stay in lock-step. You only control `mySeat`; every move
+        // is signed and sent over the live _node links, and every move you receive is re-verified (dice
+        // re-derived from the beacon reveals, signature + engine legality checked) before it is applied.
+        _genesisTxid = sharedRoot ?? Tx.ToHex(SHA256.HashData(System.Text.Encoding.ASCII.GetBytes($"table:{network}:{seats}:{Tx.ToHex(_walletPub)}:{DateTime.UtcNow.Ticks}")));
 
         var deckOrder = new Dictionary<string, List<int>>();
         foreach (var kv in Params.Instance.Decks) deckOrder[kv.Key] = Enumerable.Range(0, kv.Value.Count).ToList();
-        _game = Engine.InitialState(network, seats, 1_000_000, deckOrder, false);
         _prevBeacon = Beacon.ZeroBeacon;   // fresh provable-dice chain for this table
         _botSeats.Clear();
-        for (int i = 1; i < seats; i++) _botSeats.Add(i);   // you are seat 0; the rest are played by the computer
+        _session = null; _mySeat = mySeat;
+
+        if (sharedRoot is not null)
+        {
+            // verified P2P session: keys derived from the shared table root so both peers agree on every
+            // seat's public key (each peer signs only its own seat; the rest are accepted only after the
+            // signature + beacon + engine all check out — the exact trustless pipeline the conformance suite
+            // proves with independent keys).
+            byte[] root = SHA256.HashData(System.Text.Encoding.ASCII.GetBytes("estates/seatkeys/" + _genesisTxid));
+            var keys = DeedNft.DeriveSeatKeys(root, seats);
+            _session = new GameSession(network, seats, 1_000_000, deckOrder, keys);
+            _game = _session.State;
+        }
+        else
+        {
+            _game = Engine.InitialState(network, seats, 1_000_000, deckOrder, false);
+            for (int i = 1; i < seats; i++) _botSeats.Add(i);   // you are seat 0; the rest are played by the computer
+        }
         RenderGame();
         Tabs.SelectedIndex = 1;
         ScheduleBots();
@@ -403,14 +438,17 @@ public partial class MainWindow : Window
         if (g.LastRoll is int[] r) inner.Children.Add(new TextBlock { Text = $"▶ dice  {r[0]} + {r[1]} = {r[0] + r[1]}  (provably fair · beacon)", Foreground = B("#ffd54f"), FontSize = 18, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 12, 0, 8) });
         if (g.Winner is int w) inner.Children.Add(new TextBlock { Text = $"Winner: Seat {w}", Foreground = B("#ffd54f"), FontSize = 20, FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center });
         var bar = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 12, 0, 10) };
-        foreach (var a in Engine.LegalActions(g))
+        bool myTurn = _session is null || g.Current == _mySeat;   // networked: you can only act on your own seat
+        if (_session is not null)
+            inner.Children.Add(new TextBlock { Text = myTurn ? $"● your turn (you are Seat {_mySeat})" : $"waiting for Seat {g.Current}… (you are Seat {_mySeat})", Foreground = B(myTurn ? "#b9f6ca" : "#9aa0a6"), FontSize = 13, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 4, 0, 4) });
+        foreach (var a in myTurn ? (IEnumerable<string>)Engine.LegalActions(g) : System.Linq.Enumerable.Empty<string>())
         {
             if (a is not ("ROLL" or "BUY" or "DECLINE" or "PAY_TAX" or "END_TURN" or "FORFEIT")) continue;
             var btn = new Button { Content = Friendly(a), Margin = new Thickness(5), FontSize = 15 };
             string act = a; btn.Click += (_, _) => DoAction(act);
             bar.Children.Add(btn);
         }
-        if (g.Winner is null && g.Phase == "AWAIT_POST" && !_botSeats.Contains(g.Current))
+        if (g.Winner is null && g.Phase == "AWAIT_POST" && myTurn && !_botSeats.Contains(g.Current))
         {
             int bb = BestBuildGui(g);
             if (bb >= 0)
@@ -422,7 +460,7 @@ public partial class MainWindow : Window
         }
         inner.Children.Add(bar);
         var leave = new Button { Content = "Leave game", HorizontalAlignment = HorizontalAlignment.Center, Background = B("#3a3d42") };
-        leave.Click += (_, _) => { _game = null; GameHost.Content = null; Tabs.SelectedIndex = 0; RefreshNodes(); };
+        leave.Click += (_, _) => { _game = null; _session = null; _mySeat = -1; GameHost.Content = null; Tabs.SelectedIndex = 0; RefreshNodes(); };
         inner.Children.Add(leave);
         return new Border { Background = B("#14532d"), Child = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = inner } };
     }
@@ -451,6 +489,24 @@ public partial class MainWindow : Window
     {
         var g = _game;
         if (g is null) return;
+
+        // NETWORKED: run the move through the verified session (it rolls the beacon, signs, advances state),
+        // then broadcast the signed packet to peers over the live links. Only your own seat may move.
+        if (_session is not null)
+        {
+            if (g.Current != _mySeat) { g.Log.Add($"(not your turn — seat {g.Current} to move)"); RenderGame(); return; }
+            int? boughtN = type == "BUY" ? g.PendingTitle : null;
+            GameSession.MovePacket pkt;
+            try { pkt = _session.Local(type, 0, type == "PAY_TAX" ? "flat" : null); }
+            catch (System.Exception ex) { g.Log.Add($"(rejected: {ex.Message})"); RenderGame(); return; }
+            BroadcastMove(pkt);
+            _game = _session.State;
+            _game.Log.Add($"move {type}@t{_game.TurnIndex} (signed, sent to peers)");
+            if (boughtN is int pidN) MintDeedForBuy(pidN);
+            RenderGame();
+            return;
+        }
+
         int? bought = type == "BUY" ? g.PendingTitle : null;   // the property whose deed becomes yours
         Estates.Core.Action a = type switch
         {
@@ -467,30 +523,69 @@ public partial class MainWindow : Window
             // + signed in-process by the standalone wallet; nothing is anchored through a node here.
             string commit = a.Dice != null ? $"{type}:{a.Dice[0]},{a.Dice[1]}@t{_game.TurnIndex}" : $"{type}@t{_game.TurnIndex}";
             _game.Log.Add($"move {commit} (signed, applied; peer-to-peer)");
-            if (bought is int pid)   // buying MINTS a real encrypted deed NFT sealed to YOUR key (owner-only)
-            {
-                string nm = Params.Instance.Board[pid].Name;
-                string tag = "local";
-                try
-                {
-                    var w = EnsureWallet();
-                    if (w is not null)
-                    {
-                        byte[] face = DeedNft.DeedFace(pid, nm, _game.Current);
-                        byte[] data = DeedNft.Seal(w.ChildPriv(FirstAddr), w.ChildPub(FirstAddr), face);
-                        bool ownerOpens = DeedNft.Unseal(w.ChildPriv(FirstAddr), data) is not null;
-                        tag = "deed-nft:" + Tx.ToHex(SHA256.HashData(data))[..16];
-                        _game.Log.Add($"encrypted deed NFT '{nm}' minted — sealed to your key (only you can open it: {ownerOpens})");
-                    }
-                    else _game.Log.Add($"deed '{nm}' recorded to your wallet");
-                }
-                catch (System.Exception ex) { _game.Log.Add($"deed '{nm}' recorded (seal skipped: {ex.Message})"); }
-                _heldNfts.Add((pid, nm, tag)); SaveNftsDisk();
-            }
+            if (bought is int pid) MintDeedForBuy(pid);   // buying MINTS a real encrypted deed NFT sealed to YOUR key
         }
         else g.Log.Add($"(rejected: {res.Code})");
         RenderGame();
         ScheduleBots();
+    }
+
+    /// <summary>Mint the encrypted title-deed NFT for a just-bought property, sealed to the buyer's key
+    /// (owner-only). Shared by the local and the networked move paths.</summary>
+    private void MintDeedForBuy(int pid)
+    {
+        if (_game is null) return;
+        string nm = Params.Instance.Board[pid].Name;
+        string tag = "local";
+        try
+        {
+            var w = EnsureWallet();
+            if (w is not null)
+            {
+                byte[] face = DeedNft.DeedFace(pid, nm, _game.Current);
+                byte[] data = DeedNft.Seal(w.ChildPriv(FirstAddr), w.ChildPub(FirstAddr), face);
+                bool ownerOpens = DeedNft.Unseal(w.ChildPriv(FirstAddr), data) is not null;
+                tag = "deed-nft:" + Tx.ToHex(SHA256.HashData(data))[..16];
+                _game.Log.Add($"encrypted deed NFT '{nm}' minted — sealed to your key (only you can open it: {ownerOpens})");
+            }
+            else _game.Log.Add($"deed '{nm}' recorded to your wallet");
+        }
+        catch (System.Exception ex) { _game.Log.Add($"deed '{nm}' recorded (seal skipped: {ex.Message})"); }
+        _heldNfts.Add((pid, nm, tag)); SaveNftsDisk();
+    }
+
+    /// <summary>Broadcast a signed move packet to every live peer link, framed with the game-move magic so
+    /// the receiver routes it to the session verifier (and not the chat/tx path).</summary>
+    private void BroadcastMove(GameSession.MovePacket pkt)
+    {
+        byte[] body = GameSession.Encode(pkt);
+        var frame = new byte[MoveFrameMagic.Length + body.Length];
+        System.Buffer.BlockCopy(MoveFrameMagic, 0, frame, 0, MoveFrameMagic.Length);
+        System.Buffer.BlockCopy(body, 0, frame, MoveFrameMagic.Length, body.Length);
+        foreach (var l in _node.LiveLinks()) { try { l.Send(frame); } catch { } }
+    }
+
+    /// <summary>A game-move frame arrived from a peer: decode it, re-verify it through the session (dice
+    /// re-derived from the beacon reveals, signature + engine legality checked) and only then apply it.</summary>
+    private void OnMoveFrame(byte[] frame)
+    {
+        if (_session is null) return;
+        try
+        {
+            var body = frame[MoveFrameMagic.Length..];
+            var pkt = GameSession.Decode(body);
+            if (pkt.Seat == _mySeat) return;   // my own move echoed back over the mesh — already applied
+            bool wasBuy = pkt.Action == "BUY";
+            if (_session.Remote(pkt, out string reason))
+            {
+                _game = _session.State;
+                _game.Log.Add($"peer move {pkt.Action} by seat {pkt.Seat} (verified, applied)");
+                if (wasBuy) _game.Log.Add($"seat {pkt.Seat}'s deed is an encrypted NFT — sealed to them, you cannot open it");
+                RenderGame();
+            }
+            else { _game?.Log.Add($"(peer move REJECTED: {reason})"); RenderGame(); }
+        }
+        catch (System.Exception e) { App.CrashLog("game-move-recv", e); }
     }
 
     /// <summary>If it's a computer seat's turn, take one bot action after a short pause so you can watch the
@@ -531,6 +626,18 @@ public partial class MainWindow : Window
     private void DoBuild(int pid)
     {
         var g = _game; if (g is null) return;
+        if (_session is not null)
+        {
+            if (g.Current != _mySeat) { g.Log.Add("(not your turn)"); RenderGame(); return; }
+            GameSession.MovePacket pkt;
+            try { pkt = _session.Local("BUILD", pid); }
+            catch (System.Exception ex) { g.Log.Add($"(build rejected: {ex.Message})"); RenderGame(); return; }
+            BroadcastMove(pkt);
+            _game = _session.State;
+            _game.Log.Add($"built on {Params.Instance.Board[pid].Name} (signed, sent to peers)");
+            RenderGame();
+            return;
+        }
         var res = Engine.Apply(g, new Estates.Core.Action("BUILD") { PropertyId = pid });
         if (res.Ok && res.State is not null) { _game = res.State; _game.Log.Add($"built on {Params.Instance.Board[pid].Name}"); }
         else g.Log.Add($"(build rejected: {res.Code})");
@@ -2513,6 +2620,9 @@ public partial class MainWindow : Window
     {
         try
         {
+            // a verified game-move frame (prefixed with the move magic) → route to the session, not the tx path
+            if (frame.Length >= MoveFrameMagic.Length && frame.AsSpan(0, MoveFrameMagic.Length).SequenceEqual(MoveFrameMagic))
+            { OnMoveFrame(frame); return; }
             var tx = Tx.Parse(frame);
             if (tx is null) return;
             var ex = TxTransport.Extract(tx, _master);
