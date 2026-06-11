@@ -1673,6 +1673,32 @@ try
 }
 catch (Exception ex) { Console.Error.WriteLine($"TRADE-NET FAIL: {ex.Message}"); gfail = 1; }
 
+// NET-AUCTION: two peers run the same auction (BID / PASS_BID) deterministically and stay in lock-step — the
+// high bidder wins on both, balances match. Proves the networked-auction primitive (EnableAuctions/Bid/PassBid).
+try
+{
+    var deck = new Dictionary<string, List<int>>();
+    foreach (var kv in Params.Instance.Decks) deck[kv.Key] = Enumerable.Range(0, kv.Value.Count).ToList();
+    var k = DeedNft.DeriveSeatKeys(SHA256.HashData("estates-auc-keys"u8.ToArray()), 3);
+    var A = new GameSession("regtest", 3, 1_000_000_000, new Dictionary<string, List<int>>(deck), k); A.EnableAuctions();
+    var B = new GameSession("regtest", 3, 1_000_000_000, new Dictionary<string, List<int>>(deck), k); B.EnableAuctions();
+    int pid = Params.Instance.Board.First(sp => sp.Type == "property" && sp.Group != null).Id;
+    foreach (var S in new[] { A, B }) { S.State.Phase = "AWAIT_AUCTION"; S.State.AuctionProperty = pid; S.State.AuctionActor = 0; S.State.AuctionHighBid = 0; S.State.AuctionHighSeat = -1; S.State.AuctionPassed = new List<int>(); }
+    bool ok = true;
+    ok &= A.Bid(30, out _) & B.Bid(30, out _);     // seat 0
+    ok &= A.Bid(60, out _) & B.Bid(60, out _);     // seat 1
+    ok &= A.PassBid(out _) & B.PassBid(out _);     // seat 2 drops
+    ok &= A.PassBid(out _) & B.PassBid(out _);     // seat 0 drops -> seat 1 wins
+    bool synced = ok && A.State.Titles[pid].Owner == 1 && B.State.Titles[pid].Owner == 1
+        && A.State.Seats.Select(x => x.Balance).SequenceEqual(B.State.Seats.Select(x => x.Balance))
+        && A.State.Phase == "AWAIT_POST" && B.State.Phase == "AWAIT_POST";
+    if (synced)
+        Console.WriteLine("NET-AUCTION: two peers ran the same auction in lock-step; the high bidder won and paid identically on both ✓");
+    else
+    { Console.Error.WriteLine($"NET-AUCTION FAIL: ok={ok} ownerA={A.State.Titles[pid].Owner} ownerB={B.State.Titles[pid].Owner}"); gfail = 1; }
+}
+catch (Exception ex) { Console.Error.WriteLine($"NET-AUCTION FAIL: {ex.Message}"); gfail = 1; }
+
 // WIRE: a whole multiplayer game driven across the network — every move serialised to bytes, sent, decoded,
 // and re-verified on the other side. Proves two SEPARATE machines can play (the packet round-trips exactly
 // and a byte-flipped packet on the wire is rejected).

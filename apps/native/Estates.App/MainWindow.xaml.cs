@@ -317,6 +317,7 @@ public partial class MainWindow : Window
     private static readonly byte[] MoveFrameMagic = { 0xE5, 0x70, 0x4D, 0x56 };   // "ESMV" — a game-move frame
     private static readonly byte[] TradeOfferMagic = { 0xE5, 0x70, 0x54, 0x4F };   // "ESTO" — a trade OFFER
     private static readonly byte[] TradeAcceptMagic = { 0xE5, 0x70, 0x54, 0x41 };  // "ESTA" — a trade ACCEPT
+    private static readonly byte[] AuctionFrameMagic = { 0xE5, 0x70, 0x41, 0x42 }; // "ESAB" — an auction bid/pass
     private readonly List<(int id, string name, string txid)> _heldNfts = new();   // deed/card NFTs you hold
     private string? _genesisTxid;   // local table id for the current game (no node)
     private MentalPokerHand? _mpHand;   // this table's dealerless, provably-shuffled ENCRYPTED card deck
@@ -348,6 +349,7 @@ public partial class MainWindow : Window
             byte[] root = SHA256.HashData(System.Text.Encoding.ASCII.GetBytes("estates/seatkeys/" + _genesisTxid));
             var keys = DeedNft.DeriveSeatKeys(root, seats);
             _session = new GameSession(network, seats, 1_000_000, deckOrder, keys);
+            _session.EnableAuctions();   // both peers derive identical state, so a declined title goes to auction
             _game = _session.State;
         }
         else
@@ -682,6 +684,16 @@ public partial class MainWindow : Window
         // then broadcast the signed packet to peers over the live links. Only your own seat may move.
         if (_session is not null)
         {
+            // AUCTION bids are by the AuctionActor (not the turn-holder) and apply deterministically on both
+            // peers (EnableAuctions/Bid/PassBid), broadcast as a dedicated auction frame.
+            if (type is "BID" or "PASS_BID")
+            {
+                if (g.Phase != "AWAIT_AUCTION" || g.AuctionActor != _mySeat) { g.Log.Add("(not your bid)"); RenderGame(); return; }
+                bool okb = type == "BID" ? _session.Bid(amount, out string whyb) : _session.PassBid(out whyb);
+                if (!okb) { g.Log.Add($"(auction rejected: {whyb})"); RenderGame(); return; }
+                BroadcastAuction(type, amount);
+                _game = _session.State; RenderGame(); return;
+            }
             if (g.Current != _mySeat) { g.Log.Add($"(not your turn — seat {g.Current} to move)"); RenderGame(); return; }
             int? boughtN = type == "BUY" ? g.PendingTitle : null;
             GameSession.MovePacket pkt;
@@ -797,6 +809,31 @@ public partial class MainWindow : Window
     {
         var frame = TradeFrame(magic, proposer, pid, counterparty, amount, choice);
         foreach (var l in _node.LiveLinks()) { try { l.Send(frame); } catch { } }
+    }
+
+    /// <summary>Broadcast an auction bid/pass to peers: magic + kind(1: 1=bid,0=pass) + amount(8).</summary>
+    private void BroadcastAuction(string type, long amount)
+    {
+        var o = new List<byte>(AuctionFrameMagic) { (byte)(type == "BID" ? 1 : 0) };
+        for (int i = 7; i >= 0; i--) o.Add((byte)(amount >> (i * 8)));
+        var frame = o.ToArray();
+        foreach (var l in _node.LiveLinks()) { try { l.Send(frame); } catch { } }
+    }
+
+    /// <summary>A peer's auction bid/pass arrived: apply it deterministically so both sessions stay in sync.</summary>
+    private void OnAuctionFrame(byte[] frame)
+    {
+        if (_session is null) return;
+        try
+        {
+            int i = AuctionFrameMagic.Length;
+            bool bid = frame[i++] == 1;
+            long amount = 0; for (int k = 0; k < 8; k++) amount = (amount << 8) | frame[i++];
+            bool ok = bid ? _session.Bid(amount, out string why) : _session.PassBid(out why);
+            if (ok) { _game = _session.State; _game.Log.Add($"peer auction {(bid ? $"bid {amount}" : "pass")} (synced)"); RenderGame(); }
+            else { _game?.Log.Add($"(peer auction REJECTED: {why})"); RenderGame(); }
+        }
+        catch (System.Exception e) { App.CrashLog("auction-recv", e); }
     }
 
     private void OnTradeFrame(byte[] frame, bool isAccept)
@@ -3032,6 +3069,8 @@ public partial class MainWindow : Window
             { OnTradeFrame(frame, isAccept: false); return; }
             if (frame.Length >= TradeAcceptMagic.Length && frame.AsSpan(0, TradeAcceptMagic.Length).SequenceEqual(TradeAcceptMagic))
             { OnTradeFrame(frame, isAccept: true); return; }
+            if (frame.Length >= AuctionFrameMagic.Length && frame.AsSpan(0, AuctionFrameMagic.Length).SequenceEqual(AuctionFrameMagic))
+            { OnAuctionFrame(frame); return; }
             var tx = Tx.Parse(frame);
             if (tx is null) return;
             var ex = TxTransport.Extract(tx, _master);
