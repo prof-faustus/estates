@@ -429,7 +429,8 @@ public partial class MainWindow : Window
             bool turn = s.Id == g.Current && g.Winner is null;
             var line = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4), HorizontalAlignment = HorizontalAlignment.Center };
             line.Children.Add(new Border { Width = 14, Height = 14, CornerRadius = new CornerRadius(7), Background = B(SeatColors[s.Id % SeatColors.Length]), Margin = new Thickness(0, 0, 8, 0) });
-            line.Children.Add(new TextBlock { Text = $"Seat {s.Id}: {s.Balance} sat" + (s.Bankrupt ? " (out)" : "") + (turn ? "   ← turn" : ""), Foreground = turn ? B("#b9f6ca") : B("#e6e6e6"), FontSize = 15 });
+            string tags = (s.Bankrupt ? " (out)" : "") + (s.InHolding ? $"  ⛓ holding {s.HoldingTurns}" : "") + (s.ReprieveCards > 0 ? $"  🎟×{s.ReprieveCards}" : "") + (turn ? "   ← turn" : "");
+            line.Children.Add(new TextBlock { Text = $"Seat {s.Id}: {s.Balance} sat" + tags, Foreground = turn ? B("#b9f6ca") : B("#e6e6e6"), FontSize = 15 });
             inner.Children.Add(line);
         }
         int myDeeds = g.Titles.Count(kv => kv.Value.Owner == 0);
@@ -492,6 +493,21 @@ public partial class MainWindow : Window
                 }
                 inner.Children.Add(new Border { Background = B("#0f3d22"), CornerRadius = new CornerRadius(6), Padding = new Thickness(8), Margin = new Thickness(0, 0, 0, 8), Child = mgr });
             }
+        }
+
+        // GAME LOG — surfaces everything the engine records that's otherwise invisible: Fate/Treasury card
+        // draws ("seat N draws Fate: …"), rent paid, jail, mortgages, bankruptcies. Without this you can't see
+        // why balances move, so it's core to a playable game, not decoration.
+        if (g.Log.Count > 0)
+        {
+            var logStack = new StackPanel();
+            logStack.Children.Add(new TextBlock { Text = "Game log", Foreground = B("#ffd54f"), FontSize = 13, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 3) });
+            foreach (var line in g.Log.Skip(Math.Max(0, g.Log.Count - 12)))
+            {
+                bool card = line.Contains("draws Fate") || line.Contains("draws Treasury");
+                logStack.Children.Add(new TextBlock { Text = (card ? "🃏 " : "• ") + line, Foreground = B(card ? "#ffe082" : "#cfe8d4"), FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 1) });
+            }
+            inner.Children.Add(new Border { Background = B("#0c2c18"), CornerRadius = new CornerRadius(6), Padding = new Thickness(8), Margin = new Thickness(0, 0, 0, 8), Child = logStack });
         }
 
         var leave = new Button { Content = "Leave game", HorizontalAlignment = HorizontalAlignment.Center, Background = B("#3a3d42") };
