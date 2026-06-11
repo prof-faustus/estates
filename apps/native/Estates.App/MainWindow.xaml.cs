@@ -294,6 +294,7 @@ public partial class MainWindow : Window
 
     // ---- Game (its own tab) — a real board, you click every action ------------------
     private GameState? _game;
+    private byte[] _prevBeacon = Beacon.ZeroBeacon;   // chained dealerless dice beacon for the live game
     private readonly List<(int id, string name, string txid)> _heldNfts = new();   // deed/card NFTs you hold
     private string? _genesisTxid;   // local table id for the current game (no node)
     private MentalPokerHand? _mpHand;   // this table's dealerless, provably-shuffled ENCRYPTED card deck
@@ -308,6 +309,7 @@ public partial class MainWindow : Window
         var deckOrder = new Dictionary<string, List<int>>();
         foreach (var kv in Params.Instance.Decks) deckOrder[kv.Key] = Enumerable.Range(0, kv.Value.Count).ToList();
         _game = Engine.InitialState(network, seats, 1_000_000, deckOrder, false);
+        _prevBeacon = Beacon.ZeroBeacon;   // fresh provable-dice chain for this table
         RenderGame();
         Tabs.SelectedIndex = 1;
 
@@ -414,6 +416,20 @@ public partial class MainWindow : Window
         "PAY_TAX" => "Pay tax", "END_TURN" => "End turn", "FORFEIT" => "Forfeit turn", _ => a,
     };
 
+    /// <summary>Provably-fair dealerless dice: every live seat contributes a fresh secret; the dice are
+    /// derived ONLY from the verified reveal set and chained into the next beacon, so no player (or the
+    /// dealer, because there isn't one) can bias the roll. This is the same beacon the on-chain transcript
+    /// records and any peer re-verifies (Beacon / GameTranscript).</summary>
+    private int[] BeaconRoll()
+    {
+        var g = _game!;
+        var live = g.Seats.Where(s => !s.Bankrupt).Select(s => s.Id).ToList();
+        var reveals = live.Select(id => new Reveal(id, System.Security.Cryptography.RandomNumberGenerator.GetBytes(32))).ToList();
+        var (dice, beacon) = Beacon.Roll(reveals, g.TurnIndex, _prevBeacon);
+        _prevBeacon = beacon;
+        return dice;
+    }
+
     private void DoAction(string type)
     {
         var g = _game;
@@ -421,7 +437,7 @@ public partial class MainWindow : Window
         int? bought = type == "BUY" ? g.PendingTitle : null;   // the property whose deed becomes yours
         Estates.Core.Action a = type switch
         {
-            "ROLL" => new Estates.Core.Action("ROLL") { Dice = new[] { Die(), Die() } },
+            "ROLL" => new Estates.Core.Action("ROLL") { Dice = BeaconRoll() },
             "PAY_TAX" => new Estates.Core.Action("PAY_TAX") { Choice = "flat" },
             _ => new Estates.Core.Action(type),
         };
