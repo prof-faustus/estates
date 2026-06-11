@@ -295,6 +295,7 @@ public partial class MainWindow : Window
     // ---- Game (its own tab) — a real board, you click every action ------------------
     private GameState? _game;
     private byte[] _prevBeacon = Beacon.ZeroBeacon;   // chained dealerless dice beacon for the live game
+    private readonly HashSet<int> _botSeats = new();   // seats the computer plays (so you can play solo)
     private readonly List<(int id, string name, string txid)> _heldNfts = new();   // deed/card NFTs you hold
     private string? _genesisTxid;   // local table id for the current game (no node)
     private MentalPokerHand? _mpHand;   // this table's dealerless, provably-shuffled ENCRYPTED card deck
@@ -310,8 +311,11 @@ public partial class MainWindow : Window
         foreach (var kv in Params.Instance.Decks) deckOrder[kv.Key] = Enumerable.Range(0, kv.Value.Count).ToList();
         _game = Engine.InitialState(network, seats, 1_000_000, deckOrder, false);
         _prevBeacon = Beacon.ZeroBeacon;   // fresh provable-dice chain for this table
+        _botSeats.Clear();
+        for (int i = 1; i < seats; i++) _botSeats.Add(i);   // you are seat 0; the rest are played by the computer
         RenderGame();
         Tabs.SelectedIndex = 1;
+        ScheduleBots();
 
         // MENTAL POKER (dealerless, provably-random, collusion-proof): shuffle + prepare this table's shared
         // ENCRYPTED card deck on a BACKGROUND thread so the UI never blocks. Non-breaking — any failure is just
@@ -473,6 +477,34 @@ public partial class MainWindow : Window
         }
         else g.Log.Add($"(rejected: {res.Code})");
         RenderGame();
+        ScheduleBots();
+    }
+
+    /// <summary>If it's a computer seat's turn, take one bot action after a short pause so you can watch the
+    /// game play out. Chains itself (each move re-schedules) until it's your turn again or the game ends.</summary>
+    private void ScheduleBots()
+    {
+        if (_game is null || _game.Winner is not null || !_botSeats.Contains(_game.Current)) return;
+        var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(650) };
+        t.Tick += (_, _) =>
+        {
+            t.Stop();
+            if (_game is not null && _game.Winner is null && _botSeats.Contains(_game.Current)) BotStep();
+        };
+        t.Start();
+    }
+
+    private void BotStep()
+    {
+        var g = _game; if (g is null) return;
+        string type = g.Phase switch
+        {
+            "AWAIT_ROLL" => "ROLL",
+            "AWAIT_BUY" => (g.PendingTitle is int pp && g.Seats[g.Current].Balance >= (Params.Instance.Board[pp].BasePrice ?? 0)) ? "BUY" : "DECLINE",
+            "AWAIT_TAX" => "PAY_TAX",
+            _ => "END_TURN",
+        };
+        DoAction(type);   // applies (beacon roll / deed mint / …), re-renders, and re-schedules the next bot move
     }
 
     private static int Die() => RandomNumberGenerator.GetInt32(1, 7);
