@@ -1418,4 +1418,27 @@ try
 }
 catch (Exception ex) { Console.Error.WriteLine($"DEEDS FAIL: {ex.Message}"); gfail = 1; }
 
+// MOVE AUTHENTICATION: every move is ECDSA-signed by the seat that made it; a peer verifies it before
+// accepting. A move forged with the wrong seat's key MUST be rejected. (Beacon = fair dice, Engine = legal
+// moves, MoveAuth = authentic moves, GameTranscript = verifiable history — the whole hostile model.)
+try
+{
+    var seed = SHA256.HashData("estates-onchain-demo-v1"u8.ToArray());
+    var g = GamePlay.PlayToEnd("regtest", 2, 1_000_000_000, seed);
+    var keys = DeedNft.DeriveSeatKeys(SHA256.HashData("estates-seat-keys"u8.ToArray()), g.Seats);
+    var signed = MoveAuth.SignGame(g, keys);
+    var (allok, verified, rejected) = MoveAuth.VerifyGame(signed, keys);
+    // hostile: re-sign one move with a DIFFERENT seat's key — verification must catch the forgery
+    var victim = signed[0];
+    int wrongSeat = (victim.Move.Seat + 1) % g.Seats;
+    var forged = victim with { Signature = MoveAuth.Sign(victim.Move, keys[wrongSeat]).Signature };
+    bool caughtForgery = !MoveAuth.Verify(forged, keys[victim.Move.Seat].Pub);
+    bool ok = allok && verified > 0 && rejected == 0 && caughtForgery;
+    if (ok)
+        Console.WriteLine($"AUTH: all {verified} game moves signed by their acting seat + verified; a forged move (wrong key) was REJECTED ✓");
+    else
+    { Console.Error.WriteLine($"AUTH FAIL: ok={allok} verified={verified} rejected={rejected} caughtForgery={caughtForgery}"); gfail = 1; }
+}
+catch (Exception ex) { Console.Error.WriteLine($"AUTH FAIL: {ex.Message}"); gfail = 1; }
+
 return (fail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && bfail == 0 && xfail == 0 && gfail == 0) ? 0 : 1;
