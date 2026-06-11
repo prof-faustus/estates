@@ -450,11 +450,25 @@ public partial class MainWindow : Window
             // + signed in-process by the standalone wallet; nothing is anchored through a node here.
             string commit = a.Dice != null ? $"{type}:{a.Dice[0]},{a.Dice[1]}@t{_game.TurnIndex}" : $"{type}@t{_game.TurnIndex}";
             _game.Log.Add($"move {commit} (signed, applied; peer-to-peer)");
-            if (bought is int pid)   // buying records the deed NFT to YOUR wallet
+            if (bought is int pid)   // buying MINTS a real encrypted deed NFT sealed to YOUR key (owner-only)
             {
                 string nm = Params.Instance.Board[pid].Name;
-                _heldNfts.Add((pid, nm, "local")); SaveNftsDisk();
-                _game.Log.Add($"deed '{nm}' recorded to your wallet");
+                string tag = "local";
+                try
+                {
+                    var w = EnsureWallet();
+                    if (w is not null)
+                    {
+                        byte[] face = DeedNft.DeedFace(pid, nm, _game.Current);
+                        byte[] data = DeedNft.Seal(w.ChildPriv(FirstAddr), w.ChildPub(FirstAddr), face);
+                        bool ownerOpens = DeedNft.Unseal(w.ChildPriv(FirstAddr), data) is not null;
+                        tag = "deed-nft:" + Tx.ToHex(SHA256.HashData(data))[..16];
+                        _game.Log.Add($"encrypted deed NFT '{nm}' minted — sealed to your key (only you can open it: {ownerOpens})");
+                    }
+                    else _game.Log.Add($"deed '{nm}' recorded to your wallet");
+                }
+                catch (System.Exception ex) { _game.Log.Add($"deed '{nm}' recorded (seal skipped: {ex.Message})"); }
+                _heldNfts.Add((pid, nm, tag)); SaveNftsDisk();
             }
         }
         else g.Log.Add($"(rejected: {res.Code})");

@@ -48,6 +48,30 @@ public static class DeedNft
     /// owner (the scarcity guarantee).</summary>
     public static byte[]? Open(byte[] ownerPriv, byte[] nftData) => OnChainActions.OpenCard(ownerPriv, nftData);
 
+    private static readonly byte[] DeedAad = "estates/deed-nft/v1"u8.ToArray();
+
+    /// <summary>Seal a deed to an owner with NO transaction (no funding needed) — just the encrypted NFT
+    /// bytes (issuerPub ‖ nonce ‖ ciphertext). Used by the standalone in-window game so buying a property
+    /// mints a real owner-only encrypted deed immediately. Unseal returns the face only for the owner.</summary>
+    public static byte[] Seal(byte[] issuerPriv, byte[] ownerPub, byte[] face)
+    {
+        byte[] issuerPub = Secp256k1.PublicKey(issuerPriv);
+        var ct = Cipher.EcdhSeal(issuerPriv, ownerPub, face, DeedAad);
+        var o = new byte[33 + ct.Nonce.Length + ct.Bytes.Length];
+        System.Array.Copy(issuerPub, o, 33);
+        System.Array.Copy(ct.Nonce, 0, o, 33, ct.Nonce.Length);
+        System.Array.Copy(ct.Bytes, 0, o, 33 + ct.Nonce.Length, ct.Bytes.Length);
+        return o;
+    }
+
+    /// <summary>Open a tx-free sealed deed — only the owner's key returns the face; anyone else gets null.</summary>
+    public static byte[]? Unseal(byte[] ownerPriv, byte[] sealedDeed)
+    {
+        if (sealedDeed.Length < 45) return null;
+        return Cipher.EcdhOpen(ownerPriv, sealedDeed[..33],
+            new Cipher.EcdhSealed(sealedDeed[33..45], sealedDeed[45..]), DeedAad);
+    }
+
     /// <summary>Transfer a deed: re-seal the SAME property to a new owner. The returned NFT opens only for
     /// the new owner; the prior owner can no longer read it. (The real on-chain transfer also spends the old
     /// NFT outpoint — see OnChainActions.TransferCard; this is the cryptographic re-seal it performs.)</summary>
