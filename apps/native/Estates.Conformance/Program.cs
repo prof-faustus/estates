@@ -1336,4 +1336,19 @@ try
 }
 catch (Exception ex) { Console.Error.WriteLine($"GAME FAIL: {ex.Message}"); gfail = 1; }
 
+// FULL GAME -> REAL SIGNED BSV TX CHAIN: compile the whole game into actual signed transactions (one per
+// move), each FORKID-signed and locally spend-verified, threaded into a real change-spend chain. No node.
+try
+{
+    var w = new StandaloneWallet(SHA256.HashData("estates-onchain-game-wallet"u8.ToArray()), "regtest");
+    var funding = new Coin(new string('a', 64), 0, 5_000_000_000, 0);   // one funding coin at address 0
+    var sg = OnChainGame.PlayAndSign(w, funding, "regtest", 2, 1_000_000_000, SHA256.HashData("estates-onchain-demo-v1"u8.ToArray()));
+    bool ok = sg.Game.Finished && sg.Txs.Count == sg.Game.OnChainTxCount && sg.Txs.Count > 0 && sg.AllSigned && sg.ChainsCleanly;
+    if (ok)
+        Console.WriteLine($"GAME-TX: whole game compiled to {sg.Txs.Count} REAL signed BSV txs — every one FORKID-verified + chained, total fees {sg.TotalFees} sat ✓");
+    else
+    { Console.Error.WriteLine($"GAME-TX FAIL: finished={sg.Game.Finished} txs={sg.Txs.Count}/{sg.Game.OnChainTxCount} signed={sg.AllSigned} chains={sg.ChainsCleanly}"); gfail = 1; }
+}
+catch (Exception ex) { Console.Error.WriteLine($"GAME-TX FAIL: {ex.Message}"); gfail = 1; }
+
 return (fail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && bfail == 0 && xfail == 0 && gfail == 0) ? 0 : 1;
