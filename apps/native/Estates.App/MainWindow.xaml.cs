@@ -459,6 +459,41 @@ public partial class MainWindow : Window
             }
         }
         inner.Children.Add(bar);
+
+        // MANAGE YOUR ESTATE — mortgage to raise cash, lift mortgages, or sell buildings back. Engine-backed
+        // (MORTGAGE / UNMORTGAGE / SELL_BUILD), available on your own turn in the post-roll phase. This is how
+        // you avoid bankruptcy and free up capital, so it's core play — not a side panel.
+        int mySeatNow = _session is null ? g.Current : _mySeat;
+        if (g.Winner is null && g.Phase == "AWAIT_POST" && myTurn && !_botSeats.Contains(g.Current))
+        {
+            var owned = Params.Instance.Board
+                .Where(sp => g.Titles.TryGetValue(sp.Id, out var tt) && tt.Owner == mySeatNow)
+                .ToList();
+            if (owned.Count > 0)
+            {
+                var mgr = new StackPanel { Margin = new Thickness(0, 6, 0, 6) };
+                mgr.Children.Add(new TextBlock { Text = "Manage your estate", Foreground = B("#ffd54f"), FontSize = 14, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 4) });
+                foreach (var sp in owned)
+                {
+                    var t = g.Titles[sp.Id];
+                    var row = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 1, 0, 1) };
+                    string state = t.Mortgaged ? "mortgaged" : t.BuildLevel == 5 ? "estate" : t.BuildLevel > 0 ? $"{t.BuildLevel} house(s)" : "unbuilt";
+                    row.Children.Add(new TextBlock { Text = $"{sp.Name} — {state}", Foreground = B("#e6e6e6"), FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0), MinWidth = 150 });
+                    void Mini(string label, string act, string bg)
+                    {
+                        var b = new Button { Content = label, Margin = new Thickness(2, 0, 2, 0), FontSize = 11, Padding = new Thickness(6, 1, 6, 1), Background = B(bg), Foreground = B("#ffffff") };
+                        int cap = sp.Id; b.Click += (_, _) => DoTitleAction(act, cap);
+                        row.Children.Add(b);
+                    }
+                    if (!t.Mortgaged && t.BuildLevel > 0) Mini("Sell building", "SELL_BUILD", "#8a5a2b");
+                    if (!t.Mortgaged && t.BuildLevel == 0) Mini("Mortgage", "MORTGAGE", "#5a2030");
+                    if (t.Mortgaged) Mini("Unmortgage", "UNMORTGAGE", "#2e7d32");
+                    mgr.Children.Add(row);
+                }
+                inner.Children.Add(new Border { Background = B("#0f3d22"), CornerRadius = new CornerRadius(6), Padding = new Thickness(8), Margin = new Thickness(0, 0, 0, 8), Child = mgr });
+            }
+        }
+
         var leave = new Button { Content = "Leave game", HorizontalAlignment = HorizontalAlignment.Center, Background = B("#3a3d42") };
         leave.Click += (_, _) => { _game = null; _session = null; _mySeat = -1; GameHost.Content = null; Tabs.SelectedIndex = 0; RefreshNodes(); };
         inner.Children.Add(leave);
@@ -623,24 +658,31 @@ public partial class MainWindow : Window
 
     /// <summary>Apply BUILD on a property (houses → estate). Building develops a fully-owned colour group;
     /// rent escalates, which is what drives a game to a winner.</summary>
-    private void DoBuild(int pid)
+    private void DoBuild(int pid) => DoTitleAction("BUILD", pid);
+
+    /// <summary>Apply a title-management action (BUILD / SELL_BUILD / MORTGAGE / UNMORTGAGE) on a property the
+    /// current seat owns. Routes through the verified session + peer broadcast when networked, or the local
+    /// engine otherwise — the same shape as a roll/buy, so estate management is fully part of multiplayer.</summary>
+    private void DoTitleAction(string action, int pid)
     {
         var g = _game; if (g is null) return;
+        string nm = Params.Instance.Board[pid].Name;
+        string verb = action switch { "BUILD" => "built on", "SELL_BUILD" => "sold a building on", "MORTGAGE" => "mortgaged", "UNMORTGAGE" => "lifted the mortgage on", _ => action + " on" };
         if (_session is not null)
         {
             if (g.Current != _mySeat) { g.Log.Add("(not your turn)"); RenderGame(); return; }
             GameSession.MovePacket pkt;
-            try { pkt = _session.Local("BUILD", pid); }
-            catch (System.Exception ex) { g.Log.Add($"(build rejected: {ex.Message})"); RenderGame(); return; }
+            try { pkt = _session.Local(action, pid); }
+            catch (System.Exception ex) { g.Log.Add($"({action.ToLower()} rejected: {ex.Message})"); RenderGame(); return; }
             BroadcastMove(pkt);
             _game = _session.State;
-            _game.Log.Add($"built on {Params.Instance.Board[pid].Name} (signed, sent to peers)");
+            _game.Log.Add($"{verb} {nm} (signed, sent to peers)");
             RenderGame();
             return;
         }
-        var res = Engine.Apply(g, new Estates.Core.Action("BUILD") { PropertyId = pid });
-        if (res.Ok && res.State is not null) { _game = res.State; _game.Log.Add($"built on {Params.Instance.Board[pid].Name}"); }
-        else g.Log.Add($"(build rejected: {res.Code})");
+        var res = Engine.Apply(g, new Estates.Core.Action(action) { PropertyId = pid });
+        if (res.Ok && res.State is not null) { _game = res.State; _game.Log.Add($"{verb} {nm}"); }
+        else g.Log.Add($"({action.ToLower()} rejected: {res.Code})");
         RenderGame();
         ScheduleBots();
     }
