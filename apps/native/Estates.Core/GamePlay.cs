@@ -23,7 +23,8 @@ public sealed record GameMove(int Turn, int Seat, string Phase, string Action,
 
 public sealed record GameResult(int Seats, int? Winner, int Turns, bool Finished,
     IReadOnlyList<GameMove> Moves, IReadOnlyList<string> Log,
-    string Network, long BankReserve, IReadOnlyDictionary<string, List<int>> DeckOrder)
+    string Network, long BankReserve, IReadOnlyDictionary<string, List<int>> DeckOrder,
+    IReadOnlyDictionary<int, int> FinalOwners)
 {
     /// <summary>Total real on-chain transactions a live game of this length would broadcast.</summary>
     public int OnChainTxCount => Moves.Count;
@@ -99,8 +100,10 @@ public static class GamePlay
         }
 
         bool finished = state.Phase == "GAME_OVER";
+        var finalOwners = state.Titles.Where(kv => kv.Value.Owner is not null)
+            .ToDictionary(kv => kv.Key, kv => kv.Value.Owner!.Value);
         return new GameResult(seatCount, state.Winner, state.TurnIndex, finished, moves, state.Log,
-            network, bankReserve, deckOrder);
+            network, bankReserve, deckOrder, finalOwners);
     }
 
     // ---- deterministic bot policy (greedy, legal-only) ---------------------------------------

@@ -1378,4 +1378,44 @@ try
 }
 catch (Exception ex) { Console.Error.WriteLine($"TRUSTLESS FAIL: {ex.Message}"); gfail = 1; }
 
+// TITLE DEEDS AS ENCRYPTED NFTs: every property the game assigns becomes an encrypted NFT deed sealed to
+// its owner — only the owner can open it, everyone else sees opaque bytes, and a transfer re-seals it so
+// the prior owner can no longer read it (digital scarcity).
+try
+{
+    var seed = SHA256.HashData("estates-onchain-demo-v1"u8.ToArray());
+    var g = GamePlay.PlayToEnd("regtest", 2, 1_000_000_000, seed);
+    var keys = DeedNft.DeriveSeatKeys(SHA256.HashData("estates-seat-keys"u8.ToArray()), g.Seats);
+    var issuer = new StandaloneWallet(SHA256.HashData("estates-deed-issuer"u8.ToArray()), "regtest");
+    issuer.AddCoin(new string('e', 64), 0, 5_000_000_000, 0);   // fund the deed issuer (local; mints are real carrier txs)
+    int minted = 0, ownerOpens = 0, othersRejected = 0;
+    DeedMint? sample = null;
+    foreach (var kv in g.FinalOwners)
+    {
+        int pid = kv.Key, owner = kv.Value;
+        var dm = DeedNft.Mint(issuer, pid, Params.Instance.Board[pid].Name, owner, keys[owner].Pub, 1);
+        minted++;
+        if (DeedNft.Open(keys[owner].Priv, dm.NftData) is not null) ownerOpens++;
+        bool allOthersBlind = Enumerable.Range(0, g.Seats).Where(s => s != owner)
+            .All(s => DeedNft.Open(keys[s].Priv, dm.NftData) is null);
+        if (allOthersBlind) othersRejected++;
+        sample ??= dm;
+    }
+    // transfer scarcity: re-seal the sample deed to a different seat; new owner reads it, old owner cannot
+    bool scarcity = true;
+    if (sample is not null && g.Seats >= 2)
+    {
+        int from = sample.Owner, to = (from + 1) % g.Seats;
+        var moved = DeedNft.ReSeal(issuer, sample, Params.Instance.Board[sample.PropertyId].Name, to, keys[to].Pub, 1);
+        scarcity = DeedNft.Open(keys[to].Priv, moved.NftData) is not null
+                && DeedNft.Open(keys[from].Priv, moved.NftData) is null;
+    }
+    bool ok = minted > 0 && ownerOpens == minted && othersRejected == minted && scarcity;
+    if (ok)
+        Console.WriteLine($"DEEDS: {minted} title deeds minted as encrypted NFTs — each opens ONLY for its owner ({ownerOpens}/{minted}), all non-owners blind ({othersRejected}/{minted}), transfer re-seals (scarcity) ✓");
+    else
+    { Console.Error.WriteLine($"DEEDS FAIL: minted={minted} ownerOpens={ownerOpens} othersRejected={othersRejected} scarcity={scarcity}"); gfail = 1; }
+}
+catch (Exception ex) { Console.Error.WriteLine($"DEEDS FAIL: {ex.Message}"); gfail = 1; }
+
 return (fail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && bfail == 0 && xfail == 0 && gfail == 0) ? 0 : 1;
