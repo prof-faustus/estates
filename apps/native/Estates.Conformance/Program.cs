@@ -1351,4 +1351,31 @@ try
 }
 catch (Exception ex) { Console.Error.WriteLine($"GAME-TX FAIL: {ex.Message}"); gfail = 1; }
 
+// TRUSTLESS FOLLOWER: reconstruct + verify the WHOLE game from its on-chain transcript alone — every dice
+// roll re-derived from the beacon reveals (claimed dice not trusted), every action decoded from its payload
+// and re-applied through the pure engine, winner re-confirmed. Plus a hostile check: a tampered roll MUST
+// be rejected. This is "game state IS the verified on-chain transcript" made real.
+try
+{
+    var seed = SHA256.HashData("estates-onchain-demo-v1"u8.ToArray());
+    var g = GamePlay.PlayToEnd("regtest", 2, 1_000_000_000, seed);
+    var tr = GameTranscript.Verify(g);
+    bool ok = tr.Ok && tr.Winner == g.Winner && tr.RollsVerified > 0 && tr.MovesReplayed > 0;
+    // hostile: flip one die on the first roll — the beacon re-derivation must catch the lie
+    bool flipped = false;
+    var tamperedMoves = g.Moves.Select(m =>
+    {
+        if (!flipped && m.Action == "ROLL" && m.Dice is not null)
+        { flipped = true; return m with { Dice = new[] { (m.Dice[0] % 6) + 1, m.Dice[1] } }; }
+        return m;
+    }).ToList();
+    var trBad = GameTranscript.Verify(g with { Moves = tamperedMoves });
+    bool caughtCheat = !trBad.Ok;
+    if (ok && caughtCheat)
+        Console.WriteLine($"TRUSTLESS: whole game reconstructed + verified from the on-chain transcript alone — winner=seat {tr.Winner}, {tr.RollsVerified} rolls re-derived from the beacon, {tr.MovesReplayed} moves replayed; a tampered roll was REJECTED ✓");
+    else
+    { Console.Error.WriteLine($"TRUSTLESS FAIL: ok={tr.Ok} reason={tr.Reason} caughtCheat={caughtCheat}"); gfail = 1; }
+}
+catch (Exception ex) { Console.Error.WriteLine($"TRUSTLESS FAIL: {ex.Message}"); gfail = 1; }
+
 return (fail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && bfail == 0 && xfail == 0 && gfail == 0) ? 0 : 1;

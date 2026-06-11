@@ -18,10 +18,12 @@ namespace Estates.Core;
 /// <summary>One played action: what was done, the on-chain payload it commits to, and (for a roll)
 /// the verifiable dice + the beacon they chain from.</summary>
 public sealed record GameMove(int Turn, int Seat, string Phase, string Action,
-    byte[] OnChainPayload, int[]? Dice = null, byte[]? Beacon = null);
+    byte[] OnChainPayload, int[]? Dice = null, byte[]? Beacon = null,
+    IReadOnlyList<Commitment>? Commits = null, IReadOnlyList<Reveal>? Reveals = null);
 
 public sealed record GameResult(int Seats, int? Winner, int Turns, bool Finished,
-    IReadOnlyList<GameMove> Moves, IReadOnlyList<string> Log)
+    IReadOnlyList<GameMove> Moves, IReadOnlyList<string> Log,
+    string Network, long BankReserve, IReadOnlyDictionary<string, List<int>> DeckOrder)
 {
     /// <summary>Total real on-chain transactions a live game of this length would broadcast.</summary>
     public int OnChainTxCount => Moves.Count;
@@ -71,9 +73,10 @@ public static class GamePlay
                 if (!v.Ok || v.Dice is null) throw new InvalidOperationException("beacon failed: " + v.Reason);
                 int[] dice = v.Dice; byte[] beacon = v.Beacon!;
 
-                // the commit set + reveal set + dice are the on-chain record of a fair roll
+                // the commit set + reveal set + dice are the on-chain record of a fair roll — carry the
+                // commits + reveals so ANY peer can re-derive and verify the dice from scratch (trustless)
                 moves.Add(new GameMove(state.TurnIndex, seat, state.Phase, "ROLL",
-                    TxProtocol.Stamp(TxType.Reveal, RollPayload(dice, beacon)), dice, beacon));
+                    TxProtocol.Stamp(TxType.Reveal, RollPayload(dice, beacon)), dice, beacon, commits, reveals));
                 prevBeacon = beacon;
 
                 var r = Engine.Apply(state, new Action("ROLL") { Dice = dice });
@@ -96,7 +99,8 @@ public static class GamePlay
         }
 
         bool finished = state.Phase == "GAME_OVER";
-        return new GameResult(seatCount, state.Winner, state.TurnIndex, finished, moves, state.Log);
+        return new GameResult(seatCount, state.Winner, state.TurnIndex, finished, moves, state.Log,
+            network, bankReserve, deckOrder);
     }
 
     // ---- deterministic bot policy (greedy, legal-only) ---------------------------------------
