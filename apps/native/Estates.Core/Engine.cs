@@ -409,6 +409,7 @@ public static class Engine
             "MORTGAGE" => DoMortgage(s, a.PropertyId),
             "UNMORTGAGE" => DoUnmortgage(s, a.PropertyId),
             "TRADE" => DoTrade(s, a.PropertyId, a.SeatIndex, a.Amount, a.Choice),
+            "USE_REPRIEVE" => DoUseReprieve(s),
             "FORFEIT" => DoForfeit(s),
             "END_TURN" => DoEndTurn(s),
             _ => ApplyResult.Reject("WRONG_PHASE", $"unknown action {a.Type}"),
@@ -649,6 +650,21 @@ public static class Engine
         SeatOf(s, seller).Balance += amount;
         t.Owner = buyer;
         Note(s, $"trade: seat {buyer} acquires {sp.Name} from seat {seller} for {amount}{(t.Mortgaged ? " (mortgaged)" : "")}");
+        return ApplyResult.OkState(s);
+    }
+
+    /// <summary>Spend a reprieve ("get out of the Holding Yard free") card to leave holding at no cost. Valid
+    /// only at the start of your turn while in the Holding Yard; you stay in AWAIT_ROLL and then roll and move
+    /// normally. Additive action — it does not change ROLL's existing doubles/pay behaviour, so a player who
+    /// holds reprieve cards now has a use for them.</summary>
+    private static ApplyResult DoUseReprieve(GameState s)
+    {
+        if (s.Phase != "AWAIT_ROLL") return ApplyResult.Reject("WRONG_PHASE", $"cannot use a reprieve in {s.Phase}");
+        var sc = SeatOf(s, s.Current);
+        if (!sc.InHolding) return ApplyResult.Reject("NOT_HOLDING", "not in the Holding Yard");
+        if (sc.ReprieveCards < 1) return ApplyResult.Reject("NO_REPRIEVE", "no reprieve cards");
+        sc.ReprieveCards -= 1; sc.InHolding = false; sc.HoldingTurns = 0;
+        Note(s, $"seat {s.Current} uses a reprieve card to leave the Holding Yard (free); may now roll");
         return ApplyResult.OkState(s);
     }
 

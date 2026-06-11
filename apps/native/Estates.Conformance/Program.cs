@@ -1362,6 +1362,29 @@ try
 }
 catch (Exception ex) { Console.Error.WriteLine($"TRADE FAIL: {ex.Message}"); gfail = 1; }
 
+// REPRIEVE CARD: a held "leave the Holding Yard free" card can actually be spent to leave at no cost.
+try
+{
+    var deck = new Dictionary<string, List<int>>();
+    foreach (var kv in Params.Instance.Decks) deck[kv.Key] = Enumerable.Range(0, kv.Value.Count).ToList();
+    var gs = Engine.InitialState("regtest", 2, 1_000_000, deck, false);
+    gs.Phase = "AWAIT_ROLL"; gs.Current = 0;
+    gs.Seats[0].InHolding = true; gs.Seats[0].HoldingTurns = 1; gs.Seats[0].ReprieveCards = 1;
+    long bal = gs.Seats[0].Balance;
+    var r = Engine.Apply(gs, new Estates.Core.Action("USE_REPRIEVE"));
+    bool freed = r.Ok && !r.State!.Seats[0].InHolding && r.State.Seats[0].ReprieveCards == 0
+                 && r.State.Seats[0].Balance == bal && r.State.Phase == "AWAIT_ROLL";
+    // with no card it must be rejected
+    var gs2 = Engine.InitialState("regtest", 2, 1_000_000, deck, false);
+    gs2.Phase = "AWAIT_ROLL"; gs2.Seats[0].InHolding = true;
+    bool rejNoCard = Engine.Apply(gs2, new Estates.Core.Action("USE_REPRIEVE")).Code == "NO_REPRIEVE";
+    if (freed && rejNoCard)
+        Console.WriteLine("REPRIEVE: a held reprieve card is spent to leave the Holding Yard free (then roll); no-card use REJECTED ✓");
+    else
+    { Console.Error.WriteLine($"REPRIEVE FAIL: freed={freed} rejNoCard={rejNoCard}"); gfail = 1; }
+}
+catch (Exception ex) { Console.Error.WriteLine($"REPRIEVE FAIL: {ex.Message}"); gfail = 1; }
+
 // FULL GAME -> REAL SIGNED BSV TX CHAIN: compile the whole game into actual signed transactions (one per
 // move), each FORKID-signed and locally spend-verified, threaded into a real change-spend chain. No node.
 try

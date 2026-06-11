@@ -449,6 +449,13 @@ public partial class MainWindow : Window
             string act = a; btn.Click += (_, _) => DoAction(act);
             bar.Children.Add(btn);
         }
+        // a held reprieve card lets you walk out of the Holding Yard for free, then roll normally
+        if (myTurn && g.Phase == "AWAIT_ROLL" && g.Seats[g.Current].InHolding && g.Seats[g.Current].ReprieveCards > 0)
+        {
+            var rb = new Button { Content = "🎟 Use reprieve card (leave holding free)", Margin = new Thickness(5), FontSize = 15, Background = B("#2e7d32"), Foreground = B("#ffffff") };
+            rb.Click += (_, _) => DoAction("USE_REPRIEVE");
+            bar.Children.Add(rb);
+        }
         if (g.Winner is null && g.Phase == "AWAIT_POST" && myTurn && !_botSeats.Contains(g.Current))
         {
             int bb = BestBuildGui(g);
