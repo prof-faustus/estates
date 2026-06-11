@@ -96,6 +96,20 @@ public sealed class GameSession
         return true;
     }
 
+    /// <summary>Apply a trade that BOTH players have agreed to (the consent happens out of band via offer/
+    /// accept frames). Because TRADE is deterministic and acts from the current seat, every peer that calls
+    /// this with the same (pid, counterparty, amount, choice) lands on the identical state — so the two
+    /// sessions stay in lock-step exactly like a signed move. Returns false (state unchanged) if the engine
+    /// rejects the trade (wrong owner, insolvent, buildings present, not the post-roll phase, …).</summary>
+    public bool Trade(int pid, int counterparty, long amount, string choice, out string reason)
+    {
+        reason = "ok";
+        var r = Engine.Apply(_state, new Action("TRADE") { PropertyId = pid, SeatIndex = counterparty, Amount = amount, Choice = choice });
+        if (!r.Ok) { reason = $"{r.Code} {r.Context}"; return false; }
+        _state = r.State!;
+        return true;
+    }
+
     private static byte[] Payload(string action, int propertyId, string? choice, int[]? dice, byte[] beacon)
     {
         // canonical, replayable move bytes wrapped in the typed protocol (same idea as GamePlay)

@@ -1554,6 +1554,34 @@ try
 }
 catch (Exception ex) { Console.Error.WriteLine($"MULTIPLAYER FAIL: {ex.Message}"); gfail = 1; }
 
+// NETWORKED TRADE: a trade both peers agree to is applied deterministically on each session, so the two stay
+// in lock-step (same as a signed move); an illegal agreed-trade is rejected identically on both sides.
+try
+{
+    var deck = new Dictionary<string, List<int>>();
+    foreach (var kv in Params.Instance.Decks) deck[kv.Key] = Enumerable.Range(0, kv.Value.Count).ToList();
+    var k = DeedNft.DeriveSeatKeys(SHA256.HashData("estates-trade-keys"u8.ToArray()), 2);
+    var A = new GameSession("regtest", 2, 1_000_000_000, new Dictionary<string, List<int>>(deck), k);
+    var B = new GameSession("regtest", 2, 1_000_000_000, new Dictionary<string, List<int>>(deck), k);
+    int pid = Params.Instance.Board.First(sp => sp.Type == "property" && sp.Group != null).Id;
+    foreach (var S in new[] { A, B }) { S.State.Phase = "AWAIT_POST"; S.State.Current = 0; S.State.Titles[pid].Owner = 0; }
+    // seat 0 sells pid to seat 1 for 50 — both peers apply the agreed trade (small price fits starting cash)
+    bool ra = A.Trade(pid, 1, 50, "sell", out var raWhy);
+    bool rb = B.Trade(pid, 1, 50, "sell", out _);
+    if (!ra) Console.Error.WriteLine($"TRADE-NET note: A.Trade rejected: {raWhy}");
+    bool synced = ra && rb
+        && A.State.Titles[pid].Owner == 1 && B.State.Titles[pid].Owner == 1
+        && A.State.Seats.Select(x => x.Balance).SequenceEqual(B.State.Seats.Select(x => x.Balance));
+    // an illegal agreed-trade (seat 1 doesn't own it anymore -> sell from 0 again is fine; instead try buying
+    // a developed property) is rejected the same on both
+    bool rejBoth = !A.Trade(pid, 5, 1, "buy", out _) && !B.Trade(pid, 5, 1, "buy", out _);   // seat 5 doesn't exist
+    if (synced && rejBoth)
+        Console.WriteLine("TRADE-NET: an agreed trade applied on both peers keeps them in lock-step; an illegal agreed-trade is rejected identically ✓");
+    else
+    { Console.Error.WriteLine($"TRADE-NET FAIL: synced={synced} rejBoth={rejBoth}"); gfail = 1; }
+}
+catch (Exception ex) { Console.Error.WriteLine($"TRADE-NET FAIL: {ex.Message}"); gfail = 1; }
+
 // WIRE: a whole multiplayer game driven across the network — every move serialised to bytes, sent, decoded,
 // and re-verified on the other side. Proves two SEPARATE machines can play (the packet round-trips exactly
 // and a byte-flipped packet on the wire is rejected).

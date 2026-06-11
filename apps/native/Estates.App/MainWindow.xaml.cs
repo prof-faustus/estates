@@ -310,6 +310,8 @@ public partial class MainWindow : Window
     private GameSession? _session;
     private int _mySeat = -1;
     private static readonly byte[] MoveFrameMagic = { 0xE5, 0x70, 0x4D, 0x56 };   // "ESMV" — a game-move frame
+    private static readonly byte[] TradeOfferMagic = { 0xE5, 0x70, 0x54, 0x4F };   // "ESTO" — a trade OFFER
+    private static readonly byte[] TradeAcceptMagic = { 0xE5, 0x70, 0x54, 0x41 };  // "ESTA" — a trade ACCEPT
     private readonly List<(int id, string name, string txid)> _heldNfts = new();   // deed/card NFTs you hold
     private string? _genesisTxid;   // local table id for the current game (no node)
     private MentalPokerHand? _mpHand;   // this table's dealerless, provably-shuffled ENCRYPTED card deck
@@ -502,9 +504,10 @@ public partial class MainWindow : Window
             }
 
             // TRADE — buy an undeveloped title from another player, or sell one of yours, for a cash price you
-            // set. The engine settles it atomically (ownership + solvency + no-buildings enforced). Local/vs-bots
-            // only for now (networked trade needs a propose/accept handshake), so it's hidden in a session game.
-            if (_session is null && g.Seats.Count(se => !se.Bankrupt) > 1)
+            // set. The engine settles it atomically (ownership + solvency + no-buildings enforced). In a local/
+            // vs-bots game it applies immediately; in a networked game it sends an OFFER the counterparty must
+            // accept (offer/accept handshake) before either session moves the title.
+            if (g.Seats.Count(se => !se.Bankrupt) > 1)
             {
                 var tradeables = Params.Instance.Board
                     .Where(sp => g.Titles.TryGetValue(sp.Id, out var tt) && tt.Owner is not null
@@ -528,10 +531,19 @@ public partial class MainWindow : Window
                     int SelParty() => partyBox.SelectedItem is ComboBoxItem ci && ci.Tag is int id ? id : -1;
                     long Price() => long.TryParse(priceBox.Text.Trim(), out var v) ? v : -1;
                     var rowB = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 3, 0, 0) };
-                    var buy = new Button { Content = "Buy (you pay owner)", Margin = new Thickness(3, 0, 3, 0), FontSize = 11, Padding = new Thickness(8, 2, 8, 2), Background = B("#2e7d32"), Foreground = B("#ffffff") };
-                    buy.Click += (_, _) => { int p = SelPid(); long pr = Price(); if (p >= 0 && pr >= 0) DoTradeGui(p, g.Titles[p].Owner!.Value, pr, "buy"); };
-                    var sell = new Button { Content = "Sell to seat (they pay you)", Margin = new Thickness(3, 0, 3, 0), FontSize = 11, Padding = new Thickness(8, 2, 8, 2), Background = B("#8a5a2b"), Foreground = B("#ffffff") };
-                    sell.Click += (_, _) => { int p = SelPid(); long pr = Price(); int party = SelParty(); if (p >= 0 && pr >= 0 && party >= 0) DoTradeGui(p, party, pr, "sell"); };
+                    // in a networked game these PROPOSE the trade to the counterparty; locally they apply at once
+                    void Trade(int p, int party, long pr, string dir)
+                    {
+                        if (_session is null) { DoTradeGui(p, party, pr, dir); return; }
+                        if (g.Current != _mySeat) { g.Log.Add("(you can only propose a trade on your own turn)"); RenderGame(); return; }
+                        _pendingOffer = (p, party, pr, dir);
+                        SendTrade(TradeOfferMagic, _mySeat, p, party, pr, dir);
+                        g.Log.Add($"trade offer sent to seat {party}: {dir} {Params.Instance.Board[p].Name} for {pr} sat — awaiting their accept"); RenderGame();
+                    }
+                    var buy = new Button { Content = _session is null ? "Buy (you pay owner)" : "Offer to buy", Margin = new Thickness(3, 0, 3, 0), FontSize = 11, Padding = new Thickness(8, 2, 8, 2), Background = B("#2e7d32"), Foreground = B("#ffffff") };
+                    buy.Click += (_, _) => { int p = SelPid(); long pr = Price(); if (p >= 0 && pr >= 0) Trade(p, g.Titles[p].Owner!.Value, pr, "buy"); };
+                    var sell = new Button { Content = _session is null ? "Sell to seat (they pay you)" : "Offer to sell", Margin = new Thickness(3, 0, 3, 0), FontSize = 11, Padding = new Thickness(8, 2, 8, 2), Background = B("#8a5a2b"), Foreground = B("#ffffff") };
+                    sell.Click += (_, _) => { int p = SelPid(); long pr = Price(); int party = SelParty(); if (p >= 0 && pr >= 0 && party >= 0) Trade(p, party, pr, "sell"); };
                     rowB.Children.Add(buy); rowB.Children.Add(sell);
                     tp.Children.Add(rowB);
                     inner.Children.Add(new Border { Background = B("#10322a"), CornerRadius = new CornerRadius(6), Padding = new Thickness(8), Margin = new Thickness(0, 0, 0, 8), Child = tp });
@@ -681,6 +693,68 @@ public partial class MainWindow : Window
             else { _game?.Log.Add($"(peer move REJECTED: {reason})"); RenderGame(); }
         }
         catch (System.Exception e) { App.CrashLog("game-move-recv", e); }
+    }
+
+    // ---- networked trade: an offer/accept handshake so the counterparty actually consents before a title
+    // moves. The proposer (whose turn it is) broadcasts an OFFER; the counterparty accepts, applies the agreed
+    // trade to its own session and echoes an ACCEPT; the proposer then applies the identical trade. Because the
+    // trade is deterministic from the current seat, both sessions land on the same state (proven by TRADE-NET).
+    private (int pid, int counterparty, long amount, string choice)? _pendingOffer;   // proposer's outstanding offer
+
+    private static byte[] TradeFrame(byte[] magic, int proposer, int pid, int counterparty, long amount, string choice)
+    {
+        var o = new List<byte>(magic);
+        void U16(int n) { o.Add((byte)(n >> 8)); o.Add((byte)n); }
+        U16(proposer); U16(pid); U16(counterparty); o.Add((byte)(choice == "sell" ? 1 : 0));
+        for (int i = 7; i >= 0; i--) o.Add((byte)(amount >> (i * 8)));
+        return o.ToArray();
+    }
+
+    private void SendTrade(byte[] magic, int proposer, int pid, int counterparty, long amount, string choice)
+    {
+        var frame = TradeFrame(magic, proposer, pid, counterparty, amount, choice);
+        foreach (var l in _node.LiveLinks()) { try { l.Send(frame); } catch { } }
+    }
+
+    private void OnTradeFrame(byte[] frame, bool isAccept)
+    {
+        if (_session is null) return;
+        int i = TradeOfferMagic.Length;
+        int U16() { int n = (frame[i] << 8) | frame[i + 1]; i += 2; return n; }
+        int proposer = U16(), pid = U16(), counterparty = U16();
+        string choice = frame[i++] == 1 ? "sell" : "buy";
+        long amount = 0; for (int k = 0; k < 8; k++) amount = (amount << 8) | frame[i++];
+        string nm = Params.Instance.Board[pid].Name;
+
+        if (!isAccept)
+        {
+            // I'm the counterparty being asked to consent. (Ignore offers not addressed to my seat.)
+            if (counterparty != _mySeat) return;
+            string verb = choice == "sell" ? $"BUY {nm} from seat {proposer}" : $"SELL {nm} to seat {proposer}";
+            long mine = choice == "sell" ? amount : -amount;   // sell→you pay; buy(theirs)→you receive
+            var ans = System.Windows.MessageBox.Show(
+                $"Seat {proposer} proposes that you {verb} for {amount} sat.\n(Your balance changes by {mine:+#;-#;0} sat.)\n\nAccept this trade?",
+                "Trade offer", System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Question);
+            if (ans != System.Windows.MessageBoxResult.Yes) { _game?.Log.Add($"you declined seat {proposer}'s trade for {nm}"); RenderGame(); return; }
+            if (_session.Trade(pid, counterparty, amount, choice, out string why))
+            {
+                _game = _session.State; _game.Log.Add($"trade accepted: {nm} (synced)");
+                SendTrade(TradeAcceptMagic, proposer, pid, counterparty, amount, choice);   // tell the proposer to apply it
+                RenderGame();
+            }
+            else { _game?.Log.Add($"(trade not legal: {why})"); RenderGame(); }
+        }
+        else
+        {
+            // I'm the proposer; the counterparty accepted — apply the identical trade so we stay in sync.
+            if (proposer != _mySeat) return;
+            if (_pendingOffer is null) return;
+            if (_session.Trade(pid, counterparty, amount, choice, out string why))
+            { _game = _session.State; _game.Log.Add($"your trade for {nm} was accepted (synced)"); }
+            else _game?.Log.Add($"(your accepted trade failed: {why})");
+            _pendingOffer = null;
+            RenderGame();
+        }
     }
 
     /// <summary>If it's a computer seat's turn, take one bot action after a short pause so you can watch the
@@ -2738,6 +2812,10 @@ public partial class MainWindow : Window
             // a verified game-move frame (prefixed with the move magic) → route to the session, not the tx path
             if (frame.Length >= MoveFrameMagic.Length && frame.AsSpan(0, MoveFrameMagic.Length).SequenceEqual(MoveFrameMagic))
             { OnMoveFrame(frame); return; }
+            if (frame.Length >= TradeOfferMagic.Length && frame.AsSpan(0, TradeOfferMagic.Length).SequenceEqual(TradeOfferMagic))
+            { OnTradeFrame(frame, isAccept: false); return; }
+            if (frame.Length >= TradeAcceptMagic.Length && frame.AsSpan(0, TradeAcceptMagic.Length).SequenceEqual(TradeAcceptMagic))
+            { OnTradeFrame(frame, isAccept: true); return; }
             var tx = Tx.Parse(frame);
             if (tx is null) return;
             var ex = TxTransport.Extract(tx, _master);
