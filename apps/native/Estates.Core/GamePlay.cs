@@ -24,7 +24,7 @@ public sealed record GameMove(int Turn, int Seat, string Phase, string Action,
 public sealed record GameResult(int Seats, int? Winner, int Turns, bool Finished,
     IReadOnlyList<GameMove> Moves, IReadOnlyList<string> Log,
     string Network, long BankReserve, IReadOnlyDictionary<string, List<int>> DeckOrder,
-    IReadOnlyDictionary<int, int> FinalOwners)
+    IReadOnlyDictionary<int, int> FinalOwners, bool AuctionsEnabled = false)
 {
     /// <summary>Total real on-chain transactions a live game of this length would broadcast.</summary>
     public int OnChainTxCount => Moves.Count;
@@ -168,7 +168,7 @@ public static class GamePlay
         };
 
     // ---- on-chain payloads (typed, self-describing) ----------------------------------------
-    private static TxType TxTypeFor(string action) => action switch
+    public static TxType TxTypeFor(string action) => action switch
     {
         "BUY" or "BUILD" or "SELL_BUILD" or "MORTGAGE" or "UNMORTGAGE" => TxType.Move,
         "PAY_TAX" => TxType.Move,
@@ -176,25 +176,35 @@ public static class GamePlay
         _ => TxType.Move,
     };
 
-    private static byte[] ActionPayload(Action a)
+    public static byte[] ActionPayload(Action a)
     {
-        // compact, replayable encoding of the move: <typeLen><type><propertyId(4)><choice?>
+        // compact, replayable encoding of the move: <typeLen><type><propertyId(4)><choice?>. TRADE and BID
+        // additionally carry <choiceLen><choice><seatIndex(4)><amount(8)> so the counterparty + price round-
+        // trip through the transcript; every other action keeps the exact original bytes (so the audited
+        // GAME-TX / TRUSTLESS replay is unchanged).
         var bytes = new List<byte>();
         var t = System.Text.Encoding.ASCII.GetBytes(a.Type);
         bytes.Add((byte)t.Length); bytes.AddRange(t);
         bytes.AddRange(U32(a.PropertyId));
-        if (a.Choice != null) { var c = System.Text.Encoding.ASCII.GetBytes(a.Choice); bytes.Add((byte)c.Length); bytes.AddRange(c); }
+        if (a.Type is "TRADE" or "BID")
+        {
+            var c = a.Choice is null ? System.Array.Empty<byte>() : System.Text.Encoding.ASCII.GetBytes(a.Choice);
+            bytes.Add((byte)c.Length); bytes.AddRange(c);
+            bytes.AddRange(U32(a.SeatIndex));
+            bytes.AddRange(U64(a.Amount));
+        }
+        else if (a.Choice != null) { var c = System.Text.Encoding.ASCII.GetBytes(a.Choice); bytes.Add((byte)c.Length); bytes.AddRange(c); }
         return bytes.ToArray();
     }
 
-    private static byte[] RollPayload(int[] dice, byte[] beacon)
+    public static byte[] RollPayload(int[] dice, byte[] beacon)
     {
         var b = new List<byte> { (byte)dice[0], (byte)dice[1] };
         b.AddRange(beacon);   // the chained beacon = the verifiable seed
         return b.ToArray();
     }
 
-    private static byte[] GameStartPayload(int seats, long reserve, Dictionary<string, List<int>> deckOrder)
+    public static byte[] GameStartPayload(int seats, long reserve, Dictionary<string, List<int>> deckOrder)
     {
         var b = new List<byte> { (byte)seats };
         b.AddRange(U64(reserve));

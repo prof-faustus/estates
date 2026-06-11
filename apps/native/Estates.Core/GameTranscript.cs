@@ -25,6 +25,7 @@ public static class GameTranscript
         {
             var state = Engine.InitialState(g.Network, g.Seats, g.BankReserve,
                 new Dictionary<string, List<int>>(g.DeckOrder), requireFairDecks: true);
+            state.AuctionsEnabled = g.AuctionsEnabled;   // so a DECLINE replays into an auction, as it did live
             byte[] prevBeacon = Beacon.ZeroBeacon;
             int rolls = 0, replayed = 0;
 
@@ -75,8 +76,18 @@ public static class GameTranscript
         if (i + typeLen + 4 > p.Length) return null;
         string type = System.Text.Encoding.ASCII.GetString(p, i, typeLen); i += typeLen;
         int propId = (p[i] << 24) | (p[i + 1] << 16) | (p[i + 2] << 8) | p[i + 3]; i += 4;
-        string? choice = null;
-        if (i < p.Length) { int cl = p[i++]; if (i + cl <= p.Length) choice = System.Text.Encoding.ASCII.GetString(p, i, cl); }
+        string? choice = null; int seatIndex = 0; long amount = 0;
+        if (type is "TRADE" or "BID")
+        {
+            // extended layout: <choiceLen><choice><seatIndex(4)><amount(8)>
+            if (i >= p.Length) return null;
+            int cl = p[i++]; if (i + cl + 12 > p.Length) return null;
+            if (cl > 0) choice = System.Text.Encoding.ASCII.GetString(p, i, cl);
+            i += cl;
+            seatIndex = (p[i] << 24) | (p[i + 1] << 16) | (p[i + 2] << 8) | p[i + 3]; i += 4;
+            for (int k = 0; k < 8; k++) amount = (amount << 8) | p[i++];
+        }
+        else if (i < p.Length) { int cl = p[i++]; if (i + cl <= p.Length) choice = System.Text.Encoding.ASCII.GetString(p, i, cl); }
         return type switch
         {
             "BUY" => new Action("BUY"),
@@ -86,6 +97,10 @@ public static class GameTranscript
             "SELL_BUILD" => new Action("SELL_BUILD") { PropertyId = propId },
             "MORTGAGE" => new Action("MORTGAGE") { PropertyId = propId },
             "UNMORTGAGE" => new Action("UNMORTGAGE") { PropertyId = propId },
+            "TRADE" => new Action("TRADE") { PropertyId = propId, SeatIndex = seatIndex, Amount = amount, Choice = choice },
+            "USE_REPRIEVE" => new Action("USE_REPRIEVE"),
+            "BID" => new Action("BID") { Amount = amount },
+            "PASS_BID" => new Action("PASS_BID"),
             "END_TURN" => new Action("END_TURN"),
             "FORFEIT" => new Action("FORFEIT"),
             _ => new Action(type),

@@ -305,6 +305,11 @@ public partial class MainWindow : Window
     private GameState? _game;
     private byte[] _prevBeacon = Beacon.ZeroBeacon;   // chained dealerless dice beacon for the live game
     private readonly HashSet<int> _botSeats = new();   // seats the computer plays (so you can play solo)
+    // ---- on-chain transcript of the LIVE local game: every move recorded as the same GameMove the engine's
+    // trustless verifier replays, so a finished game can be settled/verified on-chain from the UI.
+    private List<GameMove>? _moves;
+    private Dictionary<string, List<int>>? _deckOrderUsed;
+    private int[]? _lastDice; private byte[]? _lastBeacon; private List<Commitment>? _lastCommits; private List<Reveal>? _lastReveals;
     // ---- networked play: when _session is non-null the game is over the network (verified P2P), and _mySeat
     // is the only seat you control. Moves go out over the _node links and incoming peer moves are re-verified.
     private GameSession? _session;
@@ -350,6 +355,10 @@ public partial class MainWindow : Window
             _game = Engine.InitialState(network, seats, 1_000_000, deckOrder, false);
             _game.AuctionsEnabled = true;   // declined titles go to auction (local/vs-bots)
             for (int i = 1; i < seats; i++) _botSeats.Add(i);   // you are seat 0; the rest are played by the computer
+            // open the on-chain transcript for this game (GAME_START = seats, reserve, committed deck hashes)
+            _deckOrderUsed = deckOrder.ToDictionary(kv => kv.Key, kv => new List<int>(kv.Value));
+            _moves = new List<GameMove> { new GameMove(0, 0, _game.Phase, "GAME_START",
+                TxProtocol.Stamp(TxType.GameStart, GamePlay.GameStartPayload(seats, 1_000_000, _deckOrderUsed))) };
         }
         RenderGame();
         Tabs.SelectedIndex = 1;
@@ -441,6 +450,12 @@ public partial class MainWindow : Window
             inner.Children.Add(new TextBlock { Text = $"🔒 your title deeds: {myDeeds} encrypted NFTs — only you can open them", Foreground = B("#b9f6ca"), FontSize = 12, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 6, 0, 4) });
         if (g.LastRoll is int[] r) inner.Children.Add(new TextBlock { Text = $"▶ dice  {r[0]} + {r[1]} = {r[0] + r[1]}  (provably fair · beacon)", Foreground = B("#ffd54f"), FontSize = 18, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 12, 0, 8) });
         if (g.Winner is int w) inner.Children.Add(new TextBlock { Text = $"Winner: Seat {w}", Foreground = B("#ffd54f"), FontSize = 20, FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center });
+        if (g.Winner is not null && _moves is { Count: > 1 })
+        {
+            var settle = new Button { Content = $"⛓ Settle & verify on-chain ({_moves.Count} txs)", Margin = new Thickness(0, 8, 0, 4), FontSize = 14, Padding = new Thickness(12, 4, 12, 4), Background = B("#2d6cdf"), Foreground = B("#ffffff"), HorizontalAlignment = HorizontalAlignment.Center };
+            settle.Click += (_, _) => VerifyTranscriptGui();
+            inner.Children.Add(settle);
+        }
         var bar = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 12, 0, 10) };
         bool myTurn = _session is null || g.Current == _mySeat;   // networked: you can only act on your own seat
         if (_session is not null)
@@ -592,7 +607,7 @@ public partial class MainWindow : Window
         }
 
         var leave = new Button { Content = "Leave game", HorizontalAlignment = HorizontalAlignment.Center, Background = B("#3a3d42") };
-        leave.Click += (_, _) => { _game = null; _session = null; _mySeat = -1; GameHost.Content = null; Tabs.SelectedIndex = 0; RefreshNodes(); };
+        leave.Click += (_, _) => { _game = null; _session = null; _mySeat = -1; _moves = null; _deckOrderUsed = null; GameHost.Content = null; Tabs.SelectedIndex = 0; RefreshNodes(); };
         inner.Children.Add(leave);
         return new Border { Background = B("#14532d"), Child = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = inner } };
     }
@@ -612,9 +627,50 @@ public partial class MainWindow : Window
         var g = _game!;
         var live = g.Seats.Where(s => !s.Bankrupt).Select(s => s.Id).ToList();
         var reveals = live.Select(id => new Reveal(id, System.Security.Cryptography.RandomNumberGenerator.GetBytes(32))).ToList();
+        var commits = reveals.Select(rv => new Commitment(rv.Seat, Beacon.Commit(rv.Secret))).ToList();
         var (dice, beacon) = Beacon.Roll(reveals, g.TurnIndex, _prevBeacon);
+        _lastDice = dice; _lastBeacon = beacon; _lastCommits = commits; _lastReveals = reveals;   // for the transcript
         _prevBeacon = beacon;
         return dice;
+    }
+
+    /// <summary>Record an applied move into the live game's on-chain transcript (same GameMove the trustless
+    /// verifier replays). pre = the state BEFORE the move was applied.</summary>
+    private void RecordMove(GameState pre, Estates.Core.Action a)
+    {
+        if (_moves is null) return;
+        int seat = pre.Phase == "AWAIT_AUCTION" ? pre.AuctionActor : pre.Current;
+        if (a.Type == "ROLL" && _lastDice != null && _lastBeacon != null)
+            _moves.Add(new GameMove(pre.TurnIndex, seat, pre.Phase, "ROLL",
+                TxProtocol.Stamp(TxType.Reveal, GamePlay.RollPayload(_lastDice, _lastBeacon)), _lastDice, _lastBeacon, _lastCommits, _lastReveals));
+        else
+            _moves.Add(new GameMove(pre.TurnIndex, seat, pre.Phase, a.Type,
+                TxProtocol.Stamp(GamePlay.TxTypeFor(a.Type), GamePlay.ActionPayload(a))));
+    }
+
+    /// <summary>Settle the finished game on-chain: assemble the recorded transcript and run the SAME trustless
+    /// verifier any peer would — it re-derives every die from the beacon reveals, decodes each move from its
+    /// on-chain payload, replays the engine, and confirms the winner. Proves the whole game is real on-chain,
+    /// not just asserted.</summary>
+    private void VerifyTranscriptGui()
+    {
+        var g = _game;
+        if (g is null || _moves is null || _deckOrderUsed is null) return;
+        try
+        {
+            var finalOwners = g.Titles.Where(kv => kv.Value.Owner is not null).ToDictionary(kv => kv.Key, kv => kv.Value.Owner!.Value);
+            var gr = new GameResult(g.Seats.Count, g.Winner, g.TurnIndex, g.Phase == "GAME_OVER",
+                _moves, g.Log, g.Network, 1_000_000, _deckOrderUsed, finalOwners, AuctionsEnabled: true);
+            var tr = GameTranscript.Verify(gr);
+            string msg = tr.Ok
+                ? $"VERIFIED TRUSTLESS ✓\n\n{_moves.Count} on-chain transactions\n{tr.RollsVerified} dice rolls re-derived from the beacon\n{tr.MovesReplayed} moves replayed\nwinner = Seat {tr.Winner} (matches)\n\nAnyone can replay this transcript and reach the same result — no trust required."
+                : $"verification FAILED: {tr.Reason}";
+            g.Log.Add(tr.Ok ? $"on-chain settle: VERIFIED ✓ ({_moves.Count} txs, {tr.RollsVerified} rolls, winner seat {tr.Winner})" : $"on-chain settle FAILED: {tr.Reason}");
+            RenderGame();
+            System.Windows.MessageBox.Show(msg, "On-chain settlement", System.Windows.MessageBoxButton.OK,
+                tr.Ok ? System.Windows.MessageBoxImage.Information : System.Windows.MessageBoxImage.Warning);
+        }
+        catch (System.Exception ex) { g.Log.Add($"settle error: {ex.Message}"); RenderGame(); }
     }
 
     private void DoAction(string type, long amount = 0)
@@ -650,6 +706,7 @@ public partial class MainWindow : Window
         var res = Engine.Apply(g, a);
         if (res.Ok && res.State is not null)
         {
+            RecordMove(g, a);   // append to the on-chain transcript before state advances
             _game = res.State;
             // STANDALONE: the move is a signed action applied locally and (in a multiplayer game)
             // sent to peers over the direct P2P link. The real BSV move/NFT transactions are built
@@ -856,8 +913,9 @@ public partial class MainWindow : Window
             RenderGame();
             return;
         }
-        var res = Engine.Apply(g, new Estates.Core.Action(action) { PropertyId = pid });
-        if (res.Ok && res.State is not null) { _game = res.State; _game.Log.Add($"{verb} {nm}"); }
+        var ta = new Estates.Core.Action(action) { PropertyId = pid };
+        var res = Engine.Apply(g, ta);
+        if (res.Ok && res.State is not null) { RecordMove(g, ta); _game = res.State; _game.Log.Add($"{verb} {nm}"); }
         else g.Log.Add($"({action.ToLower()} rejected: {res.Code})");
         RenderGame();
         ScheduleBots();
@@ -869,8 +927,9 @@ public partial class MainWindow : Window
     private void DoTradeGui(int pid, int counterparty, long amount, string dir)
     {
         var g = _game; if (g is null) return;
-        var res = Engine.Apply(g, new Estates.Core.Action("TRADE") { PropertyId = pid, SeatIndex = counterparty, Amount = amount, Choice = dir });
-        if (res.Ok && res.State is not null) _game = res.State;
+        var tr = new Estates.Core.Action("TRADE") { PropertyId = pid, SeatIndex = counterparty, Amount = amount, Choice = dir };
+        var res = Engine.Apply(g, tr);
+        if (res.Ok && res.State is not null) { RecordMove(g, tr); _game = res.State; }
         else g.Log.Add($"(trade rejected: {res.Code} {res.Context})");
         RenderGame();
         ScheduleBots();
