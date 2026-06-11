@@ -1411,6 +1411,71 @@ try
 }
 catch (Exception ex) { Console.Error.WriteLine($"AUCTION FAIL: {ex.Message}"); gfail = 1; }
 
+// SETTLE-WITH-EXTRAS: a recorded game that INCLUDES auction (BID/PASS_BID) and TRADE moves replays + verifies
+// from its on-chain transcript — proving the extended payload round-trips the counterparty + amount the GUI's
+// "Settle & verify on-chain" relies on. Mirrors exactly how the live game records moves.
+try
+{
+    var deck = new Dictionary<string, List<int>>();
+    foreach (var kv in Params.Instance.Decks) deck[kv.Key] = Enumerable.Range(0, kv.Value.Count).ToList();
+    var st = Engine.InitialState("regtest", 3, 1_000_000, deck, false); st.AuctionsEnabled = true;
+    var moves = new List<GameMove> { new(0, 0, st.Phase, "GAME_START", TxProtocol.Stamp(TxType.GameStart, GamePlay.GameStartPayload(3, 1_000_000, deck))) };
+    byte[] prev = Beacon.ZeroBeacon;
+    var rng = new System.Random(7);
+    void Rec(GameState pre, Estates.Core.Action a, int[]? d = null, byte[]? bc = null, IReadOnlyList<Commitment>? c = null, IReadOnlyList<Reveal>? r = null)
+    {
+        int seat = pre.Phase == "AWAIT_AUCTION" ? pre.AuctionActor : pre.Current;
+        moves.Add(a.Type == "ROLL"
+            ? new GameMove(pre.TurnIndex, seat, pre.Phase, "ROLL", TxProtocol.Stamp(TxType.Reveal, GamePlay.RollPayload(d!, bc!)), d, bc, c, r)
+            : new GameMove(pre.TurnIndex, seat, pre.Phase, a.Type, TxProtocol.Stamp(GamePlay.TxTypeFor(a.Type), GamePlay.ActionPayload(a))));
+    }
+    bool tradedOnce = false; int guard = 0; int bids = 0;
+    while (st.Phase != "GAME_OVER" && guard++ < 1500)
+    {
+        if (st.Phase == "AWAIT_ROLL")
+        {
+            var live = st.Seats.Where(x => !x.Bankrupt).Select(x => x.Id).ToList();
+            var reveals = live.Select(id => new Reveal(id, Guid.NewGuid().ToByteArray().Concat(Guid.NewGuid().ToByteArray()).ToArray())).ToList();
+            var commits = reveals.Select(rv => new Commitment(rv.Seat, Beacon.Commit(rv.Secret))).ToList();
+            var v = Beacon.VerifyRollEntry(commits, reveals, live, st.TurnIndex, prev);
+            var pre = st; Rec(pre, new Estates.Core.Action("ROLL"), v.Dice, v.Beacon, commits, reveals); prev = v.Beacon!;
+            st = Engine.Apply(st, new Estates.Core.Action("ROLL") { Dice = v.Dice }).State!;
+            continue;
+        }
+        Estates.Core.Action act = st.Phase switch
+        {
+            "AWAIT_BUY" => st.Seats[st.Current].Balance >= (Params.Instance.Board[st.PendingTitle ?? 0].BasePrice ?? 0) && rng.Next(2) == 0 ? new Estates.Core.Action("BUY") : new Estates.Core.Action("DECLINE"),
+            "AWAIT_TAX" => new Estates.Core.Action("PAY_TAX") { Choice = "flat" },
+            "AWAIT_AUCTION" => (bids < 200 && st.AuctionHighSeat != st.AuctionActor && st.Seats[st.AuctionActor].Balance > st.AuctionHighBid + 10 && rng.Next(3) != 0)
+                ? new Estates.Core.Action("BID") { Amount = st.AuctionHighBid + 10 } : new Estates.Core.Action("PASS_BID"),
+            _ => new Estates.Core.Action("END_TURN"),
+        };
+        // sprinkle in a real TRADE between two solvent seats once, to exercise the extended payload
+        if (!tradedOnce && st.Phase == "AWAIT_POST")
+        {
+            var mine = Params.Instance.Board.FirstOrDefault(sp => st.Titles.TryGetValue(sp.Id, out var t) && t.Owner == st.Current && t.BuildLevel == 0
+                       && (sp.Group == null || Params.Instance.Groups[sp.Group].MemberPropertyIds.All(m => st.Titles[m].BuildLevel == 0)));
+            int other = st.Seats.FirstOrDefault(x => x.Id != st.Current && !x.Bankrupt)?.Id ?? -1;
+            if (mine != null && other >= 0 && st.Seats[other].Balance > 20)
+            { act = new Estates.Core.Action("TRADE") { PropertyId = mine.Id, SeatIndex = other, Amount = 15, Choice = "sell" }; tradedOnce = true; }
+        }
+        if (act.Type == "BID") bids++;
+        var preA = st; var res = Engine.Apply(st, act);
+        if (!res.Ok) { act = new Estates.Core.Action("END_TURN"); preA = st; res = Engine.Apply(st, act); if (!res.Ok) break; }
+        Rec(preA, act); st = res.State!;
+    }
+    var finalOwners = st.Titles.Where(kv => kv.Value.Owner is not null).ToDictionary(kv => kv.Key, kv => kv.Value.Owner!.Value);
+    var gr = new GameResult(3, st.Winner, st.TurnIndex, st.Phase == "GAME_OVER", moves, st.Log, "regtest", 1_000_000, deck, finalOwners, AuctionsEnabled: true);
+    var tv = GameTranscript.Verify(gr);
+    bool hadAuction = moves.Any(m => m.Action == "BID" || m.Action == "PASS_BID");
+    bool hadTrade = moves.Any(m => m.Action == "TRADE");
+    if (tv.Ok && hadTrade && hadAuction)
+        Console.WriteLine($"SETTLE: a recorded game with {moves.Count} txs (incl. trades + auction bids) verified trustless from its transcript — {tv.RollsVerified} rolls re-derived, {tv.MovesReplayed} moves replayed ✓");
+    else
+    { Console.Error.WriteLine($"SETTLE FAIL: ok={tv.Ok} reason={tv.Reason} hadTrade={hadTrade} hadAuction={hadAuction}"); gfail = 1; }
+}
+catch (Exception ex) { Console.Error.WriteLine($"SETTLE FAIL: {ex.Message}"); gfail = 1; }
+
 // FULL GAME -> REAL SIGNED BSV TX CHAIN: compile the whole game into actual signed transactions (one per
 // move), each FORKID-signed and locally spend-verified, threaded into a real change-spend chain. No node.
 try
