@@ -1336,6 +1336,32 @@ try
 }
 catch (Exception ex) { Console.Error.WriteLine($"GAME FAIL: {ex.Message}"); gfail = 1; }
 
+// PLAYER-TO-PLAYER TRADE: an undeveloped title changes hands for cash, atomically; illegal trades rejected.
+try
+{
+    var deck = new Dictionary<string, List<int>>();
+    foreach (var kv in Params.Instance.Decks) deck[kv.Key] = Enumerable.Range(0, kv.Value.Count).ToList();
+    var gs = Engine.InitialState("regtest", 2, 1_000_000, deck, false);
+    gs.Phase = "AWAIT_POST"; gs.Current = 0;
+    int pid = Params.Instance.Board.First(sp => sp.Type == "property" && sp.Group != null).Id;
+    gs.Titles[pid].Owner = 0;
+    long b0 = gs.Seats[0].Balance, b1 = gs.Seats[1].Balance;
+    long price = System.Math.Min(b1 / 4, 100);                  // affordable within starting cash
+    var rSell = Engine.Apply(gs, new Estates.Core.Action("TRADE") { PropertyId = pid, SeatIndex = 1, Amount = price, Choice = "sell" });
+    bool sold = rSell.Ok && rSell.State!.Titles[pid].Owner == 1 && rSell.State.Seats[0].Balance == b0 + price && rSell.State.Seats[1].Balance == b1 - price;
+    var gs2 = rSell.State ?? gs;
+    var rBuy = Engine.Apply(gs2, new Estates.Core.Action("TRADE") { PropertyId = pid, SeatIndex = 1, Amount = price, Choice = "buy" });
+    bool bought = rBuy.Ok && rBuy.State!.Titles[pid].Owner == 0;
+    var gs3 = rBuy.State ?? gs2;
+    bool rejPoor = !Engine.Apply(gs3, new Estates.Core.Action("TRADE") { PropertyId = pid, SeatIndex = 1, Amount = 999_999_999, Choice = "buy" }).Ok;
+    bool rejSelf = Engine.Apply(gs3, new Estates.Core.Action("TRADE") { PropertyId = pid, SeatIndex = 0, Amount = 1, Choice = "sell" }).Code == "SELF_TRADE";
+    if (sold && bought && rejPoor && rejSelf)
+        Console.WriteLine("TRADE: an undeveloped title changed hands for cash both ways (sell + buy back), settled atomically; self-trade + insolvent trade REJECTED ✓");
+    else
+    { Console.Error.WriteLine($"TRADE FAIL: sold={sold} bought={bought} rejPoor={rejPoor} rejSelf={rejSelf}"); gfail = 1; }
+}
+catch (Exception ex) { Console.Error.WriteLine($"TRADE FAIL: {ex.Message}"); gfail = 1; }
+
 // FULL GAME -> REAL SIGNED BSV TX CHAIN: compile the whole game into actual signed transactions (one per
 // move), each FORKID-signed and locally spend-verified, threaded into a real change-spend chain. No node.
 try

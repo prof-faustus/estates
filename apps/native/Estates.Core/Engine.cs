@@ -81,7 +81,8 @@ public sealed record Action(string Type)
     public int[]? Dice { get; init; }
     public string? Choice { get; init; }        // PAY_TAX: "flat" | "percent"
     public int PropertyId { get; init; }
-    public int SeatIndex { get; init; }          // LEAVE
+    public int SeatIndex { get; init; }          // LEAVE; TRADE: the counterparty seat
+    public long Amount { get; init; }            // TRADE: cash that changes hands
 }
 
 public sealed class ApplyResult
@@ -407,6 +408,7 @@ public static class Engine
             "SELL_BUILD" => DoSellBuild(s, a.PropertyId),
             "MORTGAGE" => DoMortgage(s, a.PropertyId),
             "UNMORTGAGE" => DoUnmortgage(s, a.PropertyId),
+            "TRADE" => DoTrade(s, a.PropertyId, a.SeatIndex, a.Amount, a.Choice),
             "FORFEIT" => DoForfeit(s),
             "END_TURN" => DoEndTurn(s),
             _ => ApplyResult.Reject("WRONG_PHASE", $"unknown action {a.Type}"),
@@ -615,6 +617,38 @@ public static class Engine
         SeatOf(s, id).Balance -= cost;
         s.BankReserve += cost; t.Mortgaged = false;
         Note(s, $"seat {id} lifts mortgage on {sp.Name} for {cost}");
+        return ApplyResult.OkState(s);
+    }
+
+    /// <summary>Player-to-player trade of a single undeveloped title for cash, settled atomically. choice="buy"
+    /// means the current seat BUYS pid from counterparty (current pays amount); choice="sell" means the current
+    /// seat SELLS pid (which it owns) to counterparty (counterparty pays amount). Either party may have a
+    /// mortgaged title, but a property carrying buildings — or whose colour group carries buildings — can't be
+    /// traded (sell the buildings first), exactly as the build rules require. The consenting/agreement happens
+    /// at the table (UI / peer); the engine enforces ownership, solvency and the no-buildings rule.</summary>
+    private static ApplyResult DoTrade(GameState s, int pid, int counterparty, long amount, string? choice)
+    {
+        if (s.Phase != "AWAIT_POST") return ApplyResult.Reject("WRONG_PHASE", $"cannot TRADE in {s.Phase}");
+        if (pid < 0 || pid >= P.Board.Count) return ApplyResult.Reject("NO_SUCH_TITLE", $"{pid}");
+        var sp = P.Board[pid]; if (!IsTitled(sp)) return ApplyResult.Reject("NOT_TITLED_SPACE", $"{sp.Name} is not a title");
+        if (amount < 0) return ApplyResult.Reject("BAD_AMOUNT", "negative price");
+        int me = s.Current;
+        if (counterparty < 0 || counterparty >= s.Seats.Count) return ApplyResult.Reject("NO_SUCH_SEAT", $"{counterparty}");
+        if (counterparty == me) return ApplyResult.Reject("SELF_TRADE", "cannot trade with yourself");
+        if (SeatOf(s, counterparty).Bankrupt) return ApplyResult.Reject("SEAT_OUT", $"seat {counterparty} is out");
+        var t = s.Titles[pid];
+        // can't move a developed title (and not if any sibling in the group is developed)
+        if (sp.Group != null && MembersOf(sp.Group).Any(m => s.Titles[m].BuildLevel > 0))
+            return ApplyResult.Reject("HAS_BUILDINGS", $"sell buildings in {sp.Group} before trading");
+        bool buy = (choice ?? "buy") == "buy";
+        int seller = buy ? counterparty : me;
+        int buyer = buy ? me : counterparty;
+        if (t.Owner != seller) return ApplyResult.Reject("NOT_OWNER", $"seat {seller} does not own {sp.Name}");
+        if (SeatOf(s, buyer).Balance < amount) return ApplyResult.Reject("INSUFFICIENT_FUNDS", $"seat {buyer} needs {amount}");
+        SeatOf(s, buyer).Balance -= amount;
+        SeatOf(s, seller).Balance += amount;
+        t.Owner = buyer;
+        Note(s, $"trade: seat {buyer} acquires {sp.Name} from seat {seller} for {amount}{(t.Mortgaged ? " (mortgaged)" : "")}");
         return ApplyResult.OkState(s);
     }
 

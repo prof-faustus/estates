@@ -493,6 +493,43 @@ public partial class MainWindow : Window
                 }
                 inner.Children.Add(new Border { Background = B("#0f3d22"), CornerRadius = new CornerRadius(6), Padding = new Thickness(8), Margin = new Thickness(0, 0, 0, 8), Child = mgr });
             }
+
+            // TRADE — buy an undeveloped title from another player, or sell one of yours, for a cash price you
+            // set. The engine settles it atomically (ownership + solvency + no-buildings enforced). Local/vs-bots
+            // only for now (networked trade needs a propose/accept handshake), so it's hidden in a session game.
+            if (_session is null && g.Seats.Count(se => !se.Bankrupt) > 1)
+            {
+                var tradeables = Params.Instance.Board
+                    .Where(sp => g.Titles.TryGetValue(sp.Id, out var tt) && tt.Owner is not null
+                                 && !(sp.Group != null && Params.Instance.Groups.TryGetValue(sp.Group, out var gg2) && gg2.MemberPropertyIds.Any(m => g.Titles[m].BuildLevel > 0)))
+                    .ToList();
+                if (tradeables.Count > 0)
+                {
+                    var tp = new StackPanel { Margin = new Thickness(0, 2, 0, 2) };
+                    tp.Children.Add(new TextBlock { Text = "Trade with another player", Foreground = B("#ffd54f"), FontSize = 14, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 4) });
+                    var propBox = new ComboBox { Width = 240, Margin = new Thickness(2), FontSize = 12 };
+                    foreach (var sp in tradeables) propBox.Items.Add(new ComboBoxItem { Content = $"{sp.Name}  (owner: seat {g.Titles[sp.Id].Owner})", Tag = sp.Id });
+                    propBox.SelectedIndex = 0;
+                    var priceBox = new TextBox { Width = 90, Margin = new Thickness(2), FontSize = 12, Text = "10000", ToolTip = "price in sat" };
+                    var partyBox = new ComboBox { Width = 110, Margin = new Thickness(2), FontSize = 12 };
+                    foreach (var se in g.Seats.Where(se => se.Id != mySeatNow && !se.Bankrupt)) partyBox.Items.Add(new ComboBoxItem { Content = $"seat {se.Id}", Tag = se.Id });
+                    if (partyBox.Items.Count > 0) partyBox.SelectedIndex = 0;
+                    var rowT = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Center };
+                    rowT.Children.Add(propBox); rowT.Children.Add(new TextBlock { Text = "price", Foreground = B("#cfe8d4"), FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 2, 0) }); rowT.Children.Add(priceBox); rowT.Children.Add(partyBox);
+                    tp.Children.Add(rowT);
+                    int SelPid() => propBox.SelectedItem is ComboBoxItem ci && ci.Tag is int id ? id : -1;
+                    int SelParty() => partyBox.SelectedItem is ComboBoxItem ci && ci.Tag is int id ? id : -1;
+                    long Price() => long.TryParse(priceBox.Text.Trim(), out var v) ? v : -1;
+                    var rowB = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 3, 0, 0) };
+                    var buy = new Button { Content = "Buy (you pay owner)", Margin = new Thickness(3, 0, 3, 0), FontSize = 11, Padding = new Thickness(8, 2, 8, 2), Background = B("#2e7d32"), Foreground = B("#ffffff") };
+                    buy.Click += (_, _) => { int p = SelPid(); long pr = Price(); if (p >= 0 && pr >= 0) DoTradeGui(p, g.Titles[p].Owner!.Value, pr, "buy"); };
+                    var sell = new Button { Content = "Sell to seat (they pay you)", Margin = new Thickness(3, 0, 3, 0), FontSize = 11, Padding = new Thickness(8, 2, 8, 2), Background = B("#8a5a2b"), Foreground = B("#ffffff") };
+                    sell.Click += (_, _) => { int p = SelPid(); long pr = Price(); int party = SelParty(); if (p >= 0 && pr >= 0 && party >= 0) DoTradeGui(p, party, pr, "sell"); };
+                    rowB.Children.Add(buy); rowB.Children.Add(sell);
+                    tp.Children.Add(rowB);
+                    inner.Children.Add(new Border { Background = B("#10322a"), CornerRadius = new CornerRadius(6), Padding = new Thickness(8), Margin = new Thickness(0, 0, 0, 8), Child = tp });
+                }
+            }
         }
 
         // GAME LOG — surfaces everything the engine records that's otherwise invisible: Fate/Treasury card
@@ -699,6 +736,19 @@ public partial class MainWindow : Window
         var res = Engine.Apply(g, new Estates.Core.Action(action) { PropertyId = pid });
         if (res.Ok && res.State is not null) { _game = res.State; _game.Log.Add($"{verb} {nm}"); }
         else g.Log.Add($"({action.ToLower()} rejected: {res.Code})");
+        RenderGame();
+        ScheduleBots();
+    }
+
+    /// <summary>Player-to-player trade of an undeveloped title for cash (engine TRADE). Local/hotseat + vs-bots
+    /// only: the bot/opponent is taken to consent at the table. Networked trade needs a propose/accept
+    /// handshake over the session, so the trade panel is hidden when _session is non-null.</summary>
+    private void DoTradeGui(int pid, int counterparty, long amount, string dir)
+    {
+        var g = _game; if (g is null) return;
+        var res = Engine.Apply(g, new Estates.Core.Action("TRADE") { PropertyId = pid, SeatIndex = counterparty, Amount = amount, Choice = dir });
+        if (res.Ok && res.State is not null) _game = res.State;
+        else g.Log.Add($"(trade rejected: {res.Code} {res.Context})");
         RenderGame();
         ScheduleBots();
     }
