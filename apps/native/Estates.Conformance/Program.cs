@@ -1315,4 +1315,25 @@ try
 }
 catch (Exception ex) { Console.WriteLine($"LIVE: broadcast test skipped/failed ({ex.Message})"); }
 
-return (fail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && bfail == 0 && xfail == 0) ? 0 : 1;
+// FULL ON-CHAIN GAME: play a COMPLETE Estates game to a winner — provably-fair beacon dice, a typed
+// on-chain transaction payload for every single action, committed fair decks. This is the whole product
+// exercised end to end (Engine + Beacon + TxProtocol), with no node required.
+int gfail = 0;
+try
+{
+    var seed = SHA256.HashData("estates-onchain-demo-v1"u8.ToArray());
+    var gr = GamePlay.PlayToEnd("regtest", 2, 1_000_000_000, seed);
+    var gr2 = GamePlay.PlayToEnd("regtest", 2, 1_000_000_000, seed);   // same seed must reproduce the game exactly
+    int rolls = gr.Moves.Count(m => m.Action == "ROLL");
+    bool deterministic = gr2.Winner == gr.Winner && gr2.OnChainTxCount == gr.OnChainTxCount;
+    bool ok = gr.Finished && gr.Winner is not null && gr.OnChainTxCount > 0 && rolls > 0 && deterministic;
+    // every move carries a non-empty, typed on-chain payload
+    bool everyMoveOnChain = gr.Moves.All(m => m.OnChainPayload is { Length: > 0 } && TxProtocol.Read(m.OnChainPayload) is not null);
+    if (ok && everyMoveOnChain)
+        Console.WriteLine($"GAME: full Estates game played ON-CHAIN — {gr.Seats} seats, winner=seat {gr.Winner}, {gr.Turns} turns, {gr.OnChainTxCount} on-chain txs ({rolls} provable-dice rolls), replay-deterministic ✓");
+    else
+    { Console.Error.WriteLine($"GAME FAIL: finished={gr.Finished} winner={gr.Winner} txs={gr.OnChainTxCount} rolls={rolls} det={deterministic} allOnChain={everyMoveOnChain}"); gfail = 1; }
+}
+catch (Exception ex) { Console.Error.WriteLine($"GAME FAIL: {ex.Message}"); gfail = 1; }
+
+return (fail == 0 && tfail == 0 && cfail == 0 && sfail == 0 && bfail == 0 && xfail == 0 && gfail == 0) ? 0 : 1;
